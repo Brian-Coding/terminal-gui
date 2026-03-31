@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from "bun";
-import type { Subprocess } from "bun";
-import type { AgentRunContext } from "../agents/types.ts";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
 import { getAgentAdapter } from "../agents/registry.ts";
 import type { ChatAgentKind } from "../../lib/agents.ts";
 import { CheckpointService } from "./checkpoint.ts";
@@ -15,7 +15,6 @@ interface ServerChatMessage {
 
 const MAX_BUFFER_MESSAGES = 100;
 const MAX_BUFFER_CHARS = 200_000;
-const MAX_STDERR_CHARS = 64_000;
 const DISCONNECTED_SESSION_TTL_MS = 5 * 60 * 1000;
 
 let serverMsgId = 0;
@@ -178,7 +177,7 @@ interface ChatSession {
 	agentKind: ChatAgentKind;
 	sessionId: string | null;
 	clients: Set<ServerWebSocket<any>>;
-	currentProc: Subprocess | null;
+	currentHandle: AgentHandle | null;
 	cwd: string;
 	messageBuffer: ChatMessageBuffer;
 	cleanupTimer: ReturnType<typeof setTimeout> | null;
@@ -227,10 +226,10 @@ function clearCleanupTimer(session: ChatSession) {
 
 function scheduleSessionCleanup(session: ChatSession) {
 	clearCleanupTimer(session);
-	if (session.currentProc || session.clients.size > 0) return;
+	if (session.currentHandle || session.clients.size > 0) return;
 	session.cleanupTimer = setTimeout(() => {
 		const current = sessions.get(session.paneId);
-		if (!current || current.currentProc || current.clients.size > 0) return;
+		if (!current || current.currentHandle || current.clients.size > 0) return;
 		sessions.delete(session.paneId);
 	}, DISCONNECTED_SESSION_TTL_MS);
 }
@@ -247,45 +246,6 @@ function updateSessionId(
 		paneId,
 		sessionId: nextSessionId,
 	});
-}
-
-async function drainStreamToString(
-	stream: ReadableStream<Uint8Array>,
-	maxChars = MAX_STDERR_CHARS
-) {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let text = "";
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		text += decoder.decode(value, { stream: true });
-		if (text.length > maxChars) text = text.slice(-maxChars);
-	}
-	return text + decoder.decode();
-}
-
-function parseNdjsonLines(
-	leftover: string,
-	handler: (event: any) => void
-): string {
-	const lines = leftover.split("\n");
-	const remainder = lines.pop()!;
-	for (const line of lines) {
-		if (!line.trim()) continue;
-		try {
-			handler(JSON.parse(line));
-		} catch {}
-	}
-	return remainder;
-}
-
-function flushNdjsonLeftover(leftover: string, handler: (event: any) => void) {
-	if (leftover.trim()) {
-		try {
-			handler(JSON.parse(leftover));
-		} catch {}
-	}
 }
 
 async function finalizeCheckpoint(
@@ -330,42 +290,23 @@ async function runAgent(session: ChatSession, paneId: string, text: string) {
 		},
 	};
 	const state = adapter.createState(ctx);
-	const proc = adapter.spawn(text, ctx, state);
-	session.currentProc = proc;
+	const handle = adapter.createHandle(text, ctx, state);
+	session.currentHandle = handle;
 
-	const stderrPromise = drainStreamToString(
-		proc.stderr as ReadableStream<Uint8Array>
-	);
-	const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-	const decoder = new TextDecoder();
-	let leftover = "";
-
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		leftover += decoder.decode(value, { stream: true });
-		leftover = parseNdjsonLines(leftover, (event) =>
-			adapter.handleEvent(event, ctx, state)
-		);
+	try {
+		await handle.run();
+	} finally {
+		session.currentHandle = null;
+		session.messageBuffer.finalize();
+		broadcast(session, {
+			type: "chat:sync",
+			paneId,
+			messages: session.messageBuffer.getMessages(),
+			isStreaming: false,
+		});
+		broadcast(session, { type: "chat:done", paneId });
+		scheduleSessionCleanup(session);
 	}
-	flushNdjsonLeftover(leftover, (event) =>
-		adapter.handleEvent(event, ctx, state)
-	);
-
-	const exitCode = await proc.exited;
-	session.currentProc = null;
-	const stderrText = (await stderrPromise).trim();
-	await adapter.finalize({ state, ctx, exitCode, stderrText });
-
-	session.messageBuffer.finalize();
-	broadcast(session, {
-		type: "chat:sync",
-		paneId,
-		messages: session.messageBuffer.getMessages(),
-		isStreaming: false,
-	});
-	broadcast(session, { type: "chat:done", paneId });
-	scheduleSessionCleanup(session);
 }
 
 export const ChatService = {
@@ -384,7 +325,7 @@ export const ChatService = {
 				agentKind,
 				sessionId: clientSessionId || null,
 				clients: new Set([ws]),
-				currentProc: null,
+				currentHandle: null,
 				cwd: cwd || process.cwd(),
 				messageBuffer: new ChatMessageBuffer(),
 				cleanupTimer: null,
@@ -401,7 +342,7 @@ export const ChatService = {
 		session.messageBuffer.pushUser(text);
 		broadcastExcept(session, ws, { type: "chat:user_message", paneId, text });
 
-		if (session.currentProc) {
+		if (session.currentHandle) {
 			sendTo(ws, {
 				type: "chat:error",
 				paneId,
@@ -426,7 +367,7 @@ export const ChatService = {
 			await runAgent(session, paneId, text);
 			await finalizeCheckpoint(session, paneId, checkpointId);
 		} catch (e) {
-			session.currentProc = null;
+			session.currentHandle = null;
 			const errMsg =
 				e instanceof Error ? e.message : `Failed to run ${session.agentKind}`;
 			session.messageBuffer.pushSystem(errMsg);
@@ -444,87 +385,87 @@ export const ChatService = {
 		cwd?: string
 	) {
 		const effectiveCwd = cwd || process.cwd();
-		const claudeCmd = process.platform === "win32" ? "claude.cmd" : "claude";
 		const env = { ...process.env };
 		delete env.CLAUDECODE;
 
-		const proc = Bun.spawn(
-			[
-				claudeCmd,
-				"-p",
-				text,
-				"--output-format",
-				"stream-json",
-				"--verbose",
-				"--dangerously-skip-permissions",
-			],
-			{ stdout: "pipe", stderr: "pipe", cwd: effectiveCwd, env }
-		);
-
 		sendTo(ws, { type: "chat:btw:start", paneId, question: text });
 
-		const stderrPromise = drainStreamToString(
-			proc.stderr as ReadableStream<Uint8Array>
-		);
-		const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-		const decoder = new TextDecoder();
-		let leftover = "";
 		let fullText = "";
 
-		const handleBtwEvent = (event: any) => {
-			if (
-				event.type === "content_block_delta" &&
-				event.delta?.type === "text_delta"
-			) {
-				fullText += event.delta.text;
-				sendTo(ws, { type: "chat:btw:delta", paneId, text: event.delta.text });
-			} else if (
-				event.type === "content_block_start" &&
-				event.content_block?.type === "text" &&
-				event.content_block.text
-			) {
-				fullText += event.content_block.text;
-				sendTo(ws, {
-					type: "chat:btw:delta",
-					paneId,
-					text: event.content_block.text,
-				});
-			} else if (event.type === "result" && event.result && !fullText) {
-				fullText = event.result;
+		try {
+			const q = query({
+				prompt: text,
+				options: {
+					cwd: effectiveCwd,
+					permissionMode: "bypassPermissions",
+					allowDangerouslySkipPermissions: true,
+					includePartialMessages: true,
+					env,
+				},
+			});
+
+			for await (const event of q) {
+				const e = event as any;
+				if (e.type === "stream_event" && e.event) {
+					const inner = e.event;
+					if (
+						inner.type === "content_block_delta" &&
+						inner.delta?.type === "text_delta"
+					) {
+						fullText += inner.delta.text;
+						sendTo(ws, {
+							type: "chat:btw:delta",
+							paneId,
+							text: inner.delta.text,
+						});
+					} else if (
+						inner.type === "content_block_start" &&
+						inner.content_block?.type === "text" &&
+						inner.content_block.text
+					) {
+						fullText += inner.content_block.text;
+						sendTo(ws, {
+							type: "chat:btw:delta",
+							paneId,
+							text: inner.content_block.text,
+						});
+					}
+				} else if (
+					e.type === "result" &&
+					e.subtype === "success" &&
+					e.result &&
+					!fullText
+				) {
+					fullText = e.result;
+				}
 			}
-		};
-
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			leftover += decoder.decode(value, { stream: true });
-			leftover = parseNdjsonLines(leftover, handleBtwEvent);
+		} catch (err: any) {
+			if (!fullText) {
+				fullText = err.message || "(error)";
+			}
 		}
-		flushNdjsonLeftover(leftover, handleBtwEvent);
 
-		await proc.exited;
-		const stderrText = (await stderrPromise).trim();
 		sendTo(ws, {
 			type: "chat:btw:done",
 			paneId,
-			answer: fullText || stderrText || "(no response)",
+			answer: fullText || "(no response)",
 		});
 	},
 
 	stopGeneration(paneId: string) {
 		const session = sessions.get(paneId);
-		if (session?.currentProc) {
+		if (session?.currentHandle) {
 			try {
-				getAgentAdapter(session.agentKind).stop(session.currentProc);
+				session.currentHandle.stop();
 			} catch {}
 		}
 	},
 
 	destroySession(paneId: string) {
 		const session = sessions.get(paneId);
-		if (session?.currentProc) {
+		if (session?.currentHandle) {
 			try {
-				session.currentProc.kill();
+				session.currentHandle.kill();
 			} catch {}
 		}
 		if (session) clearCleanupTimer(session);
@@ -557,7 +498,7 @@ export const ChatService = {
 				messages,
 				isStreaming: session.messageBuffer.streaming,
 			});
-		if (session.currentProc)
+		if (session.currentHandle)
 			sendTo(ws, {
 				type: "chat:status",
 				paneId,
@@ -568,27 +509,27 @@ export const ChatService = {
 
 	listSessions(): AgentSessionInfo[] {
 		return Array.from(sessions.values())
-			.filter((s) => s.currentProc || s.clients.size > 0)
+			.filter((s) => s.currentHandle || s.clients.size > 0)
 			.map((s) => ({
 				paneId: s.paneId,
 				agentKind: s.agentKind,
 				cwd: s.cwd,
 				sessionId: s.sessionId,
-				isRunning: !!s.currentProc,
+				isRunning: !!s.currentHandle,
 				clientCount: s.clients.size,
 				messageCount: s.messageBuffer.getMessages().length,
 			}));
 	},
 
 	destroyAll() {
-		for (const [paneId, session] of sessions) {
-			if (session.currentProc) {
+		for (const [_, session] of sessions) {
+			if (session.currentHandle) {
 				try {
-					session.currentProc.kill();
+					session.currentHandle.kill();
 				} catch {}
 			}
 			clearCleanupTimer(session);
-			sessions.delete(paneId);
 		}
+		sessions.clear();
 	},
 };
