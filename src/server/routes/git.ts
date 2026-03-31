@@ -21,6 +21,20 @@ interface HunkDiff {
 	isNew: boolean;
 }
 
+const MAX_RENDER_DIFF_CHARS = 80_000;
+const MAX_RENDER_DIFF_LINES = 1_500;
+const MAX_UNTRACKED_FILE_BYTES = 120_000;
+const MAX_RENDER_LINE_LENGTH = 4_000;
+
+function tooLargeDiff(message: string, isNew = false): HunkDiff {
+	return {
+		oldLines: [],
+		newLines: [{ number: 1, content: message, type: "context" }],
+		isBinary: false,
+		isNew,
+	};
+}
+
 async function getHunkDiff(
 	cwd: string,
 	filePath: string,
@@ -51,14 +65,8 @@ async function getHunkDiff(
 		const fullPath = resolve(cwd, filePath);
 		try {
 			const f = Bun.file(fullPath);
-			if (f.size > 500_000) {
-				return {
-					oldLines: [],
-					newLines: [{ number: 1, content: `File too large`, type: "context" }],
-					isBinary: false,
-					isNew: true,
-				};
-			}
+			if (f.size > MAX_UNTRACKED_FILE_BYTES)
+				return tooLargeDiff("File too large to render safely", true);
 			const content = await f.text();
 			if (content.includes("\0"))
 				return { oldLines: [], newLines: [], isBinary: true, isNew: false };
@@ -85,6 +93,13 @@ async function getHunkDiff(
 
 	if (diffText.includes("Binary files")) {
 		return { oldLines: [], newLines: [], isBinary: true, isNew: false };
+	}
+	if (
+		diffText.length > MAX_RENDER_DIFF_CHARS ||
+		diffText.split("\n").length > MAX_RENDER_DIFF_LINES ||
+		diffText.split("\n").some((line) => line.length > MAX_RENDER_LINE_LENGTH)
+	) {
+		return tooLargeDiff("Diff too large to render safely");
 	}
 
 	// Parse git diff into aligned left/right lines (like GitKraken)

@@ -80,6 +80,35 @@ function IconSlash({
 	);
 }
 
+function IconFusion({
+	size = 15,
+	className = "",
+}: {
+	size?: number;
+	className?: string;
+}) {
+	return (
+		<svg
+			width={size}
+			height={size}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.8"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			className={className}
+		>
+			<rect x="3.5" y="4.5" width="8" height="15" rx="2" />
+			<path d="M6.5 8.5h2" />
+			<path d="M6.5 12h2.5" />
+			<path d="M14.5 7.5h5" />
+			<path d="M17 7.5v8" />
+			<circle cx="17" cy="17.5" r="2.5" />
+		</svg>
+	);
+}
+
 interface NavItem {
 	label: string;
 	path: string;
@@ -88,6 +117,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
 	{ label: "Terminal", path: "/terminal", icon: IconTerm },
+	{ label: "Experimental", path: "/experimental", icon: IconFusion },
 	{ label: "Git", path: "/git", icon: IconBranch },
 	{ label: "Prompts", path: "/prompts", icon: IconSlash },
 ];

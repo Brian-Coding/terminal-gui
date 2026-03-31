@@ -1,4 +1,3 @@
-import type { Subprocess } from "bun";
 import type { ChatAgentKind } from "../../lib/agents.ts";
 
 export interface AgentRunContext {
@@ -11,19 +10,18 @@ export interface AgentRunContext {
 	emitSystemMessage(message: string): void;
 }
 
-export interface AgentFinalizeInput<State> {
-	readonly state: State;
-	readonly ctx: AgentRunContext;
-	readonly exitCode: number;
-	readonly stderrText: string;
+export interface AgentHandle {
+	/** Run the agent turn to completion, emitting events via ctx. */
+	run(): Promise<void>;
+	/** Gracefully stop the current turn. */
+	stop(): void;
+	/** Forcefully kill the underlying process. */
+	kill(): void;
 }
 
 export interface AgentAdapter<State = unknown> {
 	readonly kind: ChatAgentKind;
 	readonly displayName: string;
 	createState(ctx: AgentRunContext): State;
-	spawn(prompt: string, ctx: AgentRunContext, state: State): Subprocess;
-	handleEvent(event: any, ctx: AgentRunContext, state: State): void;
-	finalize(input: AgentFinalizeInput<State>): Promise<void>;
-	stop(proc: Subprocess): void;
+	createHandle(prompt: string, ctx: AgentRunContext, state: State): AgentHandle;
 }

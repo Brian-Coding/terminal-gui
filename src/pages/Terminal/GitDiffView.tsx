@@ -2,12 +2,18 @@ import { memo, useMemo, useRef, useCallback, useState, useEffect } from "react";
 import type { HunkDiff, DiffLine } from "../../hooks/useGitDiff.ts";
 import { tokenizeLine } from "../../lib/syntax-tokens.ts";
 
+export type DiffViewMode = "split" | "stacked" | "hunks";
+
 interface GitDiffViewProps {
 	diff: HunkDiff;
 	filePath: string;
 	staged: boolean;
 	loading: boolean;
 	onClose: () => void;
+	hideHeader?: boolean;
+	viewMode?: DiffViewMode;
+	onViewModeChange?: (viewMode: DiffViewMode) => void;
+	hideToolbar?: boolean;
 }
 
 const TOKEN_CLASSES: Record<string, string> = {
@@ -21,10 +27,19 @@ const TOKEN_CLASSES: Record<string, string> = {
 	default: "",
 };
 
-const LINE_H = 20;
+const LINE_H = 18;
 const OVERSCAN = 30;
 
-function SyntaxContent({ content, ext }: { content: string; ext: string }) {
+function SyntaxContent({
+	content,
+	ext,
+	disableTokenize,
+}: {
+	content: string;
+	ext: string;
+	disableTokenize: boolean;
+}) {
+	if (disableTokenize) return content;
 	const tokens = useMemo(() => tokenizeLine(content, ext), [content, ext]);
 	return (
 		<>
@@ -38,7 +53,15 @@ function SyntaxContent({ content, ext }: { content: string; ext: string }) {
 	);
 }
 
-function DiffRow({ line, ext }: { line: DiffLine; ext: string }) {
+function DiffRow({
+	line,
+	ext,
+	disableTokenize,
+}: {
+	line: DiffLine;
+	ext: string;
+	disableTokenize: boolean;
+}) {
 	if (line.type === "hunk") {
 		return (
 			<div
@@ -78,21 +101,25 @@ function DiffRow({ line, ext }: { line: DiffLine; ext: string }) {
 
 	return (
 		<div
-			className={`flex ${bg}`}
+			className={`flex w-max min-w-full ${bg}`}
 			style={{ height: LINE_H, lineHeight: `${LINE_H}px` }}
 		>
 			<span
-				className={`shrink-0 w-10 text-right pr-1 text-[9px] font-mono select-none ${numColor}`}
+				className={`shrink-0 w-10 text-right pr-1 text-[8px] font-mono select-none ${numColor}`}
 			>
 				{line.number ?? ""}
 			</span>
 			<span
-				className={`shrink-0 w-3 text-center text-[9px] font-mono select-none ${markerColor}`}
+				className={`shrink-0 w-3 text-center text-[8px] font-mono select-none ${markerColor}`}
 			>
 				{marker}
 			</span>
-			<span className="flex-1 text-[11px] font-mono whitespace-pre overflow-x-hidden text-surgent-text pr-3 pl-1">
-				<SyntaxContent content={line.content} ext={ext} />
+			<span className="flex-1 min-w-max text-[10px] font-mono whitespace-pre text-surgent-text pr-3 pl-1">
+				<SyntaxContent
+					content={line.content}
+					ext={ext}
+					disableTokenize={disableTokenize}
+				/>
 			</span>
 		</div>
 	);
@@ -103,11 +130,13 @@ function VirtualPanel({
 	ext,
 	scrollRef,
 	onScroll,
+	disableTokenize,
 }: {
 	lines: DiffLine[];
 	ext: string;
 	scrollRef: React.RefObject<HTMLDivElement | null>;
-	onScroll: () => void;
+	onScroll: (scrollTop: number, scrollLeft: number) => void;
+	disableTokenize: boolean;
 }) {
 	const [scrollTop, setScrollTop] = useState(0);
 	const [viewH, setViewH] = useState(600);
@@ -122,8 +151,9 @@ function VirtualPanel({
 	}, [scrollRef]);
 
 	const handleScroll = useCallback(() => {
-		if (scrollRef.current) setScrollTop(scrollRef.current.scrollTop);
-		onScroll();
+		if (!scrollRef.current) return;
+		setScrollTop(scrollRef.current.scrollTop);
+		onScroll(scrollRef.current.scrollTop, scrollRef.current.scrollLeft);
 	}, [scrollRef, onScroll]);
 
 	const total = lines.length * LINE_H;
@@ -142,7 +172,12 @@ function VirtualPanel({
 			<div style={{ height: total, position: "relative" }}>
 				<div style={{ transform: `translateY(${start * LINE_H}px)` }}>
 					{lines.slice(start, end).map((line, i) => (
-						<DiffRow key={start + i} line={line} ext={ext} />
+						<DiffRow
+							key={start + i}
+							line={line}
+							ext={ext}
+							disableTokenize={disableTokenize}
+						/>
 					))}
 				</div>
 			</div>
@@ -156,26 +191,58 @@ export const GitDiffView = memo(function GitDiffView({
 	staged,
 	loading,
 	onClose,
+	hideHeader = false,
+	viewMode: controlledViewMode,
+	onViewModeChange,
+	hideToolbar = false,
 }: GitDiffViewProps) {
 	const leftRef = useRef<HTMLDivElement>(null);
 	const rightRef = useRef<HTMLDivElement>(null);
 	const syncing = useRef(false);
+	const [internalViewMode, setInternalViewMode] =
+		useState<DiffViewMode>("split");
+	const viewMode = controlledViewMode ?? internalViewMode;
+	const setViewMode = onViewModeChange ?? setInternalViewMode;
 
 	const ext = useMemo(() => {
 		const p = filePath.split(".");
 		return p.length > 1 ? p.pop()! : "";
 	}, [filePath]);
 
-	const sync = useCallback((src: "left" | "right") => {
-		if (syncing.current) return;
-		syncing.current = true;
-		const from = src === "left" ? leftRef.current : rightRef.current;
-		const to = src === "left" ? rightRef.current : leftRef.current;
-		if (from && to) to.scrollTop = from.scrollTop;
-		requestAnimationFrame(() => {
-			syncing.current = false;
-		});
-	}, []);
+	const hunkLines = useMemo(
+		() => buildStackedLines(diff.oldLines, diff.newLines, true),
+		[diff.oldLines, diff.newLines]
+	);
+	const statusMessage = useMemo(() => {
+		if (diff.oldLines.length !== 0 || diff.newLines.length !== 1) return null;
+		const line = diff.newLines[0];
+		if (!line || line.type !== "context") return null;
+		const text = line.content.trim();
+		return /too large|cannot read/i.test(text) ? text : null;
+	}, [diff.newLines, diff.oldLines.length]);
+	const disableTokenize = useMemo(() => {
+		const allLines = [...diff.oldLines, ...diff.newLines];
+		return (
+			allLines.length > 1_200 ||
+			allLines.some((line) => line.content.length > 400)
+		);
+	}, [diff.newLines, diff.oldLines]);
+
+	const sync = useCallback(
+		(src: "left" | "right", scrollTop: number, scrollLeft: number) => {
+			if (syncing.current) return;
+			syncing.current = true;
+			const to = src === "left" ? rightRef.current : leftRef.current;
+			if (to) {
+				to.scrollTop = scrollTop;
+				to.scrollLeft = scrollLeft;
+			}
+			requestAnimationFrame(() => {
+				syncing.current = false;
+			});
+		},
+		[]
+	);
 
 	if (loading) {
 		return (
@@ -191,7 +258,9 @@ export const GitDiffView = memo(function GitDiffView({
 	if (diff.isBinary) {
 		return (
 			<div className="flex h-full flex-col bg-surgent-bg">
-				<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
+				{!hideHeader && (
+					<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
+				)}
 				<div className="flex-1 flex items-center justify-center">
 					<span className="text-[11px] text-surgent-text-3">Binary file</span>
 				</div>
@@ -199,37 +268,211 @@ export const GitDiffView = memo(function GitDiffView({
 		);
 	}
 
+	if (statusMessage) {
+		return (
+			<div className="flex h-full flex-col bg-surgent-bg">
+				{!hideHeader && (
+					<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
+				)}
+				<div className="flex flex-1 items-center justify-center px-6">
+					<p className="max-w-xs text-center text-[11px] leading-5 text-surgent-text-3">
+						{statusMessage}
+					</p>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="flex h-full flex-col bg-surgent-bg">
+			{!hideHeader && (
+				<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
+			)}
+			{!hideToolbar && (
+				<DiffViewToolbar viewMode={viewMode} onChange={setViewMode} />
+			)}
 			<div className="flex flex-1 min-h-0 overflow-hidden">
-				{/* Left — removed / old */}
-				<div className="flex-1 flex flex-col min-w-0 border-r border-surgent-border">
-					{diff.isNew ? (
-						<div className="flex-1 flex items-center justify-center text-[11px] text-surgent-text-3/30">
-							New file
+				{viewMode === "split" ? (
+					<>
+						<div className="flex-1 flex flex-col min-w-0 border-r border-surgent-border">
+							{diff.isNew ? (
+								<div className="flex-1 flex items-center justify-center text-[11px] text-surgent-text-3/30">
+									New file
+								</div>
+							) : (
+								<VirtualPanel
+									lines={diff.oldLines}
+									ext={ext}
+									scrollRef={leftRef}
+									disableTokenize={disableTokenize}
+									onScroll={(scrollTop, scrollLeft) =>
+										sync("left", scrollTop, scrollLeft)
+									}
+								/>
+							)}
 						</div>
-					) : (
-						<VirtualPanel
-							lines={diff.oldLines}
-							ext={ext}
-							scrollRef={leftRef}
-							onScroll={() => sync("left")}
-						/>
-					)}
-				</div>
-				{/* Right — added / new */}
-				<div className="flex-1 flex flex-col min-w-0">
-					<VirtualPanel
-						lines={diff.newLines}
+						<div className="flex-1 flex flex-col min-w-0">
+							<VirtualPanel
+								lines={diff.newLines}
+								ext={ext}
+								scrollRef={rightRef}
+								disableTokenize={disableTokenize}
+								onScroll={(scrollTop, scrollLeft) =>
+									sync("right", scrollTop, scrollLeft)
+								}
+							/>
+						</div>
+					</>
+				) : viewMode === "stacked" ? (
+					<div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+						<div className="flex-1 flex min-h-0 flex-col border-b border-surgent-border">
+							{diff.isNew ? (
+								<div className="flex-1 flex items-center justify-center text-[11px] text-surgent-text-3/30">
+									New file
+								</div>
+							) : (
+								<VirtualPanel
+									lines={diff.oldLines}
+									ext={ext}
+									scrollRef={leftRef}
+									disableTokenize={disableTokenize}
+									onScroll={(scrollTop, scrollLeft) =>
+										sync("left", scrollTop, scrollLeft)
+									}
+								/>
+							)}
+						</div>
+						<div className="flex-1 flex min-h-0 flex-col">
+							<VirtualPanel
+								lines={diff.newLines}
+								ext={ext}
+								scrollRef={rightRef}
+								disableTokenize={disableTokenize}
+								onScroll={(scrollTop, scrollLeft) =>
+									sync("right", scrollTop, scrollLeft)
+								}
+							/>
+						</div>
+					</div>
+				) : (
+					<SinglePanel
+						lines={hunkLines}
 						ext={ext}
-						scrollRef={rightRef}
-						onScroll={() => sync("right")}
+						disableTokenize={disableTokenize}
 					/>
-				</div>
+				)}
 			</div>
 		</div>
 	);
 });
+
+function buildStackedLines(
+	oldLines: DiffLine[],
+	newLines: DiffLine[],
+	onlyChanges: boolean
+): DiffLine[] {
+	const result: DiffLine[] = [];
+	const max = Math.max(oldLines.length, newLines.length);
+
+	for (let index = 0; index < max; index++) {
+		const oldLine = oldLines[index];
+		const newLine = newLines[index];
+
+		if (oldLine?.type === "hunk" || newLine?.type === "hunk") {
+			result.push({ number: null, content: "", type: "hunk" });
+			continue;
+		}
+
+		if (oldLine?.type === "context" && newLine?.type === "context") {
+			if (!onlyChanges) result.push(newLine);
+			continue;
+		}
+
+		if (oldLine && oldLine.type !== "spacer") {
+			if (!onlyChanges || oldLine.type !== "context") result.push(oldLine);
+		}
+		if (newLine && newLine.type !== "spacer") {
+			if (!onlyChanges || newLine.type !== "context") result.push(newLine);
+		}
+	}
+
+	return result;
+}
+
+function SinglePanel({
+	lines,
+	ext,
+	disableTokenize,
+}: {
+	lines: DiffLine[];
+	ext: string;
+	disableTokenize: boolean;
+}) {
+	const scrollRef = useRef<HTMLDivElement>(null);
+	return (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<VirtualPanel
+				lines={lines}
+				ext={ext}
+				scrollRef={scrollRef}
+				disableTokenize={disableTokenize}
+				onScroll={() => {}}
+			/>
+		</div>
+	);
+}
+
+function DiffViewToolbar({
+	viewMode,
+	onChange,
+}: {
+	viewMode: DiffViewMode;
+	onChange: (viewMode: DiffViewMode) => void;
+}) {
+	return (
+		<div className="flex h-8 shrink-0 items-center gap-1 border-b border-surgent-border bg-surgent-bg px-2">
+			<DiffViewButton
+				active={viewMode === "split"}
+				label="Split"
+				onClick={() => onChange("split")}
+			/>
+			<DiffViewButton
+				active={viewMode === "stacked"}
+				label="Vertical"
+				onClick={() => onChange("stacked")}
+			/>
+			<DiffViewButton
+				active={viewMode === "hunks"}
+				label="Hunks"
+				onClick={() => onChange("hunks")}
+			/>
+		</div>
+	);
+}
+
+function DiffViewButton({
+	active,
+	label,
+	onClick,
+}: {
+	active: boolean;
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className={`rounded-md px-2 py-1 text-[10px] transition-colors ${
+				active
+					? "bg-surgent-surface-2 text-surgent-text"
+					: "text-surgent-text-3 hover:bg-surgent-surface hover:text-surgent-text-2"
+			}`}
+		>
+			{label}
+		</button>
+	);
+}
 
 function DiffHeader({
 	filePath,

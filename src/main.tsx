@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { Sidebar } from "./components/layout/Sidebar.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
+import { ExperimentalPage } from "./pages/ExperimentalPage";
 import { GitPage } from "./pages/GitPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { TerminalPage } from "./pages/Terminal";
@@ -30,6 +31,7 @@ root.render(
 					<Routes>
 						<Route path="/" element={<Navigate to="/terminal" replace />} />
 						<Route path="/terminal" element={<TerminalPage />} />
+						<Route path="/experimental" element={<ExperimentalPage />} />
 						<Route path="/git" element={<GitPage />} />
 						<Route path="/prompts" element={<PromptsPage />} />
 					</Routes>
