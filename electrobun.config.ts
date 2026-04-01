@@ -23,6 +23,8 @@ const config: ElectrobunConfig = {
 		},
 		mac: {
 			icons: "public/icon.iconset",
+			codesign: true,
+			notarize: true,
 			createDmg: true,
 		},
 	},
