@@ -1,7 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
-import { AppTitleBar } from "./components/layout/AppTitleBar.tsx";
 import { Sidebar } from "./components/layout/Sidebar.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
 import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
@@ -48,7 +47,7 @@ root.render(
 	<ErrorBoundary>
 		<HashRouter>
 			<div className="flex h-screen flex-col bg-surgent-bg">
-				<AppTitleBar />
+				<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-surgent-bg" />
 				<div className="flex min-h-0 flex-1">
 					<Sidebar />
 					<main className="min-w-0 flex-1 overflow-hidden">

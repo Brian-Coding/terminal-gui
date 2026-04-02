@@ -90,14 +90,9 @@ const windowRpc = defineElectrobunRPC<WindowControlsRPC>("bun", {
 					return { maximized: false };
 				}
 
-				const maximized = mainWindow.isMaximized();
-				if (maximized) {
-					mainWindow.unmaximize();
-					return { maximized: false };
-				}
-
-				mainWindow.maximize();
-				return { maximized: true };
+				const fs = mainWindow.isFullScreen();
+				mainWindow.setFullScreen(!fs);
+				return { maximized: !fs };
 			},
 		},
 	},
@@ -107,7 +102,7 @@ mainWindow = new BrowserWindow({
 	title: "inferay",
 	url: rendererUrl,
 	rpc: windowRpc,
-	titleBarStyle: "hidden",
+	titleBarStyle: "hiddenInset",
 	frame: {
 		x: 120,
 		y: 80,
