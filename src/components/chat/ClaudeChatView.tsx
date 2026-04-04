@@ -56,7 +56,7 @@ interface ClaudeChatViewProps {
 export interface ClaudeChatHandle {
 	sendMessage: (text: string) => void;
 	getStatus: () => string;
-	focusInput: () => void;
+	focusInput: (atEnd?: boolean) => void;
 }
 
 interface ChatMessage {
@@ -584,8 +584,15 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 				},
 				getStatus: () => status,
-				focusInput: () => {
-					textareaRef.current?.focus();
+				focusInput: (atEnd?: boolean) => {
+					const ta = textareaRef.current;
+					if (ta) {
+						ta.focus();
+						if (atEnd) {
+							const len = ta.value.length;
+							ta.setSelectionRange(len, len);
+						}
+					}
 				},
 			}),
 			[appendLocalMessages, isLoading, queueMessage, status, sendToServer]

@@ -265,8 +265,16 @@ export const GitDiffView = memo(function GitDiffView({
 				{!hideHeader && (
 					<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
 				)}
-				<div className="flex-1 flex items-center justify-center">
-					<span className="text-[11px] text-surgent-text-3">Binary file</span>
+				<div className="flex-1 flex items-center justify-center overflow-auto p-4">
+					{diff.isImage && diff.imagePath ? (
+						<img
+							src={`/api/file?path=${encodeURIComponent(diff.imagePath)}`}
+							alt={filePath}
+							className="max-w-full max-h-full object-contain rounded border border-surgent-border"
+						/>
+					) : (
+						<span className="text-[11px] text-surgent-text-3">Binary file</span>
+					)}
 				</div>
 			</div>
 		);

@@ -140,38 +140,6 @@ export function Sidebar() {
 		writeStoredValue("sidebar-collapsed", String(collapsed));
 	}, [collapsed]);
 
-	// Arrow left/right to navigate between sidebar pages
-	const handleGlobalKeys = useCallback(
-		(e: KeyboardEvent) => {
-			// Only when no input/textarea is focused
-			const tag = (e.target as HTMLElement)?.tagName;
-			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-			if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-				if (location.pathname.startsWith("/experimental")) return;
-
-				const currentIdx = navItems.findIndex((item) =>
-					location.pathname.startsWith(item.path)
-				);
-				if (currentIdx === -1) return;
-				let nextIdx: number;
-				if (e.key === "ArrowLeft") {
-					nextIdx = currentIdx <= 0 ? navItems.length - 1 : currentIdx - 1;
-				} else {
-					nextIdx = currentIdx >= navItems.length - 1 ? 0 : currentIdx + 1;
-				}
-				e.preventDefault();
-				navigate(navItems[nextIdx]?.path);
-			}
-		},
-		[location.pathname, navigate]
-	);
-
-	useEffect(() => {
-		window.addEventListener("keydown", handleGlobalKeys);
-		return () => window.removeEventListener("keydown", handleGlobalKeys);
-	}, [handleGlobalKeys]);
-
 	return (
 		<aside
 			className={`relative flex flex-col border-r border-surgent-border bg-surgent-bg transition-all duration-200 ${

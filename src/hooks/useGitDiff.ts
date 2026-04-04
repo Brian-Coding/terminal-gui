@@ -11,6 +11,8 @@ export interface HunkDiff {
 	newLines: DiffLine[];
 	isBinary: boolean;
 	isNew: boolean;
+	isImage?: boolean;
+	imagePath?: string;
 }
 
 export interface DiffRequest {

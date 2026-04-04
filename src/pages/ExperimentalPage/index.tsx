@@ -325,18 +325,12 @@ export function ExperimentalPage() {
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
-			const tag = (event.target as HTMLElement | null)?.tagName;
-			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-			if (event.key === "ArrowLeft") {
+			// All arrow keys work globally for navigation on this page
+			if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
 				event.preventDefault();
-				cycleSession(-1);
-				requestAnimationFrame(() => chatRef.current?.focusInput());
-				return;
-			}
-			if (event.key === "ArrowRight") {
-				event.preventDefault();
-				cycleSession(1);
-				requestAnimationFrame(() => chatRef.current?.focusInput());
+				cycleSession(event.key === "ArrowLeft" ? -1 : 1);
+				// Wait for component to remount, then focus at end of text
+				setTimeout(() => chatRef.current?.focusInput(true), 50);
 				return;
 			}
 			if (event.key === "ArrowDown") {
@@ -417,6 +411,7 @@ export function ExperimentalPage() {
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[400px_minmax(0,1fr)]">
 					<section className="min-h-0 min-w-0 border-r border-surgent-border">
 						<ClaudeChatView
+							key={selectedSession.paneId}
 							ref={chatRef}
 							paneId={selectedSession.paneId}
 							cwd={selectedSession.cwd}

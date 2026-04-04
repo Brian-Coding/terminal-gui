@@ -19,12 +19,30 @@ interface HunkDiff {
 	newLines: DiffLine[];
 	isBinary: boolean;
 	isNew: boolean;
+	isImage?: boolean;
+	imagePath?: string;
 }
 
 const MAX_RENDER_DIFF_CHARS = 80_000;
 const MAX_RENDER_DIFF_LINES = 1_500;
 const MAX_UNTRACKED_FILE_BYTES = 120_000;
 const MAX_RENDER_LINE_LENGTH = 4_000;
+
+const IMAGE_EXTENSIONS = new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".webp",
+	".svg",
+	".ico",
+	".bmp",
+]);
+
+function isImageFile(filePath: string): boolean {
+	const ext = filePath.toLowerCase().slice(filePath.lastIndexOf("."));
+	return IMAGE_EXTENSIONS.has(ext);
+}
 
 function tooLargeDiff(message: string, isNew = false): HunkDiff {
 	return {
@@ -63,6 +81,17 @@ async function getHunkDiff(
 	// No diff output — try reading the file as a new/untracked file
 	if (!diffText.trim()) {
 		const fullPath = resolve(cwd, filePath);
+		// Check if it's an image file first
+		if (isImageFile(filePath)) {
+			return {
+				oldLines: [],
+				newLines: [],
+				isBinary: true,
+				isNew: true,
+				isImage: true,
+				imagePath: fullPath,
+			};
+		}
 		try {
 			const f = Bun.file(fullPath);
 			if (f.size > MAX_UNTRACKED_FILE_BYTES)
@@ -92,6 +121,17 @@ async function getHunkDiff(
 	}
 
 	if (diffText.includes("Binary files")) {
+		// Check if it's an image
+		if (isImageFile(filePath)) {
+			return {
+				oldLines: [],
+				newLines: [],
+				isBinary: true,
+				isNew: false,
+				isImage: true,
+				imagePath: resolve(cwd, filePath),
+			};
+		}
 		return { oldLines: [], newLines: [], isBinary: true, isNew: false };
 	}
 	if (

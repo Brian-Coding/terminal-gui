@@ -84,9 +84,14 @@ export function fileRoutes() {
 					return Response.json({ error: "No path provided" }, { status: 400 });
 				}
 
-				// Only allow serving files from the temp directory for security
 				const resolvedPath = resolve(filePath);
-				if (!resolvedPath.startsWith(TMP_DIR)) {
+				const homeDir = process.env.HOME || "/Users";
+
+				// Allow serving files from temp directory or user's home directory
+				if (
+					!resolvedPath.startsWith(TMP_DIR) &&
+					!resolvedPath.startsWith(homeDir)
+				) {
 					return Response.json({ error: "Access denied" }, { status: 403 });
 				}
 
