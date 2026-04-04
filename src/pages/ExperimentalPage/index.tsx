@@ -128,6 +128,8 @@ export function ExperimentalPage() {
 	);
 	const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>("split");
 	const [closedPaneIds, setClosedPaneIds] = useState<Set<string>>(new Set());
+	const [commitMessage, setCommitMessage] = useState("");
+	const [isCommitting, setIsCommitting] = useState(false);
 	const chatRef = useRef<ClaudeChatHandle>(null);
 
 	const terminalState = useMemo(() => loadTerminalState(), []);
@@ -361,6 +363,74 @@ export function ExperimentalPage() {
 		[selectedPaneId, sessions]
 	);
 
+	const stageFile = useCallback(
+		async (file: string) => {
+			if (!selectedSession?.cwd) return;
+			await fetch("/api/git/stage", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ cwd: selectedSession.cwd, file }),
+			});
+			setRefreshTick((v) => v + 1);
+		},
+		[selectedSession?.cwd]
+	);
+
+	const unstageFile = useCallback(
+		async (file: string) => {
+			if (!selectedSession?.cwd) return;
+			await fetch("/api/git/unstage", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ cwd: selectedSession.cwd, file }),
+			});
+			setRefreshTick((v) => v + 1);
+		},
+		[selectedSession?.cwd]
+	);
+
+	const stageAll = useCallback(async () => {
+		if (!selectedSession?.cwd) return;
+		await fetch("/api/git/stage", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ cwd: selectedSession.cwd }),
+		});
+		setRefreshTick((v) => v + 1);
+	}, [selectedSession?.cwd]);
+
+	const unstageAll = useCallback(async () => {
+		if (!selectedSession?.cwd) return;
+		await fetch("/api/git/unstage", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ cwd: selectedSession.cwd }),
+		});
+		setRefreshTick((v) => v + 1);
+	}, [selectedSession?.cwd]);
+
+	const handleCommit = useCallback(async () => {
+		if (!selectedSession?.cwd || !commitMessage.trim() || isCommitting) return;
+		setIsCommitting(true);
+		try {
+			const res = await fetch("/api/git/commit", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					cwd: selectedSession.cwd,
+					message: commitMessage,
+				}),
+			});
+			const result = await res.json();
+			if (result.success) {
+				setCommitMessage("");
+				setRefreshTick((v) => v + 1);
+			}
+		} finally {
+			setIsCommitting(false);
+		}
+	}, [selectedSession?.cwd, commitMessage, isCommitting]);
+
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-surgent-bg">
 			<div className="flex min-h-12 shrink-0 items-center gap-2 border-b border-surgent-border bg-surgent-bg px-2">
@@ -454,7 +524,7 @@ export function ExperimentalPage() {
 										/>
 									)}
 								</div>
-								<div className="flex w-52 shrink-0 flex-col border-l border-surgent-border bg-surgent-bg">
+								<div className="flex w-56 shrink-0 flex-col border-l border-surgent-border bg-surgent-bg">
 									<div className="flex-1 overflow-y-auto">
 										<div className="sticky top-0 z-10 border-b border-surgent-border bg-surgent-bg px-2.5 py-2">
 											<div className="truncate text-[11px] font-medium text-surgent-text">
@@ -476,6 +546,9 @@ export function ExperimentalPage() {
 													staged: file.staged,
 												});
 											}}
+											actionLabel="Stage"
+											onAction={stageFile}
+											onActionAll={stageAll}
 										/>
 										<FileGroup
 											title="Staged"
@@ -490,6 +563,9 @@ export function ExperimentalPage() {
 													staged: file.staged,
 												});
 											}}
+											actionLabel="Unstage"
+											onAction={unstageFile}
+											onActionAll={unstageAll}
 										/>
 										{selectedProject && selectedProject.files.length === 0 && (
 											<div className="flex items-center justify-center py-6">
@@ -506,26 +582,37 @@ export function ExperimentalPage() {
 											</div>
 										)}
 									</div>
-									{selectedProject && selectedProject.files.length > 0 && (
-										<div className="flex items-center gap-2.5 border-t border-surgent-border px-2.5 py-1.5 text-[8px] tabular-nums text-surgent-text-3/60">
-											{staged.length > 0 && (
-												<span className="flex items-center gap-1">
-													<span className="h-1 w-1 rounded-full bg-git-added" />
-													{staged.length} staged
-												</span>
-											)}
-											{modified.length > 0 && (
-												<span className="flex items-center gap-1">
-													<span className="h-1 w-1 rounded-full bg-git-modified" />
-													{modified.length} modified
-												</span>
-											)}
-											{untracked.length > 0 && (
-												<span className="flex items-center gap-1">
-													<span className="h-1 w-1 rounded-full bg-surgent-text-3/30" />
-													{untracked.length}
-												</span>
-											)}
+									{selectedProject && (
+										<div className="shrink-0 border-t border-surgent-border">
+											<div className="p-2">
+												<textarea
+													value={commitMessage}
+													onChange={(e) => setCommitMessage(e.target.value)}
+													placeholder="Commit message..."
+													className="w-full resize-none rounded border border-surgent-border bg-surgent-surface px-2 py-1.5 text-[11px] text-surgent-text placeholder:text-surgent-text-3/50 focus:border-surgent-accent focus:outline-none"
+													rows={2}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+															e.preventDefault();
+															handleCommit();
+														}
+													}}
+												/>
+												<button
+													type="button"
+													onClick={handleCommit}
+													disabled={
+														!commitMessage.trim() ||
+														staged.length === 0 ||
+														isCommitting
+													}
+													className="mt-1.5 w-full rounded bg-surgent-accent px-2 py-1 text-[10px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+												>
+													{isCommitting
+														? "Committing..."
+														: `Commit ${staged.length > 0 ? `(${staged.length})` : ""}`}
+												</button>
+											</div>
 										</div>
 									)}
 								</div>
@@ -631,50 +718,79 @@ function FileGroup({
 	color,
 	selected,
 	onSelect,
+	actionLabel,
+	onAction,
+	onActionAll,
 }: {
 	title: string;
 	files: GitFileEntry[];
 	color: string;
 	selected: SelectedFile | null;
 	onSelect: (file: GitFileEntry) => void;
+	actionLabel?: string;
+	onAction?: (path: string) => void;
+	onActionAll?: () => void;
 }) {
 	if (files.length === 0) return null;
 	return (
 		<div>
-			<div className="sticky top-0 z-10 flex h-6 items-center justify-between border-b border-surgent-border/30 bg-surgent-bg px-2.5">
+			<div className="sticky top-0 z-10 flex h-7 items-center justify-between border-b border-surgent-border/30 bg-surgent-bg px-2.5">
 				<span
 					className={`text-[8px] font-medium uppercase tracking-[0.1em] ${color}`}
 				>
-					{title}
+					{title} ({files.length})
 				</span>
-				<span className="text-[8px] tabular-nums text-surgent-text-3/50">
-					{files.length}
-				</span>
+				{onActionAll && (
+					<button
+						type="button"
+						onClick={onActionAll}
+						className="rounded px-1.5 py-0.5 text-[8px] text-surgent-text-3 hover:bg-surgent-surface-2 hover:text-surgent-text transition-colors"
+					>
+						{actionLabel} All
+					</button>
+				)}
 			</div>
 			{files.map((file) => {
 				const active =
 					selected?.path === file.path && selected?.staged === file.staged;
 				const name = file.path.split("/").pop() || file.path;
 				return (
-					<button
+					<div
 						key={`${file.staged ? "s" : "u"}-${file.path}`}
-						type="button"
-						onClick={() => onSelect(file)}
-						className={`flex h-[24px] w-full items-center border-l-[2px] px-2.5 text-left transition-colors ${
+						className={`group flex h-[26px] items-center border-l-[2px] pr-1 ${
 							active
 								? "border-surgent-accent bg-surgent-accent/8"
 								: "border-transparent hover:bg-surgent-text/[0.03]"
 						}`}
-						title={file.path}
 					>
-						<span
-							className={`truncate text-[10.5px] font-mono ${
-								active ? "text-surgent-text" : "text-surgent-text-2/80"
-							}`}
+						<button
+							type="button"
+							onClick={() => onSelect(file)}
+							className="flex-1 min-w-0 h-full flex items-center px-2.5 text-left"
+							title={file.path}
 						>
-							{name}
-						</span>
-					</button>
+							<span
+								className={`truncate text-[10.5px] font-mono ${
+									active ? "text-surgent-text" : "text-surgent-text-2/80"
+								}`}
+							>
+								{name}
+							</span>
+						</button>
+						{onAction && (
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									onAction(file.path);
+								}}
+								className="shrink-0 opacity-0 group-hover:opacity-100 rounded px-1.5 py-0.5 text-[8px] text-surgent-text-3 hover:bg-surgent-surface-2 hover:text-surgent-text transition-all"
+								title={`${actionLabel} ${file.path}`}
+							>
+								{actionLabel}
+							</button>
+						)}
+					</div>
 				);
 			})}
 		</div>

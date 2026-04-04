@@ -232,3 +232,47 @@ export async function getLog(
 			return { hash, message, author, date };
 		});
 }
+
+export async function stageFile(
+	cwd: string,
+	filePath: string
+): Promise<boolean> {
+	const result = await run(["add", "--", filePath], cwd);
+	return result !== null;
+}
+
+export async function stageAll(cwd: string): Promise<boolean> {
+	const result = await run(["add", "-A"], cwd);
+	return result !== null;
+}
+
+export async function unstageFile(
+	cwd: string,
+	filePath: string
+): Promise<boolean> {
+	const result = await run(["reset", "HEAD", "--", filePath], cwd);
+	return result !== null;
+}
+
+export async function unstageAll(cwd: string): Promise<boolean> {
+	const result = await run(["reset", "HEAD"], cwd);
+	return result !== null;
+}
+
+export async function commit(
+	cwd: string,
+	message: string
+): Promise<{ success: boolean; hash?: string; error?: string }> {
+	if (!message.trim()) {
+		return { success: false, error: "Commit message is required" };
+	}
+
+	const result = await run(["commit", "-m", message], cwd);
+	if (result === null) {
+		return { success: false, error: "Commit failed" };
+	}
+
+	// Extract commit hash from output
+	const hashMatch = result.match(/\[[\w-]+ ([a-f0-9]+)\]/);
+	return { success: true, hash: hashMatch?.[1] };
+}
