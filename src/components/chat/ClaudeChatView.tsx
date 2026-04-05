@@ -9,7 +9,7 @@ import React, {
 } from "react";
 import { usePrompts } from "../../hooks/usePrompts.ts";
 import { getAgentDefinition } from "../../lib/agents.ts";
-import { measureTextHeight } from "../../lib/pretext-utils.ts";
+import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
 import {
 	type AgentKind,
 	formatElapsedTime,
@@ -21,6 +21,7 @@ import {
 	IconCheck,
 	IconCircle,
 	IconMessageCircle,
+	IconPause,
 	IconPencil,
 	IconSparkles,
 	IconTerminal,
@@ -189,6 +190,198 @@ interface SlashCommand {
 	isFromLibrary?: boolean;
 }
 
+// Render input text with inline highlights for /commands and @files
+// This is for the overlay that sits behind the transparent textarea
+// Critical: must maintain exact same text flow as the textarea
+function renderInputWithHighlights(
+	text: string,
+	theme?: { accent?: string; text?: string }
+): React.ReactNode {
+	if (!text) return <span style={{ color: "transparent" }}>{"\u00A0"}</span>;
+
+	// Find all tokens to highlight
+	const tokens: { start: number; end: number }[] = [];
+
+	// Find slash commands: /word (at start or after whitespace)
+	// Using a simple approach without lookbehind for compatibility
+	const slashRegex = /(^|\s)(\/[a-zA-Z][\w-]*)/g;
+	let match: RegExpExecArray | null;
+	while ((match = slashRegex.exec(text)) !== null) {
+		const prefix = match[1]!;
+		const token = match[2]!;
+		const start = match.index + prefix.length;
+		tokens.push({ start, end: start + token.length });
+	}
+
+	// Find file references: @path (at start or after whitespace)
+	const fileRegex = /(^|\s)(@[^\s]+)/g;
+	while ((match = fileRegex.exec(text)) !== null) {
+		const prefix = match[1]!;
+		const token = match[2]!;
+		const start = match.index + prefix.length;
+		tokens.push({ start, end: start + token.length });
+	}
+
+	// Sort by position and remove duplicates
+	tokens.sort((a, b) => a.start - b.start);
+
+	if (tokens.length === 0) {
+		// No tokens - render all text in theme color
+		return (
+			<span style={{ color: theme?.text ?? "var(--color-surgent-text)" }}>
+				{text}
+			</span>
+		);
+	}
+
+	// Build segments with highlights
+	const segments: React.ReactNode[] = [];
+	let lastEnd = 0;
+
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i]!;
+		// Skip if overlapping with previous
+		if (token.start < lastEnd) continue;
+
+		// Plain text before token
+		if (token.start > lastEnd) {
+			segments.push(
+				<span
+					key={`t-${lastEnd}`}
+					style={{ color: theme?.text ?? "var(--color-surgent-text)" }}
+				>
+					{text.slice(lastEnd, token.start)}
+				</span>
+			);
+		}
+		// Highlighted token - use background highlight
+		const tokenText = text.slice(token.start, token.end);
+		segments.push(
+			<span
+				key={`h-${token.start}`}
+				className="rounded-sm"
+				style={{
+					color: theme?.accent ?? "var(--color-surgent-accent)",
+					backgroundColor: theme?.accent
+						? `${theme.accent}20`
+						: "var(--color-surgent-accent-15, rgba(0, 122, 255, 0.15))",
+				}}
+			>
+				{tokenText}
+			</span>
+		);
+		lastEnd = token.end;
+	}
+
+	// Remaining text
+	if (lastEnd < text.length) {
+		segments.push(
+			<span
+				key={`t-${lastEnd}`}
+				style={{ color: theme?.text ?? "var(--color-surgent-text)" }}
+			>
+				{text.slice(lastEnd)}
+			</span>
+		);
+	}
+
+	return <>{segments}</>;
+}
+
+// Parse text and return segments with pills for /commands and @files
+// Uses theme CSS variables for consistent theming
+// When bubbleTheme is provided (for terminal panes with custom themes), uses those colors
+function parseTextWithPills(
+	text: string,
+	bubbleTheme?: { cursor?: string; fg?: string }
+): React.ReactNode[] {
+	if (!text) return [];
+
+	// Find all matches
+	const matches: {
+		start: number;
+		end: number;
+		text: string;
+		type: "command" | "file";
+	}[] = [];
+
+	// Find slash commands
+	let match: RegExpExecArray | null;
+	const slashRegex = /(?:^|\s)(\/[a-zA-Z][\w-]*)/g;
+	while ((match = slashRegex.exec(text)) !== null) {
+		const fullMatch = match[1]!;
+		const start = match.index + (match[0].length - fullMatch.length);
+		matches.push({
+			start,
+			end: start + fullMatch.length,
+			text: fullMatch,
+			type: "command",
+		});
+	}
+
+	// Find file references
+	const fileRegex = /(?:^|\s)(@[^\s]+)/g;
+	while ((match = fileRegex.exec(text)) !== null) {
+		const fullMatch = match[1]!;
+		const start = match.index + (match[0].length - fullMatch.length);
+		matches.push({
+			start,
+			end: start + fullMatch.length,
+			text: fullMatch,
+			type: "file",
+		});
+	}
+
+	// Sort by position
+	matches.sort((a, b) => a.start - b.start);
+
+	// If no matches, return plain text
+	if (matches.length === 0) return [text];
+
+	// Build segments
+	const segments: React.ReactNode[] = [];
+	let lastEnd = 0;
+
+	for (const m of matches) {
+		// Add text before this match
+		if (m.start > lastEnd) {
+			segments.push(text.slice(lastEnd, m.start));
+		}
+		// Add the pill - use bubbleTheme colors if provided (terminal panes), otherwise CSS variables
+		if (bubbleTheme?.cursor) {
+			segments.push(
+				<span
+					key={`${m.type}-${m.start}`}
+					className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] font-medium leading-none"
+					style={{
+						backgroundColor: `${bubbleTheme.cursor}20`,
+						color: bubbleTheme.cursor,
+					}}
+				>
+					{m.text}
+				</span>
+			);
+		} else {
+			segments.push(
+				<span
+					key={`${m.type}-${m.start}`}
+					className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] font-medium leading-none bg-surgent-accent/15 text-surgent-accent"
+				>
+					{m.text}
+				</span>
+			);
+		}
+		lastEnd = m.end;
+	}
+
+	// Add remaining text
+	if (lastEnd < text.length) {
+		segments.push(text.slice(lastEnd));
+	}
+
+	return segments;
+}
+
 // Local-only commands that don't send to the active agent
 const LOCAL_COMMANDS: SlashCommand[] = [
 	{
@@ -309,8 +502,6 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				maxHeight: number;
 			} | null;
 		}>({ show: false, selectedIdx: 0, position: null });
-		const showCommands = commandMenu.show;
-		const selectedCommandIdx = commandMenu.selectedIdx;
 		const _menuPosition = commandMenu.position;
 		// @ file reference menu
 		const [fileMenu, setFileMenu] = useState<{
@@ -325,6 +516,13 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				maxHeight: number;
 			} | null;
 		}>({ show: false, selectedIdx: 0, query: "", atIndex: -1, position: null });
+		// / command menu for mid-sentence detection
+		const [slashMenu, setSlashMenu] = useState<{
+			show: boolean;
+			selectedIdx: number;
+			query: string;
+			slashIndex: number; // cursor position of the '/'
+		}>({ show: false, selectedIdx: 0, query: "", slashIndex: -1 });
 		const [fileResults, setFileResults] = useState<
 			{ name: string; path: string; isDir: boolean }[]
 		>([]);
@@ -345,6 +543,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 		);
 		const scrollRef = useRef<HTMLDivElement>(null);
 		const textareaRef = useRef<HTMLTextAreaElement>(null);
+		const highlightOverlayRef = useRef<HTMLDivElement>(null);
 		const inputContainerRef = useRef<HTMLDivElement>(null);
 		const currentAssistantRef = useRef<string | null>(null);
 		const currentToolRef = useRef<string | null>(null);
@@ -426,14 +625,20 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			return [...deduped.values()];
 		}, [agentKind, localPrompts]);
 
-		const commandQuery = input.startsWith("/")
-			? (input.slice(1).match(/^\S*/) ?? [""])[0]?.toLowerCase()
-			: "";
-		const filteredCommands = input.startsWith("/")
-			? allCommands.filter((cmd) =>
-					cmd.name.toLowerCase().startsWith(commandQuery)
-				)
-			: [];
+		// Mid-sentence slash command detection
+		const slashCommandInfo = useMemo(() => {
+			if (!slashMenu.show || slashMenu.slashIndex === -1) {
+				return { query: "", filtered: [] };
+			}
+			const query = slashMenu.query.toLowerCase();
+			const filtered = allCommands.filter((cmd) =>
+				cmd.name.toLowerCase().startsWith(query)
+			);
+			return { query, filtered };
+		}, [slashMenu.show, slashMenu.slashIndex, slashMenu.query, allCommands]);
+
+		const filteredCommands = slashCommandInfo.filtered;
+		const showCommands = slashMenu.show && filteredCommands.length > 0;
 
 		// Cache container rects to avoid repeated getBoundingClientRect reflows
 		const cachedRects = useRef<{ input: DOMRect; container: DOMRect } | null>(
@@ -468,20 +673,40 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			};
 		}, []);
 
-		useEffect(() => {
-			if (
-				input.startsWith("/") &&
-				commandQuery.length === input.slice(1).length
-			) {
-				setCommandMenu({
+		// Handle slash command menu detection (mid-sentence)
+		const handleInputForSlashMenu = useCallback(
+			(value: string, cursorPos: number) => {
+				// Find the last '/' before cursor that starts a command reference
+				let slashIdx = -1;
+				for (let i = cursorPos - 1; i >= 0; i--) {
+					if (value[i] === "/") {
+						// Valid if at start or preceded by whitespace
+						if (i === 0 || /\s/.test(value[i - 1]!)) {
+							slashIdx = i;
+						}
+						break;
+					}
+					// Stop searching if we hit whitespace before finding /
+					if (/\s/.test(value[i]!)) break;
+				}
+
+				if (slashIdx === -1) {
+					if (slashMenu.show)
+						setSlashMenu((prev) => ({ ...prev, show: false }));
+					return;
+				}
+
+				const query = value.slice(slashIdx + 1, cursorPos);
+
+				setSlashMenu({
 					show: true,
 					selectedIdx: 0,
-					position: getMenuPosition(400),
+					query,
+					slashIndex: slashIdx,
 				});
-			} else {
-				setCommandMenu({ show: false, selectedIdx: 0, position: null });
-			}
-		}, [input, commandQuery, getMenuPosition]);
+			},
+			[slashMenu.show]
+		);
 
 		// @ file reference: detect trigger and search
 		const handleInputForFileMenu = useCallback(
@@ -571,6 +796,30 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			}
 		}, [isLoading, startTime]);
 
+		const sendToServer = useCallback(
+			(text: string) => {
+				setLoadingState({
+					isLoading: true,
+					status: "thinking",
+					startTime: Date.now(),
+				});
+				currentAssistantRef.current = null;
+				let sessionId: string | null = null;
+				try {
+					sessionId = localStorage.getItem(SESSION_KEY_PREFIX + paneId);
+				} catch {}
+				wsClient.send({
+					type: "chat:send",
+					paneId,
+					text,
+					cwd,
+					sessionId,
+					agentKind,
+				});
+			},
+			[paneId, cwd, agentKind, setLoadingState]
+		);
+
 		useImperativeHandle(
 			ref,
 			() => ({
@@ -658,12 +907,9 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						sendToServer(next.text);
 					}
 				} else if (msg.type === "chat:user_message") {
-					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{ id: nextId(), role: "user", content: msg.text },
-						])
-					);
+					// User message already added locally with display text in sendMessage()
+					// Server echoes back the full/expanded text - ignore it to keep display clean
+					// Just update loading state
 					setLoadingState({
 						isLoading: true,
 						status: "thinking",
@@ -713,7 +959,50 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}));
 				} else if (msg.type === "chat:sync") {
 					const serverMessages: ChatMessage[] = msg.messages;
-					setMessages(trimMessages(serverMessages));
+					// Don't replace local history if server has nothing (e.g., after server restart)
+					// Local history from localStorage is more valuable than empty server state
+					if (serverMessages.length === 0) return;
+
+					// Preserve local user message display text instead of server's expanded version
+					// Match by position since IDs differ between client and server
+					setMessages((prev) => {
+						// Don't wipe local history if server has fewer messages
+						// This happens after server restart - keep local history
+						if (serverMessages.length < prev.length && !msg.isStreaming) {
+							return prev;
+						}
+						const localUserMsgs = prev.filter((m) => m.role === "user");
+						const serverUserMsgs = serverMessages.filter(
+							(m) => m.role === "user"
+						);
+						// Build a map of server user message index -> local display text
+						const displayTextMap = new Map<number, string>();
+						for (
+							let i = 0;
+							i < serverUserMsgs.length && i < localUserMsgs.length;
+							i++
+						) {
+							// Only preserve if local version is shorter (likely a /command)
+							if (
+								localUserMsgs[i]!.content.length <
+								serverUserMsgs[i]!.content.length
+							) {
+								displayTextMap.set(i, localUserMsgs[i]!.content);
+							}
+						}
+						let userIdx = 0;
+						const merged = serverMessages.map((m) => {
+							if (m.role === "user") {
+								const displayText = displayTextMap.get(userIdx);
+								userIdx++;
+								if (displayText) {
+									return { ...m, content: displayText };
+								}
+							}
+							return m;
+						});
+						return trimMessages(merged);
+					});
 					saveMessages(paneId, serverMessages);
 					if (msg.isStreaming) {
 						setLoadingState({
@@ -1097,65 +1386,68 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 		}
 
 		// Smart scroll anchoring — only auto-scroll if user is near the bottom
-		const wasAtBottom = useRef(true);
+		const userScrolledAway = useRef(false);
+
 		useEffect(() => {
 			const el = scrollRef.current;
 			if (!el) return;
+
 			const handleScroll = () => {
-				wasAtBottom.current =
-					el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+				const { scrollTop, scrollHeight, clientHeight } = el;
+				const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+				// User is "at bottom" if within 100px - give some tolerance
+				userScrolledAway.current = distanceFromBottom > 100;
 			};
+
 			el.addEventListener("scroll", handleScroll, { passive: true });
 			return () => el.removeEventListener("scroll", handleScroll);
 		}, []);
+
+		// Auto-scroll to bottom when messages change (if user is near bottom)
 		useEffect(() => {
 			const el = scrollRef.current;
-			if (el && wasAtBottom.current) {
-				el.scrollTop = el.scrollHeight;
+			if (el && !userScrolledAway.current) {
+				requestAnimationFrame(() => {
+					el.scrollTop = el.scrollHeight;
+				});
+			}
+		}, [messages]);
+
+		// Reset scroll lock when user sends a new message (scroll to bottom)
+		const scrollToBottom = useCallback(() => {
+			const el = scrollRef.current;
+			if (el) {
+				userScrolledAway.current = false;
+				requestAnimationFrame(() => {
+					el.scrollTop = el.scrollHeight;
+				});
 			}
 		}, []);
 
 		useEffect(() => {
 			const ta = textareaRef.current;
 			if (!ta) return;
-			// Use pretext to measure text height without DOM reflow
+			// Use pretext with pre-wrap mode for accurate textarea measurement
 			const width = ta.clientWidth - 24; // px-3 padding both sides
 			if (width > 0 && input) {
-				const measured = measureTextHeight(
+				const measured = measureTextareaHeight(
 					input,
 					width,
 					"12px Geist, -apple-system, system-ui, sans-serif",
-					19.2
+					18 // Match lineHeight in textarea style
 				);
 				const target = Math.min(Math.max(measured + 16, 36), 120); // +padding, min 36, max 120
 				ta.style.height = `${target}px`;
 			} else {
-				ta.style.height = "auto";
+				ta.style.height = "36px";
+			}
+			// Sync overlay scroll position after height change
+			if (highlightOverlayRef.current && ta) {
+				highlightOverlayRef.current.style.transform = `translateY(-${ta.scrollTop}px)`;
 			}
 		}, [input]);
 
-		function sendToServer(text: string) {
-			setLoadingState({
-				isLoading: true,
-				status: "thinking",
-				startTime: Date.now(),
-			});
-			currentAssistantRef.current = null;
-			let sessionId: string | null = null;
-			try {
-				sessionId = localStorage.getItem(SESSION_KEY_PREFIX + paneId);
-			} catch {}
-			wsClient.send({
-				type: "chat:send",
-				paneId,
-				text,
-				cwd,
-				sessionId,
-				agentKind,
-			});
-		}
-
-		function stopGeneration() {
+		const stopGeneration = useCallback(() => {
 			wsClient.send({ type: "chat:stop", paneId });
 			setLoadingState({ isLoading: false, status: "idle", startTime: null });
 			setMessages((prev) =>
@@ -1164,11 +1456,14 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					{ id: nextId(), role: "system", content: "Generation stopped" },
 				])
 			);
-		}
+		}, [paneId, setLoadingState, setMessages]);
 
-		function revertCheckpoint(checkpointId: string) {
-			wsClient.send({ type: "checkpoint:revert", paneId, checkpointId });
-		}
+		const revertCheckpoint = useCallback(
+			(checkpointId: string) => {
+				wsClient.send({ type: "checkpoint:revert", paneId, checkpointId });
+			},
+			[paneId]
+		);
 
 		const executeCommand = useCallback(
 			(cmd: SlashCommand, args?: string) => {
@@ -1269,15 +1564,26 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 
 		const selectCommand = useCallback(
 			(idx: number) => {
-				if (filteredCommands[idx]) {
-					const cmd = filteredCommands[idx];
-					const args = input.slice(1).includes(" ")
-						? input.slice(input.indexOf(" ") + 1)
-						: undefined;
-					executeCommand(cmd, args);
-				}
+				const cmd = filteredCommands[idx];
+				if (!cmd) return;
+				// Insert command inline (like file references) instead of executing
+				const before = input.slice(0, slashMenu.slashIndex);
+				const cursorPos = textareaRef.current?.selectionStart ?? input.length;
+				const after = input.slice(cursorPos);
+				const newInput = `${before}/${cmd.name}${after ? after : " "}`;
+				setInput(newInput);
+				setSlashMenu((prev) => ({ ...prev, show: false }));
+				// Focus textarea and set cursor after the inserted command
+				requestAnimationFrame(() => {
+					const ta = textareaRef.current;
+					if (ta) {
+						const pos = before.length + 1 + cmd.name.length + (after ? 0 : 1);
+						ta.focus();
+						ta.setSelectionRange(pos, pos);
+					}
+				});
 			},
-			[filteredCommands, input, executeCommand]
+			[filteredCommands, input, slashMenu.slashIndex, setInput]
 		);
 
 		const selectFile = useCallback(
@@ -1308,32 +1614,75 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			const text = input.trim();
 			if (!text && attachedImages.length === 0) return;
 
-			if (text.startsWith("/")) {
-				const parts = text.slice(1).split(" ");
-				const cmdName = parts[0]?.toLowerCase();
-				const args = parts.slice(1).join(" ");
+			// Handle message that starts with just a command (legacy behavior)
+			if (text.startsWith("/") && !text.includes(" ")) {
+				const cmdName = text.slice(1).toLowerCase();
 				const cmd = allCommands.find((c) => c.name.toLowerCase() === cmdName);
 				if (cmd) {
-					executeCommand(cmd, args || undefined);
+					executeCommand(cmd, undefined);
 					return;
 				}
 			}
 
 			// Build the full message with image references
 			const imagePaths = attachedImages.map((img) => img.path);
+
+			// Expand any /commands in the text to their full prompts for sending
+			// But keep the display text showing just the /command
+			let expandedText = text;
+
+			// Find and expand all /commands in the message
+			const cmdRegex = /(^|\s)(\/[a-zA-Z][\w-]*)(?=\s|$)/g;
+			let match: RegExpExecArray | null;
+			const expansions: {
+				original: string;
+				expanded: string;
+				cmd: SlashCommand;
+			}[] = [];
+
+			while ((match = cmdRegex.exec(text)) !== null) {
+				const cmdToken = match[2]!;
+				const cmdName = cmdToken.slice(1).toLowerCase();
+				const cmd = allCommands.find((c) => c.name.toLowerCase() === cmdName);
+				if (cmd) {
+					let expanded: string;
+					if (cmd.promptTemplate) {
+						expanded = cmd.promptTemplate.replace("{args}", "").trim();
+						// Track usage for library prompts
+						if (cmd.id) {
+							incrementLocalUsage(cmd.id).catch(() => {});
+						}
+					} else {
+						expanded = cmdToken; // Native commands stay as-is
+					}
+					expansions.push({ original: cmdToken, expanded, cmd });
+				}
+			}
+
+			// Apply expansions to the text for sending to agent
+			for (const exp of expansions) {
+				expandedText = expandedText.replace(exp.original, exp.expanded);
+			}
+
+			// Display text keeps the /command tokens, doesn't show expanded prompts
 			const displayText =
 				text || `Attached image${attachedImages.length > 1 ? "s" : ""}`;
+
 			const fullText =
 				imagePaths.length > 0
-					? `${text}${text ? "\n\n" : ""}Here are the images at these paths:\n${imagePaths.join("\n")}`
-					: text;
+					? `${expandedText}${expandedText ? "\n\n" : ""}Here are the images at these paths:\n${imagePaths.join("\n")}`
+					: expandedText;
 
 			setInput("");
+			setSlashMenu((prev) => ({ ...prev, show: false }));
 			setFileMenu((prev) => ({ ...prev, show: false }));
 			// Clean up preview URLs
 			for (const img of attachedImages) URL.revokeObjectURL(img.previewUrl);
 			setAttachedImages([]);
-			if (textareaRef.current) textareaRef.current.style.height = "auto";
+			if (textareaRef.current) textareaRef.current.style.height = "36px";
+
+			// Always scroll to bottom when user sends a message
+			scrollToBottom();
 
 			if (isLoading) {
 				queueMessage(fullText, displayText, imagePaths);
@@ -1354,8 +1703,10 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			attachedImages,
 			appendLocalMessages,
 			queueMessage,
-			allCommands.find,
+			allCommands,
+			incrementLocalUsage,
 			sendToServer,
+			scrollToBottom,
 			setInput,
 		]);
 
@@ -1397,7 +1748,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				if (showCommands && filteredCommands.length > 0) {
 					if (e.key === "ArrowDown") {
 						e.preventDefault();
-						setCommandMenu((prev) => ({
+						setSlashMenu((prev) => ({
 							...prev,
 							selectedIdx: (prev.selectedIdx + 1) % filteredCommands.length,
 						}));
@@ -1405,7 +1756,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 					if (e.key === "ArrowUp") {
 						e.preventDefault();
-						setCommandMenu((prev) => ({
+						setSlashMenu((prev) => ({
 							...prev,
 							selectedIdx:
 								(prev.selectedIdx - 1 + filteredCommands.length) %
@@ -1415,12 +1766,12 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 					if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
 						e.preventDefault();
-						selectCommand(selectedCommandIdx);
+						selectCommand(slashMenu.selectedIdx);
 						return;
 					}
 					if (e.key === "Escape") {
 						e.preventDefault();
-						setCommandMenu((prev) => ({ ...prev, show: false }));
+						setSlashMenu((prev) => ({ ...prev, show: false }));
 						return;
 					}
 				}
@@ -1434,7 +1785,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				sendMessage,
 				showCommands,
 				filteredCommands,
-				selectedCommandIdx,
+				slashMenu.selectedIdx,
 				selectCommand,
 				fileMenu.show,
 				fileMenu.selectedIdx,
@@ -1551,6 +1902,16 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			]
 		);
 
+		// Memoize input highlight to avoid recalculation on status/elapsedTime changes
+		const inputHighlightTheme = useMemo(
+			() => (theme ? { accent: cursorColor, text: fgColor } : undefined),
+			[theme, cursorColor, fgColor]
+		);
+		const inputHighlights = useMemo(
+			() => renderInputWithHighlights(input, inputHighlightTheme),
+			[input, inputHighlightTheme]
+		);
+
 		return (
 			<div
 				ref={containerRef}
@@ -1582,92 +1943,19 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					/>
 				</div>
 
-				{/* Status indicator bar */}
-				{status !== "idle" &&
-					(() => {
-						const statusInfo = getStatusInfo(status);
-						const statusColor = theme ? cursorColor : undefined;
-						const iconProps = {
-							size: 13,
-							className: `shrink-0 ${theme ? "" : statusInfo.iconColor} ${statusInfo.isActive ? "animate-pulse" : ""}`,
-							...(theme ? { style: { color: statusColor } } : {}),
-						};
-						const StatusIconEl = () => {
-							switch (statusInfo.iconType) {
-								case "sparkles":
-									return <IconSparkles {...iconProps} />;
-								case "message":
-									return <IconMessageCircle {...iconProps} />;
-								case "alert":
-									return <IconAlertTriangle {...iconProps} />;
-								case "wrench":
-									return <IconWrench {...iconProps} />;
-								case "terminal":
-									return <IconTerminal {...iconProps} />;
-								default:
-									return <IconCircle {...iconProps} />;
-							}
-						};
-						return (
-							<div
-								className="shrink-0 px-3 py-1.5 flex items-center gap-2"
-								style={{
-									borderTop: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
-									backgroundColor: theme ? bgColor : "var(--color-surgent-bg)",
-								}}
-							>
-								<StatusIconEl />
-								<span
-									className={`text-[10px] font-medium ${theme ? "" : statusInfo.textColor}`}
-									style={theme ? { color: statusColor } : undefined}
-								>
-									{statusInfo.toolName ? (
-										<>
-											Running{" "}
-											<span className="font-mono">{statusInfo.toolName}</span>
-										</>
-									) : (
-										statusInfo.label
-									)}
-								</span>
-								<span className="flex-1" />
-								{elapsedTime > 0 && (
-									<span
-										className="text-[9px] tabular-nums"
-										style={{
-											color: theme ? fgDim : "var(--color-surgent-text-3)",
-										}}
-									>
-										{formatElapsedTime(elapsedTime)}
-									</span>
-								)}
-								{queuedMessages.length > 0 && (
-									<span
-										className="px-1.5 py-0.5 rounded text-[9px] font-medium tabular-nums"
-										style={{
-											backgroundColor: theme
-												? `${cursorColor}20`
-												: "rgba(0,122,255,0.15)",
-											color: theme
-												? cursorColor
-												: "var(--color-surgent-accent)",
-										}}
-									>
-										{queuedMessages.length} queued
-									</span>
-								)}
-								{isLoading && (
-									<button
-										type="button"
-										onClick={stopGeneration}
-										className="px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors bg-red-500/20 text-red-400 hover:bg-red-500/30"
-									>
-										Stop
-									</button>
-								)}
-							</div>
-						);
-					})()}
+				{/* Status indicator bar - always rendered to avoid mount/unmount glitches */}
+				<StatusBar
+					status={status}
+					elapsedTime={elapsedTime}
+					queuedCount={queuedMessages.length}
+					isLoading={isLoading}
+					onStop={stopGeneration}
+					theme={theme}
+					cursorColor={cursorColor}
+					borderColor={borderColor}
+					bgColor={bgColor}
+					fgDim={fgDim}
+				/>
 
 				{/* Queued messages panel */}
 				{queuedMessages.length > 0 && (
@@ -1997,118 +2285,133 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 										))}
 									</div>
 								)}
-								{/* / command menu */}
+								{/* / command menu - Skills dropdown */}
 								{showCommands && filteredCommands.length > 0 && (
 									<div
-										className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg overflow-y-auto z-[9999]"
+										className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border shadow-2xl overflow-hidden z-[9999]"
 										style={{
-											maxHeight: 400,
-											backgroundColor: theme
-												? surfaceColor
-												: "var(--color-surgent-surface)",
-											borderColor: theme
-												? borderColor
-												: "var(--color-surgent-border)",
+											maxHeight: 320,
+											backgroundColor: "#1a1a1a",
+											borderColor: "#333",
 										}}
 									>
-										{filteredCommands.map((cmd, idx) => (
-											<button
-												type="button"
-												key={cmd.id || cmd.name}
-												onClick={() => selectCommand(idx)}
-												onMouseEnter={() =>
-													setCommandMenu((prev) => ({
-														...prev,
-														selectedIdx: idx,
-													}))
-												}
-												className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
-												style={{
-													backgroundColor:
-														idx === selectedCommandIdx
-															? theme
-																? `${cursorColor}20`
-																: "rgba(0,122,255,0.15)"
-															: "transparent",
-												}}
-											>
-												<span
-													className="shrink-0 font-mono text-[11px] font-medium"
-													style={{
-														color: theme
-															? cursorColor
-															: "var(--color-surgent-accent)",
-													}}
-												>
-													/{cmd.name}
-												</span>
-												<span
-													className="flex-1 truncate text-[10px]"
-													style={{
-														color: theme
-															? fgDim
-															: "var(--color-surgent-text-3)",
-													}}
-												>
-													{cmd.description}
-												</span>
-												{cmd.isLocalCommand && (
-													<span
-														className="shrink-0 rounded px-1 py-0.5 text-[8px]"
+										{/* Skills header */}
+										<div
+											className="px-3 py-2 text-[10px] font-medium tracking-wide uppercase"
+											style={{ color: "#888" }}
+										>
+											Skills
+										</div>
+										<div className="overflow-y-auto" style={{ maxHeight: 280 }}>
+											{filteredCommands.map((cmd, idx) => {
+												const isSelected = idx === slashMenu.selectedIdx;
+												return (
+													<button
+														type="button"
+														key={cmd.id || cmd.name}
+														onClick={() => selectCommand(idx)}
+														onMouseEnter={() =>
+															setSlashMenu((prev) => ({
+																...prev,
+																selectedIdx: idx,
+															}))
+														}
+														className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors"
 														style={{
-															backgroundColor: theme
-																? `${cursorColor}15`
-																: "rgba(0,122,255,0.1)",
-															color: theme
-																? cursorColor
-																: "var(--color-surgent-accent)",
+															backgroundColor: isSelected
+																? "#2a2a2a"
+																: "transparent",
 														}}
 													>
-														claude code
-													</span>
-												)}
-											</button>
-										))}
+														<span
+															className="font-mono text-[12px] font-medium"
+															style={{
+																color: isSelected ? "#f5a623" : "#e5e5e5",
+															}}
+														>
+															/{cmd.name}
+														</span>
+														<span
+															className="text-[11px]"
+															style={{ color: "#888" }}
+														>
+															{cmd.description}
+														</span>
+													</button>
+												);
+											})}
+										</div>
 									</div>
 								)}
-								<textarea
-									ref={textareaRef}
-									value={input}
-									onChange={(e) => {
-										const val = e.target.value;
-										setInput(val);
-										handleInputForFileMenu(
-											val,
-											e.target.selectionStart ?? val.length
-										);
-									}}
-									onKeyDown={handleKeyDown}
-									onPaste={handlePaste}
-									placeholder={
-										isLoading
-											? "Type to queue next message..."
-											: "Message... (/ commands, @ files)"
-									}
-									rows={1}
-									aria-label="Message input"
-									spellCheck
-									autoCorrect="on"
-									autoCapitalize="sentences"
-									className={
-										theme
-											? "block w-full resize-none rounded-lg px-3 py-2 pr-10 text-[12px] outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none transition-colors"
-											: "block w-full resize-none rounded-lg bg-surgent-surface px-3 py-2 pr-10 text-[12px] text-surgent-text placeholder-surgent-text-3 outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none transition-colors"
-									}
+								{/* Textarea with highlight backdrop */}
+								<div
+									className="relative flex-1 rounded-lg overflow-hidden"
 									style={{
-										maxHeight: "80px",
-										backgroundColor: theme ? surfaceColor : undefined,
-										color: theme ? fgColor : undefined,
-										outline: "none",
-										boxShadow: "none",
-										border: "none",
-										WebkitAppearance: "none",
+										backgroundColor: theme
+											? surfaceColor
+											: "var(--color-surgent-surface)",
+										maxHeight: "120px",
 									}}
-								/>
+								>
+									{/* Backdrop div that shows highlighted text - scrolls with textarea */}
+									<div
+										ref={highlightOverlayRef}
+										className="absolute top-0 left-0 right-0 px-3 py-2 pr-10 text-[12px] pointer-events-none whitespace-pre-wrap"
+										style={{
+											lineHeight: "18px",
+											wordBreak: "break-word",
+											overflowWrap: "break-word",
+										}}
+										aria-hidden="true"
+									>
+										{inputHighlights}
+									</div>
+									<textarea
+										ref={textareaRef}
+										value={input}
+										onChange={(e) => {
+											const val = e.target.value;
+											setInput(val);
+											const cursor = e.target.selectionStart ?? val.length;
+											handleInputForFileMenu(val, cursor);
+											handleInputForSlashMenu(val, cursor);
+											// Height is managed by useEffect with pretext - just sync overlay scroll
+											if (highlightOverlayRef.current) {
+												highlightOverlayRef.current.style.transform = `translateY(-${e.target.scrollTop}px)`;
+											}
+										}}
+										onScroll={(e) => {
+											// Move overlay up/down to match textarea scroll
+											if (highlightOverlayRef.current) {
+												highlightOverlayRef.current.style.transform = `translateY(-${e.currentTarget.scrollTop}px)`;
+											}
+										}}
+										onKeyDown={handleKeyDown}
+										onPaste={handlePaste}
+										placeholder={
+											isLoading
+												? "Type to queue next message..."
+												: "Message... (/ commands, @ files)"
+										}
+										rows={1}
+										aria-label="Message input"
+										spellCheck
+										autoCorrect="on"
+										autoCapitalize="sentences"
+										className="relative block w-full resize-none rounded-lg px-3 py-2 pr-10 text-[12px] outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none bg-transparent overflow-y-auto scrollbar-none"
+										style={{
+											minHeight: "36px",
+											color: "transparent",
+											caretColor: theme
+												? cursorColor
+												: "var(--color-surgent-text)",
+											WebkitTextFillColor: "transparent",
+											lineHeight: "18px",
+											wordBreak: "break-word",
+											overflowWrap: "break-word",
+										}}
+									/>
+								</div>
 								{isLoading && (
 									<div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
 										<span
@@ -2420,7 +2723,10 @@ const Bubble = React.memo(function Bubble({
 							className="whitespace-pre-wrap break-words text-[12px]"
 							style={theme ? { color: theme.fg } : undefined}
 						>
-							{displayContent}
+							{parseTextWithPills(
+								displayContent,
+								theme ? { cursor: theme.cursor, fg: theme.fg } : undefined
+							)}
 						</p>
 					)}
 				</div>
@@ -2625,6 +2931,137 @@ const Bubble = React.memo(function Bubble({
 				<div className="absolute top-0 right-0 opacity-0 group-hover/msg:opacity-100 transition-opacity">
 					<CopyButton text={msg.content} theme={theme} />
 				</div>
+			)}
+		</div>
+	);
+});
+
+// Status icon component - extracted to avoid recreating on every render
+function StatusIcon({
+	iconType,
+	size,
+	className,
+	style,
+}: {
+	iconType: string;
+	size: number;
+	className: string;
+	style?: React.CSSProperties;
+}) {
+	const props = { size, className, style };
+	switch (iconType) {
+		case "sparkles":
+			return <IconSparkles {...props} />;
+		case "message":
+			return <IconMessageCircle {...props} />;
+		case "alert":
+			return <IconAlertTriangle {...props} />;
+		case "wrench":
+			return <IconWrench {...props} />;
+		case "terminal":
+			return <IconTerminal {...props} />;
+		default:
+			return <IconCircle {...props} />;
+	}
+}
+
+// Memoized status bar to prevent re-renders from parent state changes
+const StatusBar = React.memo(function StatusBar({
+	status,
+	elapsedTime,
+	queuedCount,
+	isLoading,
+	onStop,
+	theme,
+	cursorColor,
+	borderColor,
+	bgColor,
+	fgDim,
+}: {
+	status: string;
+	elapsedTime: number;
+	queuedCount: number;
+	isLoading: boolean;
+	onStop: () => void;
+	theme?: { bg: string; fg: string; cursor: string };
+	cursorColor: string;
+	borderColor?: string;
+	bgColor: string;
+	fgDim: string;
+}) {
+	// Don't render anything when idle - avoids layout shift
+	if (status === "idle") return null;
+
+	const statusInfo = getStatusInfo(status);
+	const statusColor = theme ? cursorColor : undefined;
+	const iconClassName = `shrink-0 ${theme ? "" : statusInfo.iconColor} ${statusInfo.isActive ? "animate-pulse" : ""}`;
+
+	return (
+		<div
+			className="shrink-0 px-3 py-1.5 flex items-center gap-2"
+			style={{
+				borderTop: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
+				backgroundColor: theme ? bgColor : "var(--color-surgent-bg)",
+			}}
+		>
+			<StatusIcon
+				iconType={statusInfo.iconType}
+				size={13}
+				className={iconClassName}
+				style={theme ? { color: statusColor } : undefined}
+			/>
+			<span
+				className={`text-[10px] font-medium ${theme ? "" : statusInfo.textColor}`}
+				style={theme ? { color: statusColor } : undefined}
+			>
+				{statusInfo.toolName ? (
+					<>
+						Running <span className="font-mono">{statusInfo.toolName}</span>
+					</>
+				) : (
+					statusInfo.label
+				)}
+			</span>
+			<span className="flex-1" />
+			{elapsedTime > 0 && (
+				<span
+					className="text-[9px] tabular-nums"
+					style={{
+						color: theme ? fgDim : "var(--color-surgent-text-3)",
+					}}
+				>
+					{formatElapsedTime(elapsedTime)}
+				</span>
+			)}
+			{queuedCount > 0 && (
+				<span
+					className="px-1.5 py-0.5 rounded text-[9px] font-medium tabular-nums"
+					style={{
+						backgroundColor: theme
+							? `${cursorColor}20`
+							: "rgba(0,122,255,0.15)",
+						color: theme ? cursorColor : "var(--color-surgent-accent)",
+					}}
+				>
+					{queuedCount} queued
+				</span>
+			)}
+			{isLoading && (
+				<button
+					type="button"
+					onClick={onStop}
+					className="p-1 rounded-md transition-all border"
+					style={{
+						color: theme ? fgDim : "var(--color-surgent-text-3)",
+						backgroundColor: theme
+							? `${bgColor}`
+							: "var(--color-surgent-surface)",
+						borderColor: theme ? borderColor : "var(--color-surgent-border)",
+					}}
+					title="Stop"
+				>
+					<IconPause size={10} />
+				</button>
 			)}
 		</div>
 	);

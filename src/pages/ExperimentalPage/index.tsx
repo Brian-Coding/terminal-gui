@@ -25,6 +25,7 @@ import {
 	type GitProjectStatus,
 	useGitStatus,
 } from "../../hooks/useGitStatus.ts";
+import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
 import {
 	getStatusInfo,
@@ -32,6 +33,11 @@ import {
 	loadTerminalState,
 	type TerminalGroupModel,
 } from "../../lib/terminal-utils.ts";
+import {
+	ActivityFeed,
+	ActivityIndicator,
+	useActivityFeed,
+} from "../../features/activity-feed/index.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
 import { type DiffViewMode, GitDiffView } from "../Terminal/GitDiffView.tsx";
 import { StatusIcon } from "../Terminal/StatusIcon.tsx";
@@ -90,9 +96,9 @@ function getAllFiles(project: GitProjectStatus | null): GitFileEntry[] {
 	];
 }
 
-function basename(filePath?: string): string {
-	if (!filePath) return "No directory";
-	return filePath.split("/").pop() || filePath;
+function basename(p?: string): string {
+	if (!p) return "No directory";
+	return p.split("/").pop() || p;
 }
 
 export function ExperimentalPage() {
@@ -111,6 +117,7 @@ export function ExperimentalPage() {
 	const [scrollToChange, setScrollToChange] = useState(0);
 	const [zenMode, setZenMode] = useState(true);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+	const [activityExpanded, setActivityExpanded] = useState(false);
 	const chatRef = useRef<ClaudeChatHandle>(null);
 
 	const terminalState = useMemo(() => loadTerminalState(), []);
@@ -194,6 +201,12 @@ export function ExperimentalPage() {
 		},
 		[loadDiff]
 	);
+
+	const { events: activityEvents, clearEvents: clearActivityEvents } =
+		useActivityFeed({
+			paneId: session?.paneId,
+			cwd: session?.cwd,
+		});
 
 	const { checkPendingScroll } = useFileWatcher({
 		enabled: zenMode,
@@ -434,21 +447,107 @@ export function ExperimentalPage() {
 				<EmptyState />
 			) : (
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[400px_minmax(0,1fr)]">
-					<section className="min-h-0 min-w-0 border-r border-surgent-border">
-						<ClaudeChatView
-							key={session.paneId}
-							ref={chatRef}
-							paneId={session.paneId}
-							cwd={session.cwd}
-							agentKind={session.agentKind}
-							theme={theme}
-							onStatusChange={(id, status) => {
-								setAgentStatuses((cur) => {
-									if (cur.get(id) === status) return cur;
-									return new Map(cur).set(id, status);
-								});
-							}}
-						/>
+					<section className="flex min-h-0 min-w-0 flex-col border-r border-surgent-border">
+						<div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-surgent-border bg-surgent-text/[0.02]">
+							<span className="text-surgent-accent">
+								{getAgentIcon(session.agentKind, 10)}
+							</span>
+							<span className="text-[10px] font-medium text-surgent-text-2">
+								{getAgentDefinition(session.agentKind).label}
+							</span>
+							{session.cwd && (
+								<>
+									<span className="text-[10px] text-surgent-text-3">›</span>
+									<span
+										className="text-[10px] font-medium text-surgent-text truncate"
+										title={session.cwd}
+									>
+										{session.cwd.split("/").pop() || session.cwd}
+									</span>
+								</>
+							)}
+							<span className="flex-1" />
+							<button
+								type="button"
+								onClick={() => setActivityExpanded((v) => !v)}
+								className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors ${
+									activityExpanded
+										? "bg-surgent-accent/15 text-surgent-accent"
+										: "hover:bg-surgent-text/5"
+								}`}
+								title={activityExpanded ? "Hide activity" : "Show activity"}
+							>
+								<ActivityIndicator events={activityEvents} />
+								<svg
+									className={`w-2.5 h-2.5 text-surgent-text-3 transition-transform ${activityExpanded ? "rotate-180" : ""}`}
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2"
+								>
+									<path d="M6 9l6 6 6-6" />
+								</svg>
+							</button>
+							<button
+								type="button"
+								onClick={() => closePane(session.paneId)}
+								className="flex items-center justify-center h-4 w-4 rounded transition-colors text-surgent-text-3 hover:text-red-400 hover:bg-red-500/15"
+								title="Close session"
+							>
+								<svg
+									aria-hidden
+									width="8"
+									height="8"
+									viewBox="0 0 8 8"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="1.5"
+									strokeLinecap="round"
+								>
+									<path d="M1 1l6 6M7 1l-6 6" />
+								</svg>
+							</button>
+						</div>
+						{activityExpanded && (
+							<div className="shrink-0 h-32 border-b border-surgent-border bg-surgent-bg/50">
+								<div className="flex h-full flex-col">
+									<div className="flex items-center justify-between px-2 py-1 border-b border-surgent-border/50">
+										<span className="text-[9px] font-medium uppercase tracking-wider text-surgent-text-3">
+											Activity
+										</span>
+										{activityEvents.length > 0 && (
+											<button
+												type="button"
+												onClick={clearActivityEvents}
+												className="text-[9px] text-surgent-text-3 hover:text-surgent-text-2 transition-colors"
+											>
+												Clear
+											</button>
+										)}
+									</div>
+									<ActivityFeed
+										events={activityEvents}
+										className="flex-1 min-h-0"
+									/>
+								</div>
+							</div>
+						)}
+						<div className="flex-1 min-h-0">
+							<ClaudeChatView
+								key={session.paneId}
+								ref={chatRef}
+								paneId={session.paneId}
+								cwd={session.cwd}
+								agentKind={session.agentKind}
+								theme={theme}
+								onStatusChange={(id, status) => {
+									setAgentStatuses((cur) => {
+										if (cur.get(id) === status) return cur;
+										return new Map(cur).set(id, status);
+									});
+								}}
+							/>
+						</div>
 					</section>
 
 					<aside className="min-h-0 min-w-0 bg-surgent-bg">
