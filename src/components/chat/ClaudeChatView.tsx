@@ -10,6 +10,7 @@ import React, {
 import { usePrompts } from "../../hooks/usePrompts.ts";
 import { getAgentDefinition } from "../../lib/agents.ts";
 import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
+import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
 import {
 	type AgentKind,
 	formatElapsedTime,
@@ -110,7 +111,12 @@ function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
 }
 
 function isGroupedToolMessage(msg: ChatMessage): boolean {
-	return msg.role === "tool" && msg.toolName !== "AskUserQuestion";
+	// Edit and AskUserQuestion render separately, not in Tool Activity group
+	return (
+		msg.role === "tool" &&
+		msg.toolName !== "AskUserQuestion" &&
+		msg.toolName !== "Edit"
+	);
 }
 
 function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
@@ -555,6 +561,47 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 		const containerRef = useRef<HTMLDivElement>(null);
 		const fileInputRef = useRef<HTMLInputElement>(null);
 		const currentBtwRef = useRef<string | null>(null);
+
+		// Markdown file preview modal state
+		const [mdPreview, setMdPreview] = useState<{
+			show: boolean;
+			path: string;
+			content: string | null;
+			loading: boolean;
+			error: string | null;
+		}>({ show: false, path: "", content: null, loading: false, error: null });
+
+		const handleMdFileClick = useCallback((filePath: string) => {
+			setMdPreview({
+				show: true,
+				path: filePath,
+				content: null,
+				loading: true,
+				error: null,
+			});
+			// Fetch the file content via websocket
+			wsClient.send({ type: "file:read", path: filePath });
+		}, []);
+
+		// Listen for file read response
+		useEffect(() => {
+			const handleMessage = (msg: Record<string, unknown>) => {
+				if (msg.type === "file:content" && mdPreview.loading) {
+					setMdPreview((prev) => ({
+						...prev,
+						content: msg.content as string,
+						loading: false,
+					}));
+				} else if (msg.type === "file:error" && mdPreview.loading) {
+					setMdPreview((prev) => ({
+						...prev,
+						error: (msg.error as string) || "Failed to read file",
+						loading: false,
+					}));
+				}
+			};
+			return wsClient.onMessage(handleMessage);
+		}, [mdPreview.loading]);
 
 		useEffect(() => {
 			requestAnimationFrame(() => textareaRef.current?.focus());
@@ -1395,66 +1442,42 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			}
 		}
 
-		// Smart scroll anchoring — only auto-scroll if user is near the bottom
-		// Uses sticky logic: once user scrolls up, stay detached until they scroll back to bottom
-		const userScrolledAway = useRef(false);
-		const isAutoScrolling = useRef(false);
-		const lastScrollTop = useRef(0);
+		// Simple scroll anchoring - check if at bottom before each scroll
+		const isAtBottomRef = useRef(true);
 
+		const checkIfAtBottom = useCallback(() => {
+			const el = scrollRef.current;
+			if (!el) return true;
+			const { scrollTop, scrollHeight, clientHeight } = el;
+			return scrollHeight - scrollTop - clientHeight < 100;
+		}, []);
+
+		// Update isAtBottom on user scroll
 		useEffect(() => {
 			const el = scrollRef.current;
 			if (!el) return;
-
 			const handleScroll = () => {
-				// Skip if this scroll was triggered by auto-scroll
-				if (isAutoScrolling.current) return;
-
-				const { scrollTop, scrollHeight, clientHeight } = el;
-				const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-
-				// Detect scroll direction
-				const scrolledUp = scrollTop < lastScrollTop.current;
-				lastScrollTop.current = scrollTop;
-
-				// If user scrolled up, detach from auto-scroll
-				if (scrolledUp && distanceFromBottom > 50) {
-					userScrolledAway.current = true;
-				}
-				// If user scrolled to bottom (within 20px), re-attach
-				else if (distanceFromBottom < 20) {
-					userScrolledAway.current = false;
-				}
+				isAtBottomRef.current = checkIfAtBottom();
 			};
-
 			el.addEventListener("scroll", handleScroll, { passive: true });
 			return () => el.removeEventListener("scroll", handleScroll);
-		}, []);
+		}, [checkIfAtBottom]);
 
-		// Auto-scroll to bottom when messages change (if user hasn't scrolled away)
-		// Only auto-scroll if there's an active streaming message
+		// Auto-scroll only if user was already at bottom
 		useEffect(() => {
+			if (!isAtBottomRef.current) return;
 			const el = scrollRef.current;
-			const hasActiveStream = messages.some((m) => m.isStreaming);
-			if (el && !userScrolledAway.current && hasActiveStream) {
-				isAutoScrolling.current = true;
-				requestAnimationFrame(() => {
-					el.scrollTop = el.scrollHeight;
-					// Reset flag after a short delay to allow the scroll event to fire
-					requestAnimationFrame(() => {
-						isAutoScrolling.current = false;
-					});
-				});
+			if (el) {
+				el.scrollTop = el.scrollHeight;
 			}
 		}, [messages]);
 
-		// Reset scroll lock when user sends a new message (scroll to bottom)
+		// Scroll to bottom when user sends a message
 		const scrollToBottom = useCallback(() => {
 			const el = scrollRef.current;
 			if (el) {
-				userScrolledAway.current = false;
-				requestAnimationFrame(() => {
-					el.scrollTop = el.scrollHeight;
-				});
+				isAtBottomRef.current = true;
+				el.scrollTop = el.scrollHeight;
 			}
 		}, []);
 
@@ -1974,6 +1997,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						handleSendMessage={handleSendMessage}
 						fgDim={fgDim}
 						theme={theme}
+						onMdFileClick={handleMdFileClick}
 					/>
 				</div>
 
@@ -2484,6 +2508,102 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						</div>
 					</div>
 				)}
+
+				{/* Markdown file preview modal */}
+				{mdPreview.show && (
+					<div
+						className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+						onClick={() =>
+							setMdPreview({
+								show: false,
+								path: "",
+								content: null,
+								loading: false,
+								error: null,
+							})
+						}
+					>
+						<div
+							className="relative w-[90%] max-w-2xl max-h-[80%] rounded-lg border overflow-hidden flex flex-col"
+							style={{
+								backgroundColor: theme ? bgColor : "var(--color-surgent-bg)",
+								borderColor: theme
+									? borderColor
+									: "var(--color-surgent-border)",
+							}}
+							onClick={(e) => e.stopPropagation()}
+						>
+							{/* Header */}
+							<div
+								className="flex items-center justify-between px-3 py-2 border-b"
+								style={{
+									borderColor: theme
+										? borderColor
+										: "var(--color-surgent-border)",
+								}}
+							>
+								<span
+									className="text-[11px] font-medium truncate"
+									style={{
+										color: theme ? fgColor : "var(--color-surgent-text)",
+									}}
+								>
+									{mdPreview.path}
+								</span>
+								<button
+									type="button"
+									onClick={() =>
+										setMdPreview({
+											show: false,
+											path: "",
+											content: null,
+											loading: false,
+											error: null,
+										})
+									}
+									className="p-1 rounded hover:bg-white/10 transition-colors"
+								>
+									<IconX
+										className="w-3.5 h-3.5"
+										style={{
+											color: theme ? fgDim : "var(--color-surgent-text-3)",
+										}}
+									/>
+								</button>
+							</div>
+							{/* Content */}
+							<div
+								className="flex-1 overflow-y-auto p-4 text-[12px]"
+								style={{
+									color: theme ? fgColor : "var(--color-surgent-text)",
+								}}
+							>
+								{mdPreview.loading && (
+									<div className="flex items-center justify-center py-8">
+										<span
+											className="text-[10px]"
+											style={{
+												color: theme ? fgDim : "var(--color-surgent-text-3)",
+											}}
+										>
+											Loading...
+										</span>
+									</div>
+								)}
+								{mdPreview.error && (
+									<div className="flex items-center justify-center py-8">
+										<span className="text-[10px] text-surgent-error">
+											{mdPreview.error}
+										</span>
+									</div>
+								)}
+								{mdPreview.content && (
+									<Markdown text={mdPreview.content} theme={bubbleTheme} />
+								)}
+							</div>
+						</div>
+					</div>
+				)}
 			</div>
 		);
 	}
@@ -2507,6 +2627,7 @@ function VirtualizedMessages({
 	handleSendMessage,
 	fgDim,
 	theme,
+	onMdFileClick,
 }: {
 	messages: ChatMessage[];
 	expandedTools: Set<string>;
@@ -2518,6 +2639,7 @@ function VirtualizedMessages({
 	handleSendMessage?: (text: string) => void;
 	fgDim: string;
 	theme?: any;
+	onMdFileClick?: (path: string) => void;
 }) {
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
 
@@ -2554,6 +2676,7 @@ function VirtualizedMessages({
 								onToggle={toggleTool}
 								theme={bubbleTheme}
 								onSendMessage={handleSendMessage}
+								onMdFileClick={onMdFileClick}
 							/>
 							{msg.role === "assistant" &&
 								!msg.isStreaming &&
@@ -2589,6 +2712,7 @@ function VirtualizedMessages({
 			revertCheckpoint={revertCheckpoint}
 			isLoading={isLoading}
 			handleSendMessage={handleSendMessage}
+			onMdFileClick={onMdFileClick}
 		/>
 	);
 }
@@ -2602,6 +2726,7 @@ function VirtualizedLongMessages({
 	revertCheckpoint,
 	isLoading,
 	handleSendMessage,
+	onMdFileClick,
 }: {
 	renderItems: RenderItem[];
 	expandedTools: Set<string>;
@@ -2611,6 +2736,7 @@ function VirtualizedLongMessages({
 	revertCheckpoint: (id: string) => void;
 	isLoading: boolean;
 	handleSendMessage?: (text: string) => void;
+	onMdFileClick?: (path: string) => void;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [scrollTop, setScrollTop] = useState(0);
@@ -2675,6 +2801,7 @@ function VirtualizedLongMessages({
 									onToggle={toggleTool}
 									theme={bubbleTheme}
 									onSendMessage={handleSendMessage}
+									onMdFileClick={onMdFileClick}
 								/>
 								{msg.role === "assistant" &&
 									!msg.isStreaming &&
@@ -2707,12 +2834,14 @@ const Bubble = React.memo(function Bubble({
 	onToggle,
 	theme,
 	onSendMessage,
+	onMdFileClick,
 }: {
 	msg: ChatMessage;
 	collapsed: boolean;
 	onToggle: (id: string) => void;
 	theme?: BubbleTheme;
 	onSendMessage?: (text: string) => void;
+	onMdFileClick?: (path: string) => void;
 }) {
 	if (msg.role === "user") {
 		// Skip rendering user message if it's a slash command (the system "Running /..." message will show instead)
@@ -2846,7 +2975,11 @@ const Bubble = React.memo(function Bubble({
 					style={theme ? { color: theme.fgMuted } : undefined}
 				>
 					{msg.content ? (
-						<Markdown text={msg.content} theme={theme} />
+						<Markdown
+							text={msg.content}
+							theme={theme}
+							onMdFileClick={onMdFileClick}
+						/>
 					) : msg.isStreaming ? (
 						<div className="flex items-center gap-[3px] py-1">
 							<span
@@ -2896,6 +3029,29 @@ const Bubble = React.memo(function Bubble({
 					onSendMessage={onSendMessage}
 				/>
 			);
+		}
+
+		// Edit tool renders as a standalone diff viewer
+		if (msg.toolName === "Edit" && msg.content && !msg.isStreaming) {
+			try {
+				const parsed = JSON.parse(msg.content);
+				if (
+					parsed.file_path &&
+					parsed.old_string !== undefined &&
+					parsed.new_string !== undefined
+				) {
+					return (
+						<MiniDiffViewer
+							oldStr={parsed.old_string}
+							newStr={parsed.new_string}
+							filePath={parsed.file_path}
+							theme={theme}
+						/>
+					);
+				}
+			} catch {
+				// Fall through to normal tool rendering
+			}
 		}
 
 		return (
@@ -2954,7 +3110,11 @@ const Bubble = React.memo(function Bubble({
 			className="group/msg relative w-full min-w-0 break-words text-[12px] leading-[1.6]"
 			style={theme ? { color: theme.fgMuted } : undefined}
 		>
-			<Markdown text={msg.content} theme={theme} />
+			<Markdown
+				text={msg.content}
+				theme={theme}
+				onMdFileClick={onMdFileClick}
+			/>
 			{msg.isStreaming && (
 				<span
 					className="inline-block ml-0.5 h-2.5 w-[1.5px] animate-pulse align-text-bottom"
@@ -3164,111 +3324,121 @@ const ToolActivityGroup = React.memo(function ToolActivityGroup({
 				</div>
 			</div>
 			<div className="overflow-x-auto">
-				<table className="w-full border-collapse text-[10px]">
-					<tbody>
-						{messages.map((msg, index) => {
-							const expanded = expandedTools.has(msg.id);
-							return (
-								<React.Fragment key={msg.id}>
-									<tr
-										className="cursor-pointer"
-										onClick={() => onToggle(msg.id)}
-										style={{
-											backgroundColor: expanded
-												? (theme?.surface ?? "rgba(255,255,255,0.02)")
-												: "transparent",
-											borderBottom:
-												index < messages.length - 1 || expanded
-													? `1px solid ${theme?.border ?? "rgba(255,255,255,0.06)"}`
-													: "none",
-										}}
-									>
-										<td className="w-6 px-2 py-1.5 align-top">
-											<svg
-												aria-hidden="true"
-												width="7"
-												height="7"
-												viewBox="0 0 8 8"
-												fill="none"
-												stroke="currentColor"
-												strokeWidth="1.5"
-												className={`transition-transform ${expanded ? "" : "-rotate-90"}`}
-												style={{
-													color: theme?.fgDim ?? "var(--color-surgent-text-3)",
-												}}
-											>
-												<path d="M2 2.5L4 5.5L6 2.5" />
-											</svg>
-										</td>
-										<td
-											className="px-2 py-1.5 align-top"
-											style={{
-												color: theme?.fg ?? "var(--color-surgent-text)",
-											}}
-										>
-											<div className="font-medium">{msg.toolName}</div>
-										</td>
-										<td
-											className="w-16 px-2 py-1.5 align-top text-right"
+				{/* All tools render in accordion */}
+				{messages.map((msg, index) => {
+					const expanded = expandedTools.has(msg.id);
+					return (
+						<table
+							key={msg.id}
+							className="w-full border-collapse text-[10px]"
+							style={{
+								borderBottom:
+									index < messages.length - 1 || expanded
+										? `1px solid ${theme?.border ?? "rgba(255,255,255,0.06)"}`
+										: "none",
+							}}
+						>
+							<tbody>
+								<tr
+									className="cursor-pointer"
+									onClick={() => onToggle(msg.id)}
+									style={{
+										backgroundColor: expanded
+											? (theme?.surface ?? "rgba(255,255,255,0.02)")
+											: "transparent",
+									}}
+								>
+									<td className="w-6 px-2 py-1.5 align-top">
+										<svg
+											aria-hidden="true"
+											width="7"
+											height="7"
+											viewBox="0 0 8 8"
+											fill="none"
+											stroke="currentColor"
+											strokeWidth="1.5"
+											className={`transition-transform ${expanded ? "" : "-rotate-90"}`}
 											style={{
 												color: theme?.fgDim ?? "var(--color-surgent-text-3)",
 											}}
 										>
-											{msg.isStreaming ? (
+											<path d="M2 2.5L4 5.5L6 2.5" />
+										</svg>
+									</td>
+									<td
+										className="px-2 py-1.5 align-top"
+										style={{
+											color: theme?.fg ?? "var(--color-surgent-text)",
+										}}
+									>
+										<div className="font-medium">{msg.toolName}</div>
+									</td>
+									<td
+										className="w-16 px-2 py-1.5 align-top text-right"
+										style={{
+											color: theme?.fgDim ?? "var(--color-surgent-text-3)",
+										}}
+									>
+										{msg.isStreaming ? (
+											<span
+												className="inline-flex items-center gap-1"
+												style={{
+													color: theme?.cursor ?? "var(--color-surgent-accent)",
+												}}
+											>
 												<span
-													className="inline-flex items-center gap-1"
-													style={{
-														color:
-															theme?.cursor ?? "var(--color-surgent-accent)",
-													}}
-												>
-													<span
-														className="h-1.5 w-1.5 rounded-full animate-pulse"
-														style={{
-															backgroundColor:
-																theme?.cursor ?? "var(--color-surgent-accent)",
-														}}
-													/>
-													Live
-												</span>
-											) : (
-												"Done"
-											)}
-										</td>
-									</tr>
-									{expanded && msg.content && (
-										<tr>
-											<td colSpan={3} className="px-2 pb-2 pt-0">
-												<pre
-													className="mt-1 max-h-32 overflow-auto rounded-lg border px-3 py-2 font-mono text-[9px] leading-relaxed whitespace-pre-wrap break-all"
+													className="h-1.5 w-1.5 rounded-full animate-pulse"
 													style={{
 														backgroundColor:
-															theme?.surface ?? "rgba(255,255,255,0.03)",
-														borderColor:
-															theme?.border ?? "rgba(255,255,255,0.08)",
-														color:
-															theme?.fgDim ?? "var(--color-surgent-text-3)",
+															theme?.cursor ?? "var(--color-surgent-accent)",
 													}}
-												>
-													<ToolOutputHighlight
-														content={msg.content}
-														theme={theme}
-													/>
-												</pre>
-											</td>
-										</tr>
-									)}
-								</React.Fragment>
-							);
-						})}
-					</tbody>
-				</table>
+												/>
+												Live
+											</span>
+										) : (
+											"Done"
+										)}
+									</td>
+								</tr>
+								{expanded && msg.content && (
+									<tr>
+										<td colSpan={3} className="px-2 pb-2 pt-0">
+											<pre
+												className="mt-1 max-h-32 overflow-auto rounded-lg border px-3 py-2 font-mono text-[9px] leading-relaxed whitespace-pre-wrap break-all"
+												style={{
+													backgroundColor:
+														theme?.surface ?? "rgba(255,255,255,0.03)",
+													borderColor:
+														theme?.border ?? "rgba(255,255,255,0.08)",
+													color: theme?.fgDim ?? "var(--color-surgent-text-3)",
+												}}
+											>
+												<ToolOutputHighlight
+													content={msg.content}
+													theme={theme}
+												/>
+											</pre>
+										</td>
+									</tr>
+								)}
+							</tbody>
+						</table>
+					);
+				})}
 			</div>
 		</div>
 	);
 });
 
-function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
+function Markdown({
+	text,
+	theme,
+	onMdFileClick,
+}: {
+	text: string;
+	theme?: BubbleTheme;
+	onMdFileClick?: (path: string) => void;
+}) {
 	const blocks = useMemo(() => parseBlocks(text), [text]);
 	return (
 		<div className="min-w-0 space-y-1 break-words">
@@ -3317,7 +3487,11 @@ function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
 								{b.bullet}
 							</span>
 							<span className="min-w-0">
-								<Inline text={b.content} theme={theme} />
+								<Inline
+									text={b.content}
+									theme={theme}
+									onMdFileClick={onMdFileClick}
+								/>
 							</span>
 						</div>
 					);
@@ -3364,7 +3538,11 @@ function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
 														color: theme?.fg ?? "#e5e5e5",
 													}}
 												>
-													<Inline text={cell} theme={theme} />
+													<Inline
+														text={cell}
+														theme={theme}
+														onMdFileClick={onMdFileClick}
+													/>
 												</td>
 											))}
 										</tr>
@@ -3376,7 +3554,11 @@ function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
 				}
 				return (
 					<p key={blockKey}>
-						<Inline text={b.content} theme={theme} />
+						<Inline
+							text={b.content}
+							theme={theme}
+							onMdFileClick={onMdFileClick}
+						/>
 					</p>
 				);
 			})}
@@ -3789,6 +3971,108 @@ function AskUserQuestionCard({
 	);
 }
 
+// ---------------------------------------------------------------------------
+// Mini diff viewer — inline diff for Edit tool operations with syntax highlighting
+// ---------------------------------------------------------------------------
+
+const SYNTAX_TOKEN_CLASSES: Record<string, string> = {
+	keyword: "text-syntax-keyword",
+	string: "text-syntax-string",
+	comment: "text-syntax-comment",
+	number: "text-syntax-number",
+	punctuation: "text-syntax-punctuation",
+	tag: "text-syntax-tag",
+	attr: "text-syntax-attr",
+	default: "",
+};
+
+function MiniDiffViewer({
+	oldStr,
+	newStr,
+	filePath,
+	theme,
+}: {
+	oldStr: string;
+	newStr: string;
+	filePath: string;
+	theme?: BubbleTheme;
+}) {
+	const fileName = filePath.split("/").pop() || filePath;
+	const ext = filePath.split(".").pop() || "";
+
+	// Split strings into lines for diff display
+	const oldLines = oldStr.split("\n");
+	const newLines = newStr.split("\n");
+
+	// Tokenize lines for syntax highlighting
+	const renderTokenizedLine = (line: string, tokens: Token[]) => {
+		if (!tokens.length) return line || " ";
+		return tokens.map((tok, i) => (
+			<span key={i} className={SYNTAX_TOKEN_CLASSES[tok.type] || ""}>
+				{tok.text}
+			</span>
+		));
+	};
+
+	return (
+		<div
+			className="rounded-lg border overflow-hidden text-[9px] font-mono"
+			style={{
+				backgroundColor: theme?.surface ?? "rgba(255,255,255,0.02)",
+				borderColor: theme?.border ?? "rgba(255,255,255,0.08)",
+			}}
+		>
+			{/* File path header */}
+			<div
+				className="px-2 py-1 text-[8px] truncate"
+				style={{
+					color: theme?.fgDim ?? "var(--color-surgent-text-3)",
+					borderBottom: `1px solid ${theme?.border ?? "rgba(255,255,255,0.06)"}`,
+				}}
+			>
+				{fileName}
+			</div>
+			{/* Diff content */}
+			<div className="max-h-48 overflow-auto">
+				{/* Removed lines */}
+				{oldLines.map((line, i) => {
+					const tokens = tokenizeLine(line, ext);
+					return (
+						<div
+							key={`old-${i}`}
+							className="flex leading-[16px] bg-[rgba(210,80,80,0.13)]"
+						>
+							<span className="shrink-0 w-5 text-right pr-1 select-none text-[rgba(210,80,80,0.6)]">
+								-
+							</span>
+							<span className="flex-1 whitespace-pre pr-2 overflow-hidden">
+								{renderTokenizedLine(line, tokens)}
+							</span>
+						</div>
+					);
+				})}
+				{/* Added lines */}
+				{newLines.map((line, i) => {
+					const tokens = tokenizeLine(line, ext);
+					return (
+						<div
+							key={`new-${i}`}
+							className="flex leading-[16px] bg-[rgba(60,180,110,0.13)]"
+						>
+							<span className="shrink-0 w-5 text-right pr-1 select-none text-[rgba(60,180,110,0.6)]">
+								+
+							</span>
+							<span className="flex-1 whitespace-pre pr-2 overflow-hidden">
+								{renderTokenizedLine(line, tokens)}
+							</span>
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
 function ToolOutputHighlight({
 	content,
 	theme,
@@ -4067,11 +4351,20 @@ function CheckpointMarker({
 	);
 }
 
-function Inline({ text, theme }: { text: string; theme?: BubbleTheme }) {
+function Inline({
+	text,
+	theme,
+	onMdFileClick,
+}: {
+	text: string;
+	theme?: BubbleTheme;
+	onMdFileClick?: (path: string) => void;
+}) {
 	const parts = useMemo(
 		() =>
 			text.split(
-				/(`[^`\n]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)<>]+)/g
+				// Match: inline code, bold, italic, markdown links, URLs with protocol, domain URLs, .md file paths
+				/(`[^`\n]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)<>]+|[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}[^\s)<>]*|[\w./-]+\.md\b)/g
 			),
 		[text]
 	);
@@ -4127,6 +4420,21 @@ function Inline({ text, theme }: { text: string; theme?: BubbleTheme }) {
 							{lm[1]}
 						</a>
 					);
+				// File path ending in .md - open preview modal (check FIRST before URL checks)
+				if (/\.md$/i.test(p) && onMdFileClick) {
+					return (
+						<button
+							key={partKey}
+							type="button"
+							onClick={() => onMdFileClick(p)}
+							className="underline decoration-current/30 hover:decoration-current/60 cursor-pointer"
+							style={linkStyle}
+						>
+							{p}
+						</button>
+					);
+				}
+				// Full URL with protocol
 				if (/^https?:\/\//.test(p))
 					return (
 						<a
@@ -4140,6 +4448,22 @@ function Inline({ text, theme }: { text: string; theme?: BubbleTheme }) {
 							{p}
 						</a>
 					);
+				// Domain URL without protocol (e.g., example.com/path)
+				if (/^[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}/.test(p)) {
+					const href = `https://${p}`;
+					return (
+						<a
+							key={partKey}
+							href={href}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="underline decoration-current/30 hover:decoration-current/60"
+							style={linkStyle}
+						>
+							{p}
+						</a>
+					);
+				}
 				return <React.Fragment key={partKey}>{p}</React.Fragment>;
 			})}
 		</>
