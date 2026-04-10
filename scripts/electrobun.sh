@@ -12,9 +12,11 @@ case "${1:-}" in
 	dev)
 		ROOT="$(pwd)"
 		bun run build:renderer
-		exec bunx concurrently \
+		trap 'kill 0' EXIT INT TERM
+		bunx concurrently --kill-others \
 			"bun --watch scripts/build-renderer.ts" \
-			"TERMINAL_GUI_APP_ROOT=$ROOT $ELECTROBUN dev"
+			"TERMINAL_GUI_APP_ROOT=$ROOT $ELECTROBUN dev" &
+		wait
 		;;
 	*)
 		exec "$ELECTROBUN" "$@"

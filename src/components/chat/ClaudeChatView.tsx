@@ -11,6 +11,7 @@ import { usePrompts } from "../../hooks/usePrompts.ts";
 import { getAgentDefinition } from "../../lib/agents.ts";
 import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
 import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
+import { useShikiSnippet } from "../../hooks/useShikiHighlighter.ts";
 import {
 	type AgentKind,
 	formatElapsedTime,
@@ -82,10 +83,13 @@ interface CheckpointInfo {
 	afterMessageId: string | null;
 }
 
-type RenderItem = { type: "message"; message: ChatMessage };
+type RenderItem =
+	| { type: "message"; message: ChatMessage }
+	| { type: "edit-group"; filePath: string; edits: ChatMessage[] };
 
-const MAX_MESSAGES = 100;
-const MAX_TOTAL_CHARS = 200000;
+const MAX_MESSAGES = 80;
+const MAX_TOTAL_CHARS = 150000;
+const TRIM_CHECK_INTERVAL = 5; // Only check trim every N new messages
 const STORAGE_KEY_PREFIX = "surgent-chat-";
 const SESSION_KEY_PREFIX = "surgent-chat-session-";
 const INPUT_KEY_PREFIX = "surgent-chat-input-";
@@ -96,16 +100,29 @@ function nextId() {
 	return `c${++msgId}-${Date.now().toString(36)}`;
 }
 
+// Quick check - only do expensive char count if message count is high
 function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
-	let trimmed = msgs.length > MAX_MESSAGES ? msgs.slice(-MAX_MESSAGES) : msgs;
+	// Fast path: under message limit, skip expensive char calculation
+	if (msgs.length <= MAX_MESSAGES) return msgs;
 
-	let totalChars = trimmed.reduce((sum, m) => sum + m.content.length, 0);
-	while (totalChars > MAX_TOTAL_CHARS && trimmed.length > 1) {
-		totalChars -= trimmed[0]?.content.length ?? 0;
-		trimmed = trimmed.slice(1);
+	// Over message limit - trim from front
+	let trimmed = msgs.slice(-MAX_MESSAGES);
+
+	// Only check char limit if we have many messages (expensive operation)
+	if (trimmed.length > 50) {
+		let totalChars = trimmed.reduce((sum, m) => sum + m.content.length, 0);
+		while (totalChars > MAX_TOTAL_CHARS && trimmed.length > 1) {
+			totalChars -= trimmed[0]?.content.length ?? 0;
+			trimmed = trimmed.slice(1);
+		}
 	}
 
 	return trimmed;
+}
+
+// Lightweight version - just adds message, no trimming (for streaming)
+function addMessage(msgs: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+	return [...msgs, msg];
 }
 
 // Tools shown in activity bar, not rendered inline (except Edit and AskUserQuestion)
@@ -117,11 +134,94 @@ function isActivityBarTool(msg: ChatMessage): boolean {
 	);
 }
 
+function getEditFilePath(msg: ChatMessage): string | null {
+	if (msg.role !== "tool" || msg.toolName !== "Edit" || !msg.content)
+		return null;
+	try {
+		const parsed = JSON.parse(msg.content);
+		return parsed.file_path || null;
+	} catch {
+		return null;
+	}
+}
+
 function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
-	// Filter out tools that are shown in activity bar, only keep messages to render
-	return messages
-		.filter((msg) => !isActivityBarTool(msg))
-		.map((message) => ({ type: "message" as const, message }));
+	const items: RenderItem[] = [];
+	const filtered = messages.filter((msg) => !isActivityBarTool(msg));
+
+	// First pass: identify edit groups by file path
+	// Track which edit message IDs belong to groups (to skip them later)
+	const editGroups = new Map<
+		number,
+		{ filePath: string; edits: ChatMessage[]; lastIdx: number }
+	>();
+	const skipIndices = new Set<number>();
+
+	for (let i = 0; i < filtered.length; i++) {
+		if (skipIndices.has(i)) continue;
+
+		const msg = filtered[i]!;
+		const filePath = getEditFilePath(msg);
+
+		if (filePath) {
+			const edits: ChatMessage[] = [msg];
+			const editIndices: number[] = [i];
+			let j = i + 1;
+
+			// Look ahead for more edits to the same file (allow other messages between)
+			while (j < filtered.length) {
+				const nextMsg = filtered[j]!;
+				const nextFilePath = getEditFilePath(nextMsg);
+
+				if (nextFilePath === filePath) {
+					// Same file edit - add to group
+					edits.push(nextMsg);
+					editIndices.push(j);
+					j++;
+				} else if (nextMsg.role === "assistant" || nextMsg.role === "user") {
+					// Non-edit message - skip over but keep looking for more edits
+					j++;
+				} else if (nextFilePath && nextFilePath !== filePath) {
+					// Different file edit - stop looking
+					break;
+				} else {
+					j++;
+				}
+			}
+
+			if (edits.length > 1) {
+				// Mark all these indices to be skipped
+				for (const idx of editIndices) {
+					skipIndices.add(idx);
+				}
+				// Store the group at the position of the last edit
+				const lastEditIdx = editIndices[editIndices.length - 1]!;
+				editGroups.set(lastEditIdx, { filePath, edits, lastIdx: lastEditIdx });
+			}
+		}
+	}
+
+	// Second pass: build render items in order
+	for (let i = 0; i < filtered.length; i++) {
+		// Check if there's an edit group that should be rendered at this position
+		const group = editGroups.get(i);
+		if (group) {
+			items.push({
+				type: "edit-group",
+				filePath: group.filePath,
+				edits: group.edits,
+			});
+			continue;
+		}
+
+		// Skip if this index is part of a group (but not the last one)
+		if (skipIndices.has(i)) continue;
+
+		// Normal message
+		items.push({ type: "message", message: filtered[i]! });
+	}
+
+	return items;
 }
 
 function loadMessages(paneId: string): ChatMessage[] {
@@ -1285,16 +1385,14 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					const id = nextId();
 					currentAssistantRef.current = id;
 					setLoadingState((prev) => ({ ...prev, status: "responding" }));
+					// Use addMessage during streaming - no expensive trim
 					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id,
-								role: "assistant",
-								content: block.text || "",
-								isStreaming: true,
-							},
-						])
+						addMessage(prev, {
+							id,
+							role: "assistant",
+							content: block.text || "",
+							isStreaming: true,
+						})
 					);
 				} else if (block?.type === "tool_use") {
 					currentAssistantRef.current = null;
@@ -1304,17 +1402,15 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						...prev,
 						status: `tool:${block.name}`,
 					}));
+					// Use addMessage during streaming - no expensive trim
 					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id,
-								role: "tool",
-								content: "",
-								toolName: block.name,
-								isStreaming: true,
-							},
-						])
+						addMessage(prev, {
+							id,
+							role: "tool",
+							content: "",
+							toolName: block.name,
+							isStreaming: true,
+						})
 					);
 				}
 			} else if (event.type === "content_block_delta") {
@@ -1361,7 +1457,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				}
 			} else if (event.type === "content_block_stop") {
 				setMessages((prev) => {
-					const updated = prev.slice();
+					let updated = prev.slice();
 					let changed = false;
 					if (currentAssistantRef.current) {
 						const targetId = currentAssistantRef.current;
@@ -1385,6 +1481,10 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 					currentAssistantRef.current = null;
 					currentToolRef.current = null;
+					// Trim after message is finalized (not during streaming)
+					if (changed) {
+						updated = trimMessages(updated);
+					}
 					return changed ? updated : prev;
 				});
 			} else if (event.type === "result") {
@@ -1424,44 +1524,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			}
 		}
 
-		// Simple scroll anchoring - check if at bottom before each scroll
-		const isAtBottomRef = useRef(true);
-
-		const checkIfAtBottom = useCallback(() => {
-			const el = scrollRef.current;
-			if (!el) return true;
-			const { scrollTop, scrollHeight, clientHeight } = el;
-			return scrollHeight - scrollTop - clientHeight < 100;
-		}, []);
-
-		// Update isAtBottom on user scroll
-		useEffect(() => {
-			const el = scrollRef.current;
-			if (!el) return;
-			const handleScroll = () => {
-				isAtBottomRef.current = checkIfAtBottom();
-			};
-			el.addEventListener("scroll", handleScroll, { passive: true });
-			return () => el.removeEventListener("scroll", handleScroll);
-		}, [checkIfAtBottom]);
-
-		// Auto-scroll only if user was already at bottom
-		useEffect(() => {
-			if (!isAtBottomRef.current) return;
-			const el = scrollRef.current;
-			if (el) {
-				el.scrollTop = el.scrollHeight;
-			}
-		}, [messages]);
-
-		// Scroll to bottom when user sends a message
-		const scrollToBottom = useCallback(() => {
-			const el = scrollRef.current;
-			if (el) {
-				isAtBottomRef.current = true;
-				el.scrollTop = el.scrollHeight;
-			}
-		}, []);
+		// Removed auto-scroll - was causing lag when scrolling up
 
 		useEffect(() => {
 			const ta = textareaRef.current;
@@ -1720,9 +1783,6 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			setAttachedImages([]);
 			if (textareaRef.current) textareaRef.current.style.height = "36px";
 
-			// Always scroll to bottom when user sends a message
-			scrollToBottom();
-
 			if (isLoading) {
 				queueMessage(fullText, displayText, imagePaths);
 			} else {
@@ -1745,7 +1805,6 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			allCommands,
 			incrementLocalUsage,
 			sendToServer,
-			scrollToBottom,
 			setInput,
 		]);
 
@@ -1968,7 +2027,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					className="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-none"
 					style={theme ? { backgroundColor: bgColor } : undefined}
 				>
-					<VirtualizedMessages
+					<MessageList
 						messages={messages}
 						expandedTools={expandedTools}
 						toggleTool={toggleTool}
@@ -2589,14 +2648,9 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 	}
 );
 
-// Virtualized message list — renders all messages but with smart scroll anchoring
-// Uses pretext for height estimation. For conversations under 200 messages,
-// renders everything (fast enough). For longer ones, only renders visible range.
-const VIRTUALIZE_THRESHOLD = 200;
-const MSG_OVERSCAN = 30;
-const EST_MSG_HEIGHT = 48; // rough estimate per message for virtualization
-
-function VirtualizedMessages({
+// Simple message list - no virtualization to avoid scroll conflicts
+// The parent container handles all scrolling
+function MessageList({
 	messages,
 	expandedTools,
 	toggleTool,
@@ -2623,164 +2677,55 @@ function VirtualizedMessages({
 }) {
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
 
-	// For short conversations, render everything normally
-	if (renderItems.length < VIRTUALIZE_THRESHOLD) {
-		return (
-			<div className="min-w-0 px-3 py-2 space-y-2">
-				{messages.length === 0 && (
-					<p
-						className="pt-8 text-center text-[10px]"
-						style={theme ? { color: fgDim } : undefined}
-					>
-						Ready
-					</p>
-				)}
-				{renderItems.map((item) => {
-					const msg = item.message;
-					return (
-						<React.Fragment key={msg.id}>
-							<Bubble
-								msg={msg}
-								collapsed={!expandedTools.has(msg.id)}
-								onToggle={toggleTool}
-								theme={bubbleTheme}
-								onSendMessage={handleSendMessage}
-								onMdFileClick={onMdFileClick}
-							/>
-							{msg.role === "assistant" &&
-								!msg.isStreaming &&
-								(() => {
-									const cp = checkpoints.find(
-										(c) => c.afterMessageId === msg.id
-									);
-									if (!cp) return null;
-									return (
-										<CheckpointMarker
-											checkpoint={cp}
-											theme={bubbleTheme}
-											onRevert={revertCheckpoint}
-											disabled={isLoading}
-										/>
-									);
-								})()}
-						</React.Fragment>
-					);
-				})}
-			</div>
-		);
-	}
-
-	// For long conversations, virtualize — only render visible + overscan
 	return (
-		<VirtualizedLongMessages
-			renderItems={renderItems}
-			expandedTools={expandedTools}
-			toggleTool={toggleTool}
-			bubbleTheme={bubbleTheme}
-			checkpoints={checkpoints}
-			revertCheckpoint={revertCheckpoint}
-			isLoading={isLoading}
-			handleSendMessage={handleSendMessage}
-			onMdFileClick={onMdFileClick}
-		/>
-	);
-}
-
-function VirtualizedLongMessages({
-	renderItems,
-	expandedTools,
-	toggleTool,
-	bubbleTheme,
-	checkpoints,
-	revertCheckpoint,
-	isLoading,
-	handleSendMessage,
-	onMdFileClick,
-}: {
-	renderItems: RenderItem[];
-	expandedTools: Set<string>;
-	toggleTool: (id: string) => void;
-	bubbleTheme?: BubbleTheme;
-	checkpoints: any[];
-	revertCheckpoint: (id: string) => void;
-	isLoading: boolean;
-	handleSendMessage?: (text: string) => void;
-	onMdFileClick?: (path: string) => void;
-}) {
-	const containerRef = useRef<HTMLDivElement>(null);
-	const [scrollTop, setScrollTop] = useState(0);
-	const [viewHeight, setViewHeight] = useState(600);
-
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		setViewHeight(el.clientHeight);
-		const obs = new ResizeObserver((entries) => {
-			for (const e of entries) setViewHeight(e.contentRect.height);
-		});
-		obs.observe(el);
-		return () => obs.disconnect();
-	}, []);
-
-	const handleScroll = useCallback(() => {
-		const el = containerRef.current;
-		if (el) setScrollTop(el.scrollTop);
-	}, []);
-
-	const totalHeight = renderItems.length * EST_MSG_HEIGHT;
-	const startIdx = Math.max(
-		0,
-		Math.floor(scrollTop / EST_MSG_HEIGHT) - MSG_OVERSCAN
-	);
-	const endIdx = Math.min(
-		renderItems.length,
-		Math.ceil((scrollTop + viewHeight) / EST_MSG_HEIGHT) + MSG_OVERSCAN
-	);
-
-	return (
-		<div
-			ref={containerRef}
-			onScroll={handleScroll}
-			className="min-w-0 px-3 py-2 h-full overflow-y-auto"
-		>
-			<div style={{ height: totalHeight, position: "relative" }}>
-				<div
-					className="space-y-2"
-					style={{ transform: `translateY(${startIdx * EST_MSG_HEIGHT}px)` }}
+		<div className="min-w-0 px-3 py-2 space-y-2">
+			{messages.length === 0 && (
+				<p
+					className="pt-8 text-center text-[10px]"
+					style={theme ? { color: fgDim } : undefined}
 				>
-					{renderItems.slice(startIdx, endIdx).map((item) => {
-						const msg = item.message;
-						return (
-							<React.Fragment key={msg.id}>
-								<Bubble
-									msg={msg}
-									collapsed={!expandedTools.has(msg.id)}
-									onToggle={toggleTool}
-									theme={bubbleTheme}
-									onSendMessage={handleSendMessage}
-									onMdFileClick={onMdFileClick}
-								/>
-								{msg.role === "assistant" &&
-									!msg.isStreaming &&
-									(() => {
-										const cp = checkpoints.find(
-											(c) => c.afterMessageId === msg.id
-										);
-										if (!cp) return null;
-										return (
-											<CheckpointMarker
-												checkpoint={cp}
-												theme={bubbleTheme}
-												onRevert={revertCheckpoint}
-												disabled={isLoading}
-											/>
-										);
-									})()}
-							</React.Fragment>
-						);
-					})}
-				</div>
-			</div>
+					Ready
+				</p>
+			)}
+			{renderItems.map((item, idx) => {
+				if (item.type === "edit-group") {
+					return (
+						<GroupedEditViewer
+							key={`edit-group-${item.filePath}-${idx}`}
+							filePath={item.filePath}
+							edits={item.edits}
+							theme={bubbleTheme}
+						/>
+					);
+				}
+				const msg = item.message;
+				return (
+					<React.Fragment key={msg.id}>
+						<Bubble
+							msg={msg}
+							collapsed={!expandedTools.has(msg.id)}
+							onToggle={toggleTool}
+							theme={bubbleTheme}
+							onSendMessage={handleSendMessage}
+							onMdFileClick={onMdFileClick}
+						/>
+						{msg.role === "assistant" &&
+							!msg.isStreaming &&
+							(() => {
+								const cp = checkpoints.find((c) => c.afterMessageId === msg.id);
+								if (!cp) return null;
+								return (
+									<CheckpointMarker
+										checkpoint={cp}
+										theme={bubbleTheme}
+										onRevert={revertCheckpoint}
+										disabled={isLoading}
+									/>
+								);
+							})()}
+					</React.Fragment>
+				);
+			})}
 		</div>
 	);
 }
@@ -3003,6 +2948,7 @@ const Bubble = React.memo(function Bubble({
 							newStr={parsed.new_string}
 							filePath={parsed.file_path}
 							theme={theme}
+							isStreaming={msg.isStreaming}
 						/>
 					);
 				}
@@ -3239,7 +3185,6 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 	fgDim: string;
 }) {
 	const [isHovered, setIsHovered] = useState(false);
-	const listRef = useRef<HTMLDivElement>(null);
 
 	// Extract tool activity from messages
 	const toolActivities = useMemo(() => {
@@ -3290,16 +3235,15 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 		return activities;
 	}, [messages]);
 
-	// Auto-scroll to bottom when expanded
-	useEffect(() => {
-		if (isHovered && listRef.current) {
-			listRef.current.scrollTop = listRef.current.scrollHeight;
-		}
-	}, [toolActivities.length, isHovered]);
-
 	if (!isLoading) return null;
 
+	// If we have tool activities from messages, use those.
+	// Otherwise, derive activity from the current status (helps with timing before tool message arrives)
 	const latestActivity = toolActivities[toolActivities.length - 1];
+	const statusToolName = status?.startsWith("tool:") ? status.slice(5) : null;
+
+	// Show either tool activities or status-derived activity
+	const hasActivity = toolActivities.length > 0 || statusToolName;
 
 	const getToolIcon = (toolName: string) => {
 		const baseClass = "w-3 h-3 shrink-0";
@@ -3318,6 +3262,7 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 					</svg>
 				);
 			case "edit":
+			case "patch": // Codex patch tool
 				return (
 					<svg
 						className={baseClass}
@@ -3346,6 +3291,7 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 					</svg>
 				);
 			case "bash":
+			case "exec": // Codex exec tool
 				return (
 					<svg
 						className={baseClass}
@@ -3372,6 +3318,22 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 						<line x1="21" y1="21" x2="16.65" y2="16.65" />
 					</svg>
 				);
+			case "web_search": // Codex web search
+			case "websearch":
+			case "webfetch":
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<circle cx="12" cy="12" r="10" />
+						<line x1="2" y1="12" x2="22" y2="12" />
+						<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+					</svg>
+				);
 			default:
 				return (
 					<svg
@@ -3387,61 +3349,62 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 		}
 	};
 
+	// Determine the display name and count
+	const displayToolName = latestActivity?.toolName ?? statusToolName;
+	const displaySummary = latestActivity?.summary ?? statusToolName;
+	const activityCount = toolActivities.length;
+
 	return (
-		<div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 bg-surgent-surface-2">
+		<div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 bg-surgent-bg border-t border-surgent-border">
 			{/* Left side: Activity pill with hover dropdown */}
-			{toolActivities.length > 0 ? (
+			{hasActivity ? (
 				<div
 					className="relative"
 					onMouseEnter={() => setIsHovered(true)}
 					onMouseLeave={() => setIsHovered(false)}
 				>
 					{/* The pill */}
-					<div className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-xs font-medium cursor-default bg-white/[0.08] text-white/80 hover:bg-white/[0.12] transition-all">
-						{latestActivity && (
-							<span className="text-white/50">
-								{getToolIcon(latestActivity.toolName)}
+					<div className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-xs font-medium cursor-default bg-surgent-surface-2 text-surgent-text-2 hover:bg-surgent-surface-3 transition-all border border-surgent-border">
+						{displayToolName && (
+							<span className="text-surgent-text-3">
+								{getToolIcon(displayToolName)}
 							</span>
 						)}
 						<span className="max-w-[150px] truncate">
-							{latestActivity?.summary || "Working..."}
+							{displaySummary || "Working..."}
 						</span>
-						{toolActivities.length > 1 && (
-							<span className="text-[9px] tabular-nums text-white/40">
-								+{toolActivities.length - 1}
+						{activityCount > 1 && (
+							<span className="text-[9px] tabular-nums text-surgent-text-3">
+								+{activityCount - 1}
 							</span>
 						)}
 					</div>
 
-					{/* Dropdown (appears above) */}
-					{isHovered && (
-						<div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 min-w-[240px] max-w-[320px] rounded-lg overflow-hidden bg-surgent-surface-2 shadow-lg border border-white/[0.08]">
-							<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-white/[0.06] text-white/50">
+					{/* Dropdown (appears above) - only show if we have tool activities */}
+					{isHovered && activityCount > 0 && (
+						<div className="absolute bottom-full left-0 mb-1 min-w-[240px] max-w-[320px] rounded-lg overflow-hidden bg-surgent-surface shadow-lg border border-surgent-border">
+							<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-surgent-border text-surgent-text-3">
 								<span>Activity</span>
-								<span className="tabular-nums">{toolActivities.length}</span>
+								<span className="tabular-nums">{activityCount}</span>
 							</div>
-							<div
-								ref={listRef}
-								className="overflow-y-auto"
-								style={{ maxHeight: "200px" }}
-							>
+							<div className="overflow-y-auto" style={{ maxHeight: "200px" }}>
 								{toolActivities.map((activity, idx) => (
 									<div
 										key={activity.id}
 										className={`flex items-center gap-2 px-2.5 py-1.5 text-[10px] ${
 											idx < toolActivities.length - 1
-												? "border-b border-white/[0.04]"
+												? "border-b border-surgent-border/50"
 												: ""
 										}`}
 									>
-										<span className="shrink-0 text-white/40">
+										<span className="shrink-0 text-surgent-text-3">
 											{getToolIcon(activity.toolName)}
 										</span>
-										<span className="flex-1 truncate text-white/70">
+										<span className="flex-1 truncate text-surgent-text-2">
 											{activity.summary}
 										</span>
 										{activity.isStreaming && (
-											<span className="h-1.5 w-1.5 rounded-full shrink-0 bg-white/40" />
+											<span className="h-1.5 w-1.5 rounded-full shrink-0 bg-surgent-text-3" />
 										)}
 									</div>
 								))}
@@ -3451,17 +3414,20 @@ const ChatStatusBar = React.memo(function ChatStatusBar({
 				</div>
 			) : (
 				<div className="flex items-center gap-2">
-					<span className="h-1.5 w-1.5 rounded-full animate-pulse bg-white/40" />
-					<span className="text-[10px] text-white/60">Working...</span>
+					<span className="h-1.5 w-1.5 rounded-full animate-pulse bg-surgent-text-3" />
+					<span className="text-[10px] text-surgent-text-3">Working...</span>
 				</div>
 			)}
 
-			{/* Right side: Stop button */}
+			{/* Right side: Stop button with icon */}
 			<button
 				type="button"
 				onClick={onStop}
-				className="shrink-0 px-2 py-0.5 rounded text-[10px] font-medium transition-all bg-white/[0.08] text-white/60 hover:bg-white/[0.12] hover:text-white/80"
+				className="shrink-0 flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-medium transition-all bg-surgent-surface-2 text-surgent-text-2 hover:bg-surgent-surface-3 border border-surgent-border"
 			>
+				<svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+					<rect x="6" y="6" width="12" height="12" rx="1" />
+				</svg>
 				Stop
 			</button>
 		</div>
@@ -4176,36 +4142,54 @@ function MiniDiffViewer({
 	newStr,
 	filePath,
 	theme,
+	isStreaming,
 }: {
 	oldStr: string;
 	newStr: string;
 	filePath: string;
 	theme?: BubbleTheme;
+	isStreaming?: boolean;
 }) {
 	const fileName = filePath.split("/").pop() || filePath;
-	const ext = filePath.split(".").pop() || "";
 
 	// Compute hunks with minimal context (just 1 line)
-	const hunks = useMemo(
-		() => computeDiffHunks(oldStr, newStr, 1),
-		[oldStr, newStr]
-	);
+	const { hunks, stats, totalChanges, allLines } = useMemo(() => {
+		const computedHunks = computeDiffHunks(oldStr, newStr, 1);
+		let added = 0;
+		let removed = 0;
+		const lines: string[] = [];
+		for (const hunk of computedHunks) {
+			for (const line of hunk) {
+				if (line.type === "added") added++;
+				else if (line.type === "removed") removed++;
+				// Collect all lines for highlighting
+				if (line.type !== "context" && line.text.trim() !== "") {
+					lines.push(line.text);
+				}
+			}
+		}
+		return {
+			hunks: computedHunks,
+			stats: { added, removed },
+			totalChanges: added + removed,
+			allLines: lines,
+		};
+	}, [oldStr, newStr]);
 
-	// Tokenize lines for syntax highlighting
-	const renderTokenizedLine = (line: string, tokens: Token[]) => {
-		if (!tokens.length) return line || " ";
-		return tokens.map((tok, i) => (
-			<span key={i} className={SYNTAX_TOKEN_CLASSES[tok.type] || ""}>
-				{tok.text}
-			</span>
-		));
-	};
+	// Use Shiki for syntax highlighting
+	const { highlighted, isReady } = useShikiSnippet(allLines, filePath, true);
+
+	// Auto-expand for small diffs (3 lines or less), collapse for larger ones
+	const [isExpanded, setIsExpanded] = useState(totalChanges <= 3);
 
 	// Colors
-	const removedBg = "rgba(248,81,73,0.15)";
-	const removedBorder = "rgba(248,81,73,0.4)";
-	const addedBg = "rgba(46,160,67,0.15)";
-	const addedBorder = "rgba(46,160,67,0.4)";
+	const removedBg = "rgba(248,81,73,0.12)";
+	const removedBorder = "rgba(248,81,73,0.5)";
+	const addedBg = "rgba(46,160,67,0.12)";
+	const addedBorder = "rgba(46,160,67,0.5)";
+
+	// Track line index for highlighting lookup
+	let globalLineIdx = 0;
 
 	return (
 		<div
@@ -4215,17 +4199,299 @@ function MiniDiffViewer({
 				borderColor: theme?.border ?? "var(--color-surgent-border)",
 			}}
 		>
-			{/* File path header */}
-			<div
-				className="flex items-center gap-2 px-2.5 py-1.5 text-[10px] font-medium"
+			{/* Compact header - clickable to expand */}
+			<button
+				type="button"
+				onClick={() => setIsExpanded(!isExpanded)}
+				className="w-full flex items-center gap-1.5 px-2 py-1 text-[9px] font-medium text-left hover:opacity-80 transition-all"
 				style={{
 					color: theme?.fg ?? "var(--color-surgent-text-2)",
 					backgroundColor: theme?.bg ?? "var(--color-surgent-surface-2)",
-					borderBottom: `1px solid ${theme?.border ?? "var(--color-surgent-border)"}`,
+					borderBottom: isExpanded
+						? `1px solid ${theme?.border ?? "var(--color-surgent-border)"}`
+						: "none",
 				}}
 			>
+				{/* Chevron */}
 				<svg
-					className="w-3 h-3 opacity-50"
+					className={`w-2.5 h-2.5 opacity-40 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2"
+				>
+					<polyline points="9 18 15 12 9 6" />
+				</svg>
+				{/* File icon or streaming indicator */}
+				{isStreaming ? (
+					<span className="w-2 h-2 rounded-full bg-current opacity-50 animate-pulse" />
+				) : (
+					<svg
+						className="w-2.5 h-2.5 opacity-40"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+						<polyline points="14 2 14 8 20 8" />
+					</svg>
+				)}
+				<span className="flex-1 truncate opacity-80">{fileName}</span>
+				{/* Stats */}
+				<span className="flex items-center gap-1 text-[8px]">
+					{stats.added > 0 && (
+						<span style={{ color: "rgba(46,160,67,0.8)" }}>+{stats.added}</span>
+					)}
+					{stats.removed > 0 && (
+						<span style={{ color: "rgba(248,81,73,0.8)" }}>
+							−{stats.removed}
+						</span>
+					)}
+				</span>
+			</button>
+			{/* Diff content - collapsible */}
+			{isExpanded && (
+				<div className="max-h-60 overflow-auto">
+					{hunks.map((hunk, hunkIdx) => {
+						// Reset line counter for each render
+						let hunkLineIdx = globalLineIdx;
+
+						return (
+							<div key={hunkIdx}>
+								{/* Subtle hunk separator - just a thin line */}
+								{hunkIdx > 0 && (
+									<div
+										className="h-px my-0.5"
+										style={{
+											backgroundColor:
+												theme?.border ?? "var(--color-surgent-border)",
+											opacity: 0.3,
+										}}
+									/>
+								)}
+								{/* Hunk lines - skip context lines and empty lines */}
+								{hunk
+									.filter(
+										(line) => line.type !== "context" && line.text.trim() !== ""
+									)
+									.map((line, lineIdx) => {
+										const currentLineIdx = hunkLineIdx++;
+										const highlightedHtml = highlighted.get(currentLineIdx);
+										const isRemoved = line.type === "removed";
+										const isAdded = line.type === "added";
+
+										// Update global counter
+										if (
+											hunkIdx === hunks.length - 1 &&
+											lineIdx ===
+												hunk.filter(
+													(l) => l.type !== "context" && l.text.trim() !== ""
+												).length -
+													1
+										) {
+											globalLineIdx = currentLineIdx + 1;
+										}
+
+										return (
+											<div
+												key={`${hunkIdx}-${lineIdx}`}
+												className="flex leading-[12px]"
+												style={{
+													backgroundColor: isRemoved
+														? removedBg
+														: isAdded
+															? addedBg
+															: "transparent",
+													borderLeft: `2px solid ${isRemoved ? removedBorder : isAdded ? addedBorder : "transparent"}`,
+												}}
+											>
+												<span
+													className="shrink-0 w-4 text-center select-none text-[8px]"
+													style={{
+														color: isRemoved
+															? "rgba(248,81,73,0.7)"
+															: "rgba(46,160,67,0.7)",
+													}}
+												>
+													{isRemoved ? "−" : "+"}
+												</span>
+												<span
+													className="flex-1 whitespace-pre pr-1 overflow-hidden text-[8px] shiki-line"
+													style={{
+														color: theme?.fg ?? "var(--color-surgent-text)",
+													}}
+													dangerouslySetInnerHTML={
+														isReady && highlightedHtml
+															? { __html: highlightedHtml }
+															: undefined
+													}
+												>
+													{!(isReady && highlightedHtml)
+														? line.text || " "
+														: undefined}
+												</span>
+											</div>
+										);
+									})}
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// Applies a series of edits to build the final content, then diffs against original
+function applyEditsSequentially(
+	edits: { old_string: string; new_string: string }[]
+): { originalText: string; finalText: string } | null {
+	if (edits.length === 0) return null;
+
+	// The first edit's old_string is our starting point
+	// We'll track what the "original" would look like and what the "final" is
+	let currentText = edits[0]!.old_string;
+	const originalText = currentText;
+
+	for (const edit of edits) {
+		// Apply this edit
+		const idx = currentText.indexOf(edit.old_string);
+		if (idx !== -1) {
+			currentText =
+				currentText.slice(0, idx) +
+				edit.new_string +
+				currentText.slice(idx + edit.old_string.length);
+		} else {
+			// old_string not found - this edit might be based on a different state
+			// Try to find partial match or just append the new content
+			currentText = edit.new_string;
+		}
+	}
+
+	return { originalText, finalText: currentText };
+}
+
+function GroupedEditViewer({
+	filePath,
+	edits,
+	theme,
+}: {
+	filePath: string;
+	edits: ChatMessage[];
+	theme?: BubbleTheme;
+}) {
+	const fileName = filePath.split("/").pop() || filePath;
+	const editCount = edits.length;
+
+	// Parse all edits and compute combined diff
+	const { hunks, stats, totalChanges, allLines } = useMemo(() => {
+		const parsedEdits: { old_string: string; new_string: string }[] = [];
+
+		for (const edit of edits) {
+			if (!edit.content) continue;
+			try {
+				const parsed = JSON.parse(edit.content);
+				if (
+					parsed.old_string !== undefined &&
+					parsed.new_string !== undefined
+				) {
+					parsedEdits.push({
+						old_string: parsed.old_string,
+						new_string: parsed.new_string,
+					});
+				}
+			} catch {}
+		}
+
+		const result = applyEditsSequentially(parsedEdits);
+		if (!result) {
+			return { hunks: [], stats: { added: 0, removed: 0 }, allLines: [] };
+		}
+
+		const computedHunks = computeDiffHunks(
+			result.originalText,
+			result.finalText,
+			1
+		);
+
+		// Count added/removed lines and collect lines for highlighting
+		let added = 0;
+		let removed = 0;
+		const lines: string[] = [];
+		for (const hunk of computedHunks) {
+			for (const line of hunk) {
+				if (line.type === "added") added++;
+				else if (line.type === "removed") removed++;
+				// Collect all lines for highlighting
+				if (line.type !== "context" && line.text.trim() !== "") {
+					lines.push(line.text);
+				}
+			}
+		}
+
+		const total = added + removed;
+		return {
+			hunks: computedHunks,
+			stats: { added, removed },
+			totalChanges: total,
+			allLines: lines,
+		};
+	}, [edits]);
+
+	// Use Shiki for syntax highlighting
+	const { highlighted, isReady } = useShikiSnippet(allLines, filePath, true);
+
+	// Auto-expand for small diffs (4 lines or less), collapse for larger ones
+	const [isExpanded, setIsExpanded] = useState(() => (totalChanges ?? 0) <= 4);
+
+	// Colors
+	const removedBg = "rgba(248,81,73,0.12)";
+	const removedBorder = "rgba(248,81,73,0.5)";
+	const addedBg = "rgba(46,160,67,0.12)";
+	const addedBorder = "rgba(46,160,67,0.5)";
+
+	if (hunks.length === 0) {
+		return null;
+	}
+
+	// Track line index for highlighting lookup
+	let globalLineIdx = 0;
+
+	return (
+		<div
+			className="rounded-lg border overflow-hidden text-[10px] font-mono"
+			style={{
+				backgroundColor: theme?.surface ?? "var(--color-surgent-surface)",
+				borderColor: theme?.border ?? "var(--color-surgent-border)",
+			}}
+		>
+			{/* Compact header - clickable to expand */}
+			<button
+				type="button"
+				onClick={() => setIsExpanded(!isExpanded)}
+				className="w-full flex items-center gap-1.5 px-2 py-1 text-[9px] font-medium text-left hover:opacity-80 transition-all"
+				style={{
+					color: theme?.fg ?? "var(--color-surgent-text-2)",
+					backgroundColor: theme?.bg ?? "var(--color-surgent-surface-2)",
+					borderBottom: isExpanded
+						? `1px solid ${theme?.border ?? "var(--color-surgent-border)"}`
+						: "none",
+				}}
+			>
+				{/* Chevron */}
+				<svg
+					className={`w-2.5 h-2.5 opacity-40 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2"
+				>
+					<polyline points="9 18 15 12 9 6" />
+				</svg>
+				{/* File icon */}
+				<svg
+					className="w-2.5 h-2.5 opacity-40"
 					viewBox="0 0 24 24"
 					fill="none"
 					stroke="currentColor"
@@ -4234,70 +4500,117 @@ function MiniDiffViewer({
 					<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
 					<polyline points="14 2 14 8 20 8" />
 				</svg>
-				{fileName}
-			</div>
-			{/* Diff content with hunks */}
-			<div className="max-h-60 overflow-auto">
-				{hunks.map((hunk, hunkIdx) => (
-					<div key={hunkIdx}>
-						{/* Hunk separator (except first) */}
-						{hunkIdx > 0 && (
-							<div
-								className="px-2.5 py-1 text-[9px] select-none text-center"
-								style={{
-									color: theme?.fgDim ?? "var(--color-surgent-text-3)",
-									backgroundColor:
-										theme?.surface ?? "var(--color-surgent-surface-2)",
-								}}
-							>
-								•••
-							</div>
-						)}
-						{/* Hunk lines - skip context lines, only show changes */}
-						{hunk
-							.filter((line) => line.type !== "context")
-							.map((line, lineIdx) => {
-								const tokens = tokenizeLine(line.text, ext);
-								const isRemoved = line.type === "removed";
-								const isAdded = line.type === "added";
+				<span className="flex-1 truncate opacity-80">{fileName}</span>
+				{/* Stats */}
+				<span className="flex items-center gap-1 text-[8px]">
+					{stats.added > 0 && (
+						<span style={{ color: "rgba(46,160,67,0.8)" }}>+{stats.added}</span>
+					)}
+					{stats.removed > 0 && (
+						<span style={{ color: "rgba(248,81,73,0.8)" }}>
+							−{stats.removed}
+						</span>
+					)}
+				</span>
+				<span
+					className="text-[8px] px-1 py-px rounded opacity-60"
+					style={{
+						backgroundColor: theme?.surface ?? "var(--color-surgent-surface)",
+						color: theme?.fgDim ?? "var(--color-surgent-text-3)",
+					}}
+				>
+					{editCount}×
+				</span>
+			</button>
+			{/* Diff content - collapsible */}
+			{isExpanded && (
+				<div className="max-h-60 overflow-auto">
+					{hunks.map((hunk, hunkIdx) => {
+						// Reset line counter for each render
+						let hunkLineIdx = globalLineIdx;
 
-								return (
+						return (
+							<div key={hunkIdx}>
+								{/* Subtle hunk separator - just a thin line */}
+								{hunkIdx > 0 && (
 									<div
-										key={`${hunkIdx}-${lineIdx}`}
-										className="flex leading-[18px]"
+										className="h-px my-0.5"
 										style={{
-											backgroundColor: isRemoved
-												? removedBg
-												: isAdded
-													? addedBg
-													: "transparent",
-											borderLeft: `3px solid ${isRemoved ? removedBorder : isAdded ? addedBorder : "transparent"}`,
+											backgroundColor:
+												theme?.border ?? "var(--color-surgent-border)",
+											opacity: 0.3,
 										}}
-									>
-										<span
-											className="shrink-0 w-6 text-center select-none font-bold"
-											style={{
-												color: isRemoved
-													? "rgba(248,81,73,0.8)"
-													: "rgba(46,160,67,0.8)",
-											}}
-										>
-											{isRemoved ? "−" : "+"}
-										</span>
-										<span
-											className="flex-1 whitespace-pre pr-2 overflow-hidden"
-											style={{
-												color: theme?.fg ?? "var(--color-surgent-text)",
-											}}
-										>
-											{renderTokenizedLine(line.text, tokens)}
-										</span>
-									</div>
-								);
-							})}
-					</div>
-				))}
-			</div>
+									/>
+								)}
+								{/* Hunk lines - skip context lines and empty lines */}
+								{hunk
+									.filter(
+										(line) => line.type !== "context" && line.text.trim() !== ""
+									)
+									.map((line, lineIdx) => {
+										const currentLineIdx = hunkLineIdx++;
+										const highlightedHtml = highlighted.get(currentLineIdx);
+										const isRemoved = line.type === "removed";
+										const isAdded = line.type === "added";
+
+										// Update global counter
+										if (
+											hunkIdx === hunks.length - 1 &&
+											lineIdx ===
+												hunk.filter(
+													(l) => l.type !== "context" && l.text.trim() !== ""
+												).length -
+													1
+										) {
+											globalLineIdx = currentLineIdx + 1;
+										}
+
+										return (
+											<div
+												key={`${hunkIdx}-${lineIdx}`}
+												className="flex leading-[12px]"
+												style={{
+													backgroundColor: isRemoved
+														? removedBg
+														: isAdded
+															? addedBg
+															: "transparent",
+													borderLeft: `2px solid ${isRemoved ? removedBorder : isAdded ? addedBorder : "transparent"}`,
+												}}
+											>
+												<span
+													className="shrink-0 w-4 text-center select-none text-[8px]"
+													style={{
+														color: isRemoved
+															? "rgba(248,81,73,0.7)"
+															: "rgba(46,160,67,0.7)",
+													}}
+												>
+													{isRemoved ? "−" : "+"}
+												</span>
+												<span
+													className="flex-1 whitespace-pre pr-1 overflow-hidden text-[8px] shiki-line"
+													style={{
+														color: theme?.fg ?? "var(--color-surgent-text)",
+													}}
+													dangerouslySetInnerHTML={
+														isReady && highlightedHtml
+															? { __html: highlightedHtml }
+															: undefined
+													}
+												>
+													{!(isReady && highlightedHtml)
+														? line.text || " "
+														: undefined}
+												</span>
+											</div>
+										);
+									})}
+							</div>
+						);
+					})}
+				</div>
+			)}
 		</div>
 	);
 }

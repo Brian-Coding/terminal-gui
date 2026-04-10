@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownPreview } from "../../components/MarkdownPreview.tsx";
 import type { DiffLine, HunkDiff } from "../../hooks/useGitDiff.ts";
+import { useShikiHighlighter } from "../../hooks/useShikiHighlighter.ts";
 import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
 
 export type DiffViewMode = "split" | "stacked" | "hunks";
@@ -35,22 +36,38 @@ const OVERSCAN = 15;
 const DiffRow = memo(function DiffRow({
 	line,
 	tokens,
+	highlightedHtml,
+	onCopy,
+	isHighlighted,
 }: {
 	line: DiffLine;
 	ext: string;
 	tokens: Token[] | null;
+	highlightedHtml?: string;
+	onCopy?: (content: string) => void;
+	isHighlighted?: boolean;
 }) {
+	const [isHovered, setIsHovered] = useState(false);
+
 	if (line.type === "hunk") {
-		return <div className="diff-hatch border-y border-surgent-border/20 h-2" />;
+		return (
+			<div
+				className="h-1.5 my-0.5"
+				style={{
+					backgroundColor: "var(--color-surgent-border)",
+					opacity: 0.15,
+				}}
+			/>
+		);
 	}
 
 	if (line.type === "spacer") {
 		return (
 			<div
-				className="h-[18px] bg-surgent-surface/30"
+				className="h-[18px] bg-surgent-surface/20"
 				style={{
 					backgroundImage:
-						"repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(255,255,255,0.04) 6px, rgba(255,255,255,0.04) 7px)",
+						"repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(255,255,255,0.02) 8px, rgba(255,255,255,0.02) 9px)",
 				}}
 			/>
 		);
@@ -58,16 +75,60 @@ const DiffRow = memo(function DiffRow({
 
 	const isAdd = line.type === "add";
 	const isRemove = line.type === "remove";
+	const isChanged = isAdd || isRemove;
+
+	// Calculate background color with hover/highlight states
+	const getBgColor = () => {
+		if (isHighlighted) {
+			return isAdd
+				? "rgba(60,180,110,0.25)"
+				: isRemove
+					? "rgba(210,80,80,0.25)"
+					: "rgba(255,255,255,0.08)";
+		}
+		if (isHovered && isChanged) {
+			return isAdd ? "rgba(60,180,110,0.2)" : "rgba(210,80,80,0.2)";
+		}
+		return isAdd
+			? "rgba(60,180,110,0.13)"
+			: isRemove
+				? "rgba(210,80,80,0.13)"
+				: "transparent";
+	};
+
+	const handleCopy = (e: React.MouseEvent) => {
+		e.stopPropagation();
+		if (onCopy && line.content) {
+			onCopy(line.content);
+		}
+	};
+
+	// Render content with Shiki or fallback to basic tokens
+	const renderContent = () => {
+		if (highlightedHtml) {
+			return (
+				<span
+					dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+					className="shiki-line"
+				/>
+			);
+		}
+		if (tokens) {
+			return tokens.map((tok, i) => (
+				<span key={i} className={TOKEN_CLASSES[tok.type]}>
+					{tok.text}
+				</span>
+			));
+		}
+		return line.content;
+	};
 
 	return (
 		<div
-			className={`flex w-max min-w-full h-[18px] leading-[18px] ${
-				isAdd
-					? "bg-[rgba(60,180,110,0.13)]"
-					: isRemove
-						? "bg-[rgba(210,80,80,0.13)]"
-						: ""
-			}`}
+			className="group relative flex w-max min-w-full h-[18px] leading-[18px]"
+			style={{ backgroundColor: getBgColor() }}
+			onMouseEnter={() => setIsHovered(true)}
+			onMouseLeave={() => setIsHovered(false)}
 		>
 			<span
 				className={`shrink-0 w-10 text-right pr-1 text-[8px] font-mono select-none ${
@@ -91,15 +152,35 @@ const DiffRow = memo(function DiffRow({
 			>
 				{isAdd ? "+" : isRemove ? "-" : ""}
 			</span>
-			<span className="flex-1 min-w-max text-[10px] font-mono whitespace-pre text-surgent-text pr-3 pl-1">
-				{tokens
-					? tokens.map((tok, i) => (
-							<span key={i} className={TOKEN_CLASSES[tok.type]}>
-								{tok.text}
-							</span>
-						))
-					: line.content}
+			<span
+				className="flex-1 min-w-max text-[10px] font-mono whitespace-pre pr-3 pl-1"
+				style={{
+					color: highlightedHtml ? undefined : "var(--color-surgent-text)",
+				}}
+			>
+				{renderContent()}
 			</span>
+			{/* Copy button on hover */}
+			{isHovered && line.content && onCopy && (
+				<button
+					type="button"
+					onClick={handleCopy}
+					className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-50 hover:opacity-100 transition-opacity bg-surgent-surface-2"
+					title="Copy line"
+				>
+					<svg
+						className="w-2.5 h-2.5"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+						style={{ color: "var(--color-surgent-text-2)" }}
+					>
+						<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+						<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+					</svg>
+				</button>
+			)}
 		</div>
 	);
 });
@@ -133,6 +214,10 @@ function VirtualPanel({
 	disableTokenize,
 	showMinimap: _showMinimap = false,
 	externalScrollTop,
+	filePath,
+	onCopyLine,
+	highlightedChangeIdx,
+	changeLineMap,
 }: {
 	lines: DiffLine[];
 	ext: string;
@@ -141,6 +226,10 @@ function VirtualPanel({
 	disableTokenize: boolean;
 	showMinimap?: boolean;
 	externalScrollTop?: number;
+	filePath?: string;
+	onCopyLine?: (content: string) => void;
+	highlightedChangeIdx?: number;
+	changeLineMap?: Map<number, number>;
 }) {
 	const [scrollTop, setScrollTop] = useState(0);
 	const [viewH, setViewH] = useState(600);
@@ -188,6 +277,17 @@ function VirtualPanel({
 		Math.ceil((scrollTop + viewH) / LINE_H) + OVERSCAN
 	);
 
+	// Extract line contents for Shiki
+	const lineContents = useMemo(() => lines.map((l) => l.content), [lines]);
+
+	// Use Shiki highlighter for visible lines
+	const { getHighlightedLine, isReady: shikiReady } = useShikiHighlighter({
+		filePath: filePath ?? `file.${ext}`,
+		lines: lineContents,
+		visibleRange: [start, end],
+		enabled: !disableTokenize && !!filePath,
+	});
+
 	const scrollToLine = useCallback(
 		(lineIndex: number) => {
 			if (!scrollRef.current) return;
@@ -197,21 +297,50 @@ function VirtualPanel({
 	);
 
 	const visibleRows = useMemo(() => {
-		const rows: { line: DiffLine; tokens: Token[] | null; key: number }[] = [];
+		const rows: {
+			line: DiffLine;
+			tokens: Token[] | null;
+			highlightedHtml?: string;
+			key: number;
+			isHighlighted: boolean;
+		}[] = [];
 		for (let i = start; i < end; i++) {
 			const line = lines[i];
 			if (!line) continue;
+
+			const changeIdx = changeLineMap?.get(i);
+			const isHighlighted =
+				highlightedChangeIdx !== undefined &&
+				changeIdx === highlightedChangeIdx;
+
+			// Use Shiki if ready, otherwise fall back to basic tokens
+			const useShiki = shikiReady && !disableTokenize && filePath;
+			const highlightedHtml = useShiki ? getHighlightedLine(i) : undefined;
+
 			rows.push({
 				line,
 				tokens:
-					line.type === "spacer" || line.type === "hunk"
+					line.type === "spacer" || line.type === "hunk" || useShiki
 						? null
 						: getTokens(line.content, ext, disableTokenize),
+				highlightedHtml,
 				key: i,
+				isHighlighted,
 			});
 		}
 		return rows;
-	}, [lines, start, end, ext, disableTokenize]);
+	}, [
+		lines,
+		start,
+		end,
+		ext,
+		disableTokenize,
+		shikiReady,
+		getHighlightedLine,
+		filePath,
+		changeLineMap,
+		highlightedChangeIdx,
+	]);
 
 	const minimapSegments = useMemo(() => {
 		if (!_showMinimap || lines.length === 0 || lines.length >= 3000)
@@ -233,9 +362,19 @@ function VirtualPanel({
 							willChange: "transform",
 						}}
 					>
-						{visibleRows.map(({ line, tokens, key }) => (
-							<DiffRow key={key} line={line} ext={ext} tokens={tokens} />
-						))}
+						{visibleRows.map(
+							({ line, tokens, highlightedHtml, key, isHighlighted }) => (
+								<DiffRow
+									key={key}
+									line={line}
+									ext={ext}
+									tokens={tokens}
+									highlightedHtml={highlightedHtml}
+									onCopy={onCopyLine}
+									isHighlighted={isHighlighted}
+								/>
+							)
+						)}
 					</div>
 				</div>
 			</div>
@@ -358,6 +497,22 @@ const DiffMinimap = memo(function DiffMinimap({
 	);
 });
 
+// Copy feedback component
+const CopyFeedback = memo(function CopyFeedback({ show }: { show: boolean }) {
+	if (!show) return null;
+	return (
+		<div
+			className="absolute top-2 right-2 px-2 py-1 rounded text-[10px] font-medium z-10 animate-pulse"
+			style={{
+				backgroundColor: "var(--color-surgent-accent)",
+				color: "var(--color-surgent-surface)",
+			}}
+		>
+			Copied!
+		</div>
+	);
+});
+
 export const GitDiffView = memo(function GitDiffView({
 	diff,
 	filePath,
@@ -370,6 +525,7 @@ export const GitDiffView = memo(function GitDiffView({
 	hideToolbar = false,
 	scrollToChange,
 }: GitDiffViewProps) {
+	const containerRef = useRef<HTMLDivElement>(null);
 	const leftRef = useRef<HTMLDivElement>(null);
 	const rightRef = useRef<HTMLDivElement>(null);
 	const syncing = useRef(false);
@@ -378,6 +534,135 @@ export const GitDiffView = memo(function GitDiffView({
 	const viewMode = controlledViewMode ?? internalViewMode;
 	const setViewMode = onViewModeChange ?? setInternalViewMode;
 	const [externalScrollTop, setExternalScrollTop] = useState(-1);
+	const [showCopyFeedback, setShowCopyFeedback] = useState(false);
+	const [highlightedChangeIdx, setHighlightedChangeIdx] = useState<
+		number | undefined
+	>();
+
+	// Calculate diff stats
+	const stats = useMemo(() => {
+		let added = 0;
+		let removed = 0;
+		for (const line of diff.newLines) {
+			if (line.type === "add") added++;
+		}
+		for (const line of diff.oldLines) {
+			if (line.type === "remove") removed++;
+		}
+		return { added, removed };
+	}, [diff.newLines, diff.oldLines]);
+
+	// Build change position map for navigation
+	const { changePositions, changeLineMap } = useMemo(() => {
+		const positions: number[] = [];
+		const lineMap = new Map<number, number>();
+
+		let currentChangeIdx = -1;
+		let inChange = false;
+
+		diff.newLines.forEach((line, idx) => {
+			const isChanged = line.type === "add" || line.type === "remove";
+			if (isChanged && !inChange) {
+				currentChangeIdx++;
+				positions.push(idx);
+				inChange = true;
+			} else if (!isChanged) {
+				inChange = false;
+			}
+			if (isChanged) {
+				lineMap.set(idx, currentChangeIdx);
+			}
+		});
+
+		return { changePositions: positions, changeLineMap: lineMap };
+	}, [diff.newLines]);
+
+	const totalChanges = changePositions.length;
+
+	// Navigate to a specific change
+	const scrollToChangeIdx = useCallback(
+		(changeIdx: number) => {
+			if (changeIdx < 0 || changeIdx >= changePositions.length) return;
+			const lineIdx = changePositions[changeIdx];
+			const scrollPos = Math.max(0, (lineIdx - 5) * LINE_H);
+			setExternalScrollTop(scrollPos);
+			setHighlightedChangeIdx(changeIdx);
+
+			setTimeout(() => {
+				setExternalScrollTop(-1);
+				setTimeout(() => setHighlightedChangeIdx(undefined), 1500);
+			}, 100);
+		},
+		[changePositions]
+	);
+
+	// Navigate to next/previous change
+	const goToNextChange = useCallback(() => {
+		const currentScroll =
+			rightRef.current?.scrollTop ?? leftRef.current?.scrollTop ?? 0;
+		const currentLine = Math.floor(currentScroll / LINE_H);
+		const nextIdx = changePositions.findIndex((pos) => pos > currentLine + 2);
+		if (nextIdx !== -1) {
+			scrollToChangeIdx(nextIdx);
+		} else if (changePositions.length > 0) {
+			scrollToChangeIdx(0);
+		}
+	}, [changePositions, scrollToChangeIdx]);
+
+	const goToPrevChange = useCallback(() => {
+		const currentScroll =
+			rightRef.current?.scrollTop ?? leftRef.current?.scrollTop ?? 0;
+		const currentLine = Math.floor(currentScroll / LINE_H);
+		let prevIdx = -1;
+		for (let i = changePositions.length - 1; i >= 0; i--) {
+			if (changePositions[i] < currentLine - 2) {
+				prevIdx = i;
+				break;
+			}
+		}
+		if (prevIdx !== -1) {
+			scrollToChangeIdx(prevIdx);
+		} else if (changePositions.length > 0) {
+			scrollToChangeIdx(changePositions.length - 1);
+		}
+	}, [changePositions, scrollToChangeIdx]);
+
+	// Copy line handler
+	const handleCopyLine = useCallback((content: string) => {
+		navigator.clipboard.writeText(content).then(() => {
+			setShowCopyFeedback(true);
+			setTimeout(() => setShowCopyFeedback(false), 1000);
+		});
+	}, []);
+
+	// Keyboard navigation
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			// Check if we're in an input
+			const target = e.target as HTMLElement;
+			if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+
+			// Only handle if this viewer is focused/hovered
+			if (!containerRef.current?.matches(":hover")) return;
+
+			if (e.key === "n" && !e.metaKey && !e.ctrlKey) {
+				e.preventDefault();
+				goToNextChange();
+			} else if (e.key === "p" && !e.metaKey && !e.ctrlKey) {
+				e.preventDefault();
+				goToPrevChange();
+			} else if (e.key === "j") {
+				e.preventDefault();
+				goToNextChange();
+			} else if (e.key === "k") {
+				e.preventDefault();
+				goToPrevChange();
+			}
+		};
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [goToNextChange, goToPrevChange]);
 
 	useEffect(() => {
 		if (!scrollToChange) return;
@@ -519,9 +804,21 @@ export const GitDiffView = memo(function GitDiffView({
 	}
 
 	return (
-		<div className="flex h-full flex-col bg-surgent-bg">
+		<div
+			ref={containerRef}
+			className="flex h-full flex-col bg-surgent-bg relative"
+		>
+			<CopyFeedback show={showCopyFeedback} />
 			{!hideHeader && (
-				<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
+				<DiffHeader
+					filePath={filePath}
+					staged={staged}
+					onClose={onClose}
+					stats={stats}
+					totalChanges={totalChanges}
+					onPrevChange={goToPrevChange}
+					onNextChange={goToNextChange}
+				/>
 			)}
 			{!hideToolbar && (
 				<DiffViewToolbar viewMode={viewMode} onChange={setViewMode} />
@@ -542,6 +839,10 @@ export const GitDiffView = memo(function GitDiffView({
 									disableTokenize={disableTokenize}
 									onScroll={(st, sl) => sync("left", st, sl)}
 									externalScrollTop={externalScrollTop}
+									filePath={filePath}
+									onCopyLine={handleCopyLine}
+									highlightedChangeIdx={highlightedChangeIdx}
+									changeLineMap={changeLineMap}
 								/>
 							)}
 						</div>
@@ -554,6 +855,10 @@ export const GitDiffView = memo(function GitDiffView({
 								onScroll={(st, sl) => sync("right", st, sl)}
 								showMinimap
 								externalScrollTop={externalScrollTop}
+								filePath={filePath}
+								onCopyLine={handleCopyLine}
+								highlightedChangeIdx={highlightedChangeIdx}
+								changeLineMap={changeLineMap}
 							/>
 						</div>
 					</>
@@ -572,6 +877,10 @@ export const GitDiffView = memo(function GitDiffView({
 									disableTokenize={disableTokenize}
 									onScroll={(st, sl) => sync("left", st, sl)}
 									externalScrollTop={externalScrollTop}
+									filePath={filePath}
+									onCopyLine={handleCopyLine}
+									highlightedChangeIdx={highlightedChangeIdx}
+									changeLineMap={changeLineMap}
 								/>
 							)}
 						</div>
@@ -584,6 +893,10 @@ export const GitDiffView = memo(function GitDiffView({
 								onScroll={(st, sl) => sync("right", st, sl)}
 								showMinimap
 								externalScrollTop={externalScrollTop}
+								filePath={filePath}
+								onCopyLine={handleCopyLine}
+								highlightedChangeIdx={highlightedChangeIdx}
+								changeLineMap={changeLineMap}
 							/>
 						</div>
 					</div>
@@ -593,6 +906,8 @@ export const GitDiffView = memo(function GitDiffView({
 						ext={ext}
 						disableTokenize={disableTokenize}
 						externalScrollTop={externalScrollTop}
+						filePath={filePath}
+						onCopyLine={handleCopyLine}
 					/>
 				)}
 			</div>
@@ -638,11 +953,15 @@ function SinglePanel({
 	ext,
 	disableTokenize,
 	externalScrollTop,
+	filePath,
+	onCopyLine,
 }: {
 	lines: DiffLine[];
 	ext: string;
 	disableTokenize: boolean;
 	externalScrollTop?: number;
+	filePath?: string;
+	onCopyLine?: (content: string) => void;
 }) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	return (
@@ -655,6 +974,8 @@ function SinglePanel({
 				onScroll={() => {}}
 				showMinimap
 				externalScrollTop={externalScrollTop}
+				filePath={filePath}
+				onCopyLine={onCopyLine}
 			/>
 		</div>
 	);
@@ -716,10 +1037,18 @@ function DiffHeader({
 	filePath,
 	staged,
 	onClose,
+	stats,
+	totalChanges,
+	onPrevChange,
+	onNextChange,
 }: {
 	filePath: string;
 	staged: boolean;
 	onClose: () => void;
+	stats?: { added: number; removed: number };
+	totalChanges?: number;
+	onPrevChange?: () => void;
+	onNextChange?: () => void;
 }) {
 	const dir = filePath.includes("/")
 		? filePath.slice(0, filePath.lastIndexOf("/") + 1)
@@ -741,7 +1070,65 @@ function DiffHeader({
 					staged
 				</span>
 			)}
+
+			{/* Stats */}
+			{stats && (stats.added > 0 || stats.removed > 0) && (
+				<div className="flex items-center gap-1.5 text-[9px] ml-2">
+					{stats.added > 0 && (
+						<span className="text-git-added">+{stats.added}</span>
+					)}
+					{stats.removed > 0 && (
+						<span className="text-git-deleted">−{stats.removed}</span>
+					)}
+				</div>
+			)}
+
 			<span className="flex-1" />
+
+			{/* Change navigation */}
+			{totalChanges !== undefined &&
+				totalChanges > 0 &&
+				onPrevChange &&
+				onNextChange && (
+					<div className="flex items-center gap-0.5 mr-2">
+						<button
+							type="button"
+							onClick={onPrevChange}
+							className="flex items-center justify-center h-5 w-5 rounded text-surgent-text-3 hover:text-surgent-text hover:bg-surgent-surface-2 transition-colors"
+							title="Previous change (k/p)"
+						>
+							<svg
+								className="w-2.5 h-2.5"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2"
+							>
+								<polyline points="15 18 9 12 15 6" />
+							</svg>
+						</button>
+						<span className="text-[9px] text-surgent-text-3 tabular-nums px-1">
+							{totalChanges}
+						</span>
+						<button
+							type="button"
+							onClick={onNextChange}
+							className="flex items-center justify-center h-5 w-5 rounded text-surgent-text-3 hover:text-surgent-text hover:bg-surgent-surface-2 transition-colors"
+							title="Next change (j/n)"
+						>
+							<svg
+								className="w-2.5 h-2.5"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="2"
+							>
+								<polyline points="9 18 15 12 9 6" />
+							</svg>
+						</button>
+					</div>
+				)}
+
 			<button
 				type="button"
 				onClick={onClose}

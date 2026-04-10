@@ -214,6 +214,15 @@ export async function getBranches(
 		}));
 }
 
+export interface GitCommit {
+	hash: string;
+	message: string;
+	author: string;
+	date: string;
+	parents: string[];
+	refs: string[];
+}
+
 export async function getLog(
 	cwd: string,
 	limit = 20
@@ -231,6 +240,234 @@ export async function getLog(
 			const [hash = "", message = "", author = "", date = ""] = line.split("|");
 			return { hash, message, author, date };
 		});
+}
+
+export async function getGraphLog(
+	cwd: string,
+	limit = 50
+): Promise<GitCommit[]> {
+	// Format: hash|parents|refs|subject|author|date
+	// %h = abbreviated hash, %p = parent hashes, %D = ref names, %s = subject, %an = author, %ar = relative date
+	const result = await run(
+		["log", `--max-count=${limit}`, "--format=%h|%p|%D|%s|%an|%ar", "--all"],
+		cwd
+	);
+	if (!result) return [];
+
+	return result
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => {
+			const parts = line.split("|");
+			const hash = parts[0] || "";
+			const parents = (parts[1] || "").split(" ").filter(Boolean);
+			const refsRaw = parts[2] || "";
+			const refs = refsRaw
+				.split(",")
+				.map((r) => r.trim())
+				.filter(Boolean);
+			const message = parts[3] || "";
+			const author = parts[4] || "";
+			const date = parts[5] || "";
+			return { hash, message, author, date, parents, refs };
+		});
+}
+
+export interface BlameLine {
+	hash: string;
+	author: string;
+	date: string;
+	lineNum: number;
+	content: string;
+}
+
+export async function getBlame(
+	cwd: string,
+	filePath: string
+): Promise<BlameLine[]> {
+	// Use --porcelain for machine-readable output
+	const result = await runSafe(
+		["blame", "--porcelain", "--", filePath],
+		cwd,
+		10000
+	);
+	if (!result) return [];
+
+	const lines: BlameLine[] = [];
+	const commits = new Map<string, { author: string; date: string }>();
+	const rawLines = result.split("\n");
+
+	let i = 0;
+	while (i < rawLines.length) {
+		const headerLine = rawLines[i]!;
+		// Header format: <hash> <orig-line> <final-line> [<num-lines>]
+		const headerMatch = headerLine.match(/^([a-f0-9]{40}) \d+ (\d+)/);
+		if (!headerMatch) {
+			i++;
+			continue;
+		}
+
+		const hash = headerMatch[1]!;
+		const lineNum = Number.parseInt(headerMatch[2]!, 10);
+		i++;
+
+		// Read commit info if this is first time seeing this commit
+		if (!commits.has(hash)) {
+			let author = "";
+			let date = "";
+
+			while (i < rawLines.length && !rawLines[i]!.startsWith("\t")) {
+				const line = rawLines[i]!;
+				if (line.startsWith("author ")) {
+					author = line.slice(7);
+				} else if (line.startsWith("author-time ")) {
+					const timestamp = Number.parseInt(line.slice(12), 10);
+					const d = new Date(timestamp * 1000);
+					date = d.toLocaleDateString("en-US", {
+						month: "short",
+						day: "numeric",
+						year: "numeric",
+					});
+				}
+				i++;
+			}
+
+			commits.set(hash, { author, date });
+		} else {
+			// Skip to the content line
+			while (i < rawLines.length && !rawLines[i]!.startsWith("\t")) {
+				i++;
+			}
+		}
+
+		// Content line starts with tab
+		const content = rawLines[i]?.slice(1) ?? "";
+		i++;
+
+		const commitInfo = commits.get(hash)!;
+		lines.push({
+			hash: hash.slice(0, 7),
+			author: commitInfo.author,
+			date: commitInfo.date,
+			lineNum,
+			content,
+		});
+	}
+
+	return lines;
+}
+
+export async function getFileHistory(
+	cwd: string,
+	filePath: string,
+	limit = 20
+): Promise<{ hash: string; message: string; author: string; date: string }[]> {
+	const result = await run(
+		[
+			"log",
+			`--max-count=${limit}`,
+			"--format=%h|%s|%an|%ar",
+			"--follow",
+			"--",
+			filePath,
+		],
+		cwd
+	);
+	if (!result) return [];
+
+	return result
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => {
+			const [hash = "", message = "", author = "", date = ""] = line.split("|");
+			return { hash, message, author, date };
+		});
+}
+
+export interface CommitFile {
+	path: string;
+	status: string; // A, M, D, R, etc.
+	additions: number;
+	deletions: number;
+}
+
+export interface CommitDetails {
+	hash: string;
+	message: string;
+	author: string;
+	date: string;
+	files: CommitFile[];
+}
+
+export async function getCommitDetails(
+	cwd: string,
+	hash: string
+): Promise<CommitDetails | null> {
+	// Get commit info
+	const info = await run(["log", "-1", "--format=%H|%s|%an|%ar", hash], cwd);
+	if (!info) return null;
+
+	const [fullHash = "", message = "", author = "", date = ""] = info
+		.trim()
+		.split("|");
+
+	// Get files changed with stats
+	const filesResult = await run(
+		["diff-tree", "--no-commit-id", "--name-status", "-r", "--numstat", hash],
+		cwd
+	);
+
+	const files: CommitFile[] = [];
+
+	// First get numstat for additions/deletions
+	const numstatResult = await run(
+		["diff-tree", "--no-commit-id", "-r", "--numstat", hash],
+		cwd
+	);
+	const statsMap = new Map<string, { additions: number; deletions: number }>();
+	if (numstatResult) {
+		for (const line of numstatResult.split("\n").filter(Boolean)) {
+			const parts = line.split("\t");
+			if (parts.length >= 3) {
+				const additions =
+					parts[0] === "-" ? 0 : Number.parseInt(parts[0]!, 10) || 0;
+				const deletions =
+					parts[1] === "-" ? 0 : Number.parseInt(parts[1]!, 10) || 0;
+				const path = parts[2]!;
+				statsMap.set(path, { additions, deletions });
+			}
+		}
+	}
+
+	// Get name-status for status codes
+	const statusResult = await run(
+		["diff-tree", "--no-commit-id", "-r", "--name-status", hash],
+		cwd
+	);
+	if (statusResult) {
+		for (const line of statusResult.split("\n").filter(Boolean)) {
+			const parts = line.split("\t");
+			if (parts.length >= 2) {
+				const status = parts[0]!.charAt(0); // M, A, D, R, etc.
+				const path = parts[parts.length - 1]!; // Last part is the path (handles renames)
+				const stats = statsMap.get(path) || { additions: 0, deletions: 0 };
+				files.push({
+					path,
+					status,
+					additions: stats.additions,
+					deletions: stats.deletions,
+				});
+			}
+		}
+	}
+
+	return {
+		hash: fullHash,
+		message,
+		author,
+		date,
+		files,
+	};
 }
 
 export async function stageFile(

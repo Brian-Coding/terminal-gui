@@ -11,6 +11,7 @@ import {
 	ClaudeChatView,
 	clearChatMessages,
 } from "../../components/chat/ClaudeChatView.tsx";
+import { CommitGraph } from "../../components/git/CommitGraph.tsx";
 import {
 	IconGitBranch,
 	IconLayoutGrid,
@@ -18,6 +19,7 @@ import {
 	IconPanelRight,
 	IconZen,
 } from "../../components/ui/Icons.tsx";
+import { useCommitDetails, useGitGraph } from "../../hooks/useGitGraph.ts";
 import { useAgentSessions } from "../../hooks/useAgentSessions.ts";
 import { type DiffRequest, useGitDiff } from "../../hooks/useGitDiff.ts";
 import {
@@ -34,7 +36,6 @@ import {
 	type TerminalGroupModel,
 } from "../../lib/terminal-utils.ts";
 import {
-	ActivityFeed,
 	ActivityIndicator,
 	useActivityFeed,
 } from "../../features/activity-feed/index.ts";
@@ -118,11 +119,16 @@ export function ExperimentalPage() {
 	const [scrollToChange, setScrollToChange] = useState(0);
 	const [zenMode, setZenMode] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-	const [activityHeight, setActivityHeight] = useState(150);
+	const [sidebarWidth, setSidebarWidth] = useState(224); // Default w-56 = 224px
+	const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(
+		null
+	);
+	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("path");
+	const [mainViewMode, setMainViewMode] = useState<"diff" | "graph">("diff");
 	const chatRef = useRef<ClaudeChatHandle>(null);
-	const activityDragRef = useRef<{
-		startY: number;
-		startHeight: number;
+	const sidebarDragRef = useRef<{
+		startX: number;
+		startWidth: number;
 	} | null>(null);
 
 	const terminalState = useMemo(() => loadTerminalState(), []);
@@ -201,6 +207,19 @@ export function ExperimentalPage() {
 	const untracked = project?.files.filter((f) => f.status === "?") ?? [];
 	const selectedFile = session ? (selectedFiles[session.paneId] ?? null) : null;
 
+	// Fetch commit graph when in graph view
+	const { commits: graphCommits, loading: graphLoading } = useGitGraph(
+		mainViewMode === "graph" ? session?.cwd : undefined,
+		100
+	);
+
+	// Fetch commit details when a commit is selected
+	const { details: commitDetails, loading: commitDetailsLoading } =
+		useCommitDetails(
+			mainViewMode === "graph" ? session?.cwd : undefined,
+			selectedCommitHash ?? undefined
+		);
+
 	const selectFile = useCallback(
 		(paneId: string, req: DiffRequest) => {
 			setSelectedFiles((cur) => ({
@@ -212,11 +231,10 @@ export function ExperimentalPage() {
 		[loadDiff]
 	);
 
-	const { events: activityEvents, clearEvents: clearActivityEvents } =
-		useActivityFeed({
-			paneId: session?.paneId,
-			cwd: session?.cwd,
-		});
+	const { events: activityEvents } = useActivityFeed({
+		paneId: session?.paneId,
+		cwd: session?.cwd,
+	});
 
 	const { checkPendingScroll } = useFileWatcher({
 		enabled: zenMode,
@@ -415,26 +433,26 @@ export function ExperimentalPage() {
 		}
 	}, [session?.cwd, commitMessage, isCommitting, refresh]);
 
-	const handleActivityDragStart = useCallback(
+	const handleSidebarDragStart = useCallback(
 		(e: React.MouseEvent) => {
 			e.preventDefault();
-			activityDragRef.current = {
-				startY: e.clientY,
-				startHeight: activityHeight,
+			sidebarDragRef.current = {
+				startX: e.clientX,
+				startWidth: sidebarWidth,
 			};
 
 			const handleMouseMove = (e: MouseEvent) => {
-				if (!activityDragRef.current) return;
-				const delta = activityDragRef.current.startY - e.clientY;
-				const newHeight = Math.min(
-					300,
-					Math.max(100, activityDragRef.current.startHeight + delta)
+				if (!sidebarDragRef.current) return;
+				const delta = sidebarDragRef.current.startX - e.clientX;
+				const newWidth = Math.min(
+					400,
+					Math.max(160, sidebarDragRef.current.startWidth + delta)
 				);
-				setActivityHeight(newHeight);
+				setSidebarWidth(newWidth);
 			};
 
 			const handleMouseUp = () => {
-				activityDragRef.current = null;
+				sidebarDragRef.current = null;
 				document.removeEventListener("mousemove", handleMouseMove);
 				document.removeEventListener("mouseup", handleMouseUp);
 			};
@@ -442,7 +460,7 @@ export function ExperimentalPage() {
 			document.addEventListener("mousemove", handleMouseMove);
 			document.addEventListener("mouseup", handleMouseUp);
 		},
-		[activityHeight]
+		[sidebarWidth]
 	);
 
 	return (
@@ -458,6 +476,32 @@ export function ExperimentalPage() {
 					/>
 				</div>
 				<div className="flex-1 min-w-0" />
+				{/* Main view mode toggle: Diff / Graph */}
+				<div className="electrobun-webkit-app-region-no-drag relative z-10 flex shrink-0 items-center rounded-lg border border-surgent-border bg-surgent-surface overflow-hidden h-7">
+					<button
+						type="button"
+						onClick={() => setMainViewMode("diff")}
+						className={`px-2.5 h-full text-[10px] font-medium transition-all ${
+							mainViewMode === "diff"
+								? "bg-surgent-text/10 text-surgent-text"
+								: "text-surgent-text-3 hover:text-surgent-text-2"
+						}`}
+					>
+						Diff
+					</button>
+					<button
+						type="button"
+						onClick={() => setMainViewMode("graph")}
+						className={`px-2.5 h-full text-[10px] font-medium transition-all ${
+							mainViewMode === "graph"
+								? "bg-surgent-text/10 text-surgent-text"
+								: "text-surgent-text-3 hover:text-surgent-text-2"
+						}`}
+					>
+						Graph
+					</button>
+				</div>
+				{/* Diff view mode buttons */}
 				<div className="electrobun-webkit-app-region-no-drag relative z-10 flex shrink-0 items-center rounded-lg border border-surgent-border bg-surgent-surface overflow-hidden h-7">
 					<ToolbarButton
 						active={diffViewMode === "split"}
@@ -559,26 +603,47 @@ export function ExperimentalPage() {
 						<div className="flex h-full min-h-0 flex-col">
 							<div className="flex min-h-0 flex-1 overflow-hidden">
 								<div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-									{diffLoading ? (
-										<Placeholder label="Loading diff..." />
-									) : diff && request ? (
-										<GitDiffView
-											diff={diff}
-											filePath={request.file}
-											staged={request.staged}
-											scrollToChange={scrollToChange}
-											loading={false}
-											onClose={clearDiff}
-											hideHeader
-											hideToolbar
-											viewMode={diffViewMode}
-											onViewModeChange={setDiffViewMode}
-										/>
+									{mainViewMode === "diff" ? (
+										// Diff View
+										diffLoading ? (
+											<Placeholder label="Loading diff..." />
+										) : diff && request ? (
+											<GitDiffView
+												diff={diff}
+												filePath={request.file}
+												staged={request.staged}
+												scrollToChange={scrollToChange}
+												loading={false}
+												onClose={clearDiff}
+												hideHeader
+												hideToolbar
+												viewMode={diffViewMode}
+												onViewModeChange={setDiffViewMode}
+											/>
+										) : (
+											<Placeholder
+												label={
+													project
+														? "Select a changed file"
+														: "No diff available"
+												}
+											/>
+										)
+									) : // Graph View - full width, details show in sidebar
+									graphLoading ? (
+										<div className="flex items-center justify-center h-full">
+											<p className="text-[11px] text-surgent-text-3">
+												Loading graph...
+											</p>
+										</div>
 									) : (
-										<Placeholder
-											label={
-												project ? "Select a changed file" : "No diff available"
-											}
+										<CommitGraph
+											commits={graphCommits}
+											selectedHash={selectedCommitHash ?? undefined}
+											onSelect={setSelectedCommitHash}
+											className="h-full"
+											wipFiles={files}
+											branch={project?.branch}
 										/>
 									)}
 								</div>
@@ -593,141 +658,285 @@ export function ExperimentalPage() {
 										<IconPanelRight size={12} />
 									</button>
 								) : (
-									<div className="flex w-56 shrink-0 flex-col border-l border-surgent-border bg-surgent-bg">
-										{/* Git Files Section */}
-										<div className="flex-1 min-h-0 overflow-y-auto">
+									<div
+										className="flex shrink-0 flex-row border-l border-surgent-border bg-surgent-bg"
+										style={{ width: sidebarWidth }}
+									>
+										{/* Drag handle for resizing sidebar */}
+										<div
+											className="w-1 cursor-ew-resize bg-transparent hover:bg-surgent-accent/30 transition-colors shrink-0"
+											onMouseDown={handleSidebarDragStart}
+										/>
+										<div className="flex flex-1 flex-col min-w-0">
+											{/* Sidebar Header */}
 											<div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-surgent-border bg-surgent-bg px-2.5 py-2">
 												<IconGitBranch
 													size={12}
 													className="shrink-0 text-surgent-text-3"
 												/>
-												<div className="flex-1 min-w-0 truncate text-[11px] font-medium text-surgent-text">
-													{project?.branch ?? "No repo data"}
-												</div>
+												<span className="flex-1 truncate text-[11px] font-medium text-surgent-text">
+													{project?.branch ?? "No repo"}
+												</span>
 												<button
 													type="button"
 													onClick={() => setSidebarCollapsed(true)}
-													title="Hide file sidebar"
+													title="Hide sidebar"
 													className="shrink-0 flex items-center justify-center rounded w-5 h-5 text-surgent-text-3 hover:text-surgent-text-2 hover:bg-surgent-text/10 transition-all"
 												>
 													<IconPanelRight size={12} />
 												</button>
 											</div>
 
-											<FileGroup
-												title="Unstaged"
-												files={[...modified, ...untracked]}
-												color="text-surgent-text-2"
-												selected={selectedFile}
-												onSelect={(f) =>
-													session.cwd &&
-													selectFile(session.paneId, {
-														cwd: session.cwd,
-														file: f.path,
-														staged: f.staged,
-													})
-												}
-												actionLabel="Stage"
-												onAction={stageFile}
-												onActionAll={stageAll}
-											/>
-											<FileGroup
-												title="Staged"
-												files={staged}
-												color="text-git-added"
-												selected={selectedFile}
-												onSelect={(f) =>
-													session.cwd &&
-													selectFile(session.paneId, {
-														cwd: session.cwd,
-														file: f.path,
-														staged: f.staged,
-													})
-												}
-												actionLabel="Unstage"
-												onAction={unstageFile}
-												onActionAll={unstageAll}
-											/>
-
-											{project && !project.files.length && (
-												<div className="flex items-center justify-center py-6">
-													<p className="text-[10px] text-surgent-text-3/50">
-														Clean
-													</p>
-												</div>
-											)}
-											{!project && (
-												<div className="flex items-center justify-center py-6">
-													<p className="px-3 text-center text-[10px] text-surgent-text-3/50">
-														No repository
-													</p>
-												</div>
-											)}
-										</div>
-
-										{/* Commit Section */}
-										{project && (
-											<div className="shrink-0 border-t border-surgent-border p-2">
-												<textarea
-													value={commitMessage}
-													onChange={(e) => setCommitMessage(e.target.value)}
-													placeholder="Commit message..."
-													className="w-full resize-none rounded border border-surgent-border bg-surgent-surface px-2 py-1.5 text-[11px] text-surgent-text placeholder:text-surgent-text-3/50 focus:border-surgent-accent focus:outline-none"
-													rows={2}
-													onKeyDown={(e) => {
-														if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-															e.preventDefault();
-															handleCommit();
+											{/* Files View */}
+											{mainViewMode !== "graph" && (
+												<div className="flex-1 min-h-0 overflow-y-auto">
+													{/* Path/Tree toggle */}
+													<div className="sticky top-0 z-20 flex items-center justify-end gap-1 px-2 py-1 border-b border-surgent-border/30 bg-surgent-bg">
+														<div className="flex items-center rounded border border-surgent-border bg-surgent-surface overflow-hidden">
+															<button
+																type="button"
+																onClick={() => setFileViewMode("path")}
+																title="Path view"
+																className={`px-1.5 py-0.5 text-[8px] font-medium transition-all ${
+																	fileViewMode === "path"
+																		? "bg-surgent-text/10 text-surgent-text"
+																		: "text-surgent-text-3 hover:text-surgent-text-2"
+																}`}
+															>
+																Path
+															</button>
+															<button
+																type="button"
+																onClick={() => setFileViewMode("tree")}
+																title="Tree view"
+																className={`px-1.5 py-0.5 text-[8px] font-medium transition-all ${
+																	fileViewMode === "tree"
+																		? "bg-surgent-text/10 text-surgent-text"
+																		: "text-surgent-text-3 hover:text-surgent-text-2"
+																}`}
+															>
+																Tree
+															</button>
+														</div>
+													</div>
+													<FileGroup
+														title="Unstaged"
+														files={[...modified, ...untracked]}
+														color="text-surgent-text-2"
+														selected={selectedFile}
+														onSelect={(f) =>
+															session.cwd &&
+															selectFile(session.paneId, {
+																cwd: session.cwd,
+																file: f.path,
+																staged: f.staged,
+															})
 														}
-													}}
-												/>
-												<button
-													type="button"
-													onClick={handleCommit}
-													disabled={
-														!commitMessage.trim() ||
-														!staged.length ||
-														isCommitting
-													}
-													className="mt-1.5 w-full rounded bg-surgent-accent px-2 py-1 text-[10px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-												>
-													{isCommitting
-														? "Committing..."
-														: `Commit${staged.length ? ` (${staged.length})` : ""}`}
-												</button>
-											</div>
-										)}
+														actionLabel="Stage"
+														onAction={stageFile}
+														onActionAll={stageAll}
+														viewMode={fileViewMode}
+													/>
+													<FileGroup
+														title="Staged"
+														files={staged}
+														color="text-git-added"
+														selected={selectedFile}
+														onSelect={(f) =>
+															session.cwd &&
+															selectFile(session.paneId, {
+																cwd: session.cwd,
+																file: f.path,
+																staged: f.staged,
+															})
+														}
+														actionLabel="Unstage"
+														onAction={unstageFile}
+														onActionAll={unstageAll}
+														viewMode={fileViewMode}
+													/>
 
-										{/* Activity Feed Section - Resizable at bottom */}
-										<div
-											className="shrink-0 border-t border-surgent-border flex flex-col"
-											style={{ height: activityHeight }}
-										>
-											{/* Drag handle */}
-											<div
-												className="h-1.5 cursor-ns-resize bg-transparent hover:bg-surgent-accent/30 transition-colors flex items-center justify-center"
-												onMouseDown={handleActivityDragStart}
-											>
-												<div className="w-8 h-0.5 rounded-full bg-surgent-border" />
-											</div>
-											<div className="flex items-center justify-between px-2.5 py-1 border-b border-surgent-border/50 bg-surgent-bg">
-												<span className="text-[9px] font-medium uppercase tracking-wider text-surgent-text-3">
-													Activity
-												</span>
-												{activityEvents.length > 0 && (
-													<button
-														type="button"
-														onClick={clearActivityEvents}
-														className="text-[9px] text-surgent-text-3 hover:text-surgent-text-2 transition-colors"
-													>
-														Clear
-													</button>
-												)}
-											</div>
-											<ActivityFeed
-												events={activityEvents}
-												className="flex-1 min-h-0"
-											/>
+													{project && !project.files.length && (
+														<div className="flex items-center justify-center py-6">
+															<p className="text-[10px] text-surgent-text-3/50">
+																Clean
+															</p>
+														</div>
+													)}
+													{!project && (
+														<div className="flex items-center justify-center py-6">
+															<p className="px-3 text-center text-[10px] text-surgent-text-3/50">
+																No repository
+															</p>
+														</div>
+													)}
+												</div>
+											)}
+
+											{/* Graph View - show commit details or WIP files in sidebar */}
+											{mainViewMode === "graph" && (
+												<div className="flex-1 min-h-0 overflow-y-auto">
+													{selectedCommitHash === "wip" ? (
+														// WIP selected - show current changes
+														<>
+															<div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2 border-b border-surgent-border bg-surgent-bg">
+																<div className="w-3 h-3 rounded-full border-2 border-dashed border-surgent-accent" />
+																<span className="text-[11px] font-medium text-surgent-text">
+																	WIP on {project?.branch ?? "branch"}
+																</span>
+																<span className="ml-auto text-[9px] text-surgent-text-3">
+																	{files.length} files
+																</span>
+															</div>
+															<div className="py-1">
+																{files.map((f, i) => (
+																	<div
+																		key={i}
+																		className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-surgent-text/5"
+																	>
+																		<FileStatusIcon status={f.status} />
+																		<span className="flex-1 truncate text-[10px] font-mono text-surgent-text-2">
+																			{f.path}
+																		</span>
+																	</div>
+																))}
+																{files.length === 0 && (
+																	<div className="flex items-center justify-center py-6">
+																		<p className="text-[10px] text-surgent-text-3/50">
+																			No changes
+																		</p>
+																	</div>
+																)}
+															</div>
+														</>
+													) : selectedCommitHash ? (
+														// Commit selected - show commit details
+														commitDetailsLoading ? (
+															<div className="flex items-center justify-center py-8">
+																<p className="text-[10px] text-surgent-text-3">
+																	Loading...
+																</p>
+															</div>
+														) : commitDetails ? (
+															<CommitDetailsPanel details={commitDetails} />
+														) : (
+															<div className="flex items-center justify-center py-8">
+																<p className="text-[10px] text-surgent-text-3">
+																	No details
+																</p>
+															</div>
+														)
+													) : (
+														// Nothing selected
+														<div className="flex items-center justify-center py-8">
+															<p className="text-[10px] text-surgent-text-3 px-4 text-center">
+																Select a commit to view details
+															</p>
+														</div>
+													)}
+												</div>
+											)}
+
+											{/* Commit Section - only show when not in graph view */}
+											{project && mainViewMode !== "graph" && (
+												<div className="shrink-0 border-t border-surgent-border">
+													{/* Commit header */}
+													<div className="flex items-center justify-between px-2.5 py-1.5 border-b border-surgent-border/50">
+														<div className="flex items-center gap-1.5">
+															<svg
+																className="w-3 h-3 text-surgent-text-3"
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																strokeWidth="2"
+															>
+																<circle cx="12" cy="12" r="4" />
+																<line x1="1.05" y1="12" x2="7" y2="12" />
+																<line x1="17.01" y1="12" x2="22.96" y2="12" />
+															</svg>
+															<span className="text-[9px] font-medium text-surgent-text-2">
+																Commit
+															</span>
+														</div>
+														{commitMessage.length > 0 && (
+															<span
+																className={`text-[9px] tabular-nums ${commitMessage.length > 72 ? "text-amber-400" : "text-surgent-text-3"}`}
+															>
+																{commitMessage.length}
+															</span>
+														)}
+													</div>
+													<div className="p-2 space-y-2">
+														{/* Summary line */}
+														<input
+															type="text"
+															value={commitMessage.split("\n")[0] || ""}
+															onChange={(e) => {
+																const lines = commitMessage.split("\n");
+																lines[0] = e.target.value;
+																setCommitMessage(lines.join("\n"));
+															}}
+															placeholder="Summary (required)"
+															className="w-full rounded border border-surgent-border bg-surgent-surface px-2 py-1.5 text-[11px] text-surgent-text placeholder:text-surgent-text-3/50 focus:border-surgent-accent focus:outline-none"
+															onKeyDown={(e) => {
+																if (
+																	e.key === "Enter" &&
+																	(e.metaKey || e.ctrlKey)
+																) {
+																	e.preventDefault();
+																	handleCommit();
+																}
+															}}
+														/>
+														{/* Description */}
+														<textarea
+															value={commitMessage
+																.split("\n")
+																.slice(1)
+																.join("\n")}
+															onChange={(e) => {
+																const summary =
+																	commitMessage.split("\n")[0] || "";
+																setCommitMessage(
+																	summary +
+																		(e.target.value
+																			? "\n" + e.target.value
+																			: "")
+																);
+															}}
+															placeholder="Description (optional)"
+															className="w-full resize-none rounded border border-surgent-border bg-surgent-surface px-2 py-1.5 text-[10px] text-surgent-text placeholder:text-surgent-text-3/50 focus:border-surgent-accent focus:outline-none"
+															rows={2}
+														/>
+														{/* Commit button */}
+														<button
+															type="button"
+															onClick={handleCommit}
+															disabled={
+																!commitMessage.trim() ||
+																!staged.length ||
+																isCommitting
+															}
+															className="w-full flex items-center justify-center gap-1.5 rounded bg-surgent-accent hover:bg-surgent-accent/90 px-3 py-1.5 text-[10px] font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+														>
+															<svg
+																className="w-3 h-3"
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																strokeWidth="2"
+															>
+																<circle cx="12" cy="12" r="4" />
+																<line x1="1.05" y1="12" x2="7" y2="12" />
+																<line x1="17.01" y1="12" x2="22.96" y2="12" />
+															</svg>
+															{isCommitting
+																? "Committing..."
+																: `Commit Changes to ${staged.length} File${staged.length !== 1 ? "s" : ""}`}
+														</button>
+													</div>
+												</div>
+											)}
 										</div>
 									</div>
 								)}
@@ -839,6 +1048,304 @@ function Placeholder({ label }: { label: string }) {
 	);
 }
 
+// Commit details panel for graph view
+function CommitDetailsPanel({
+	details,
+}: {
+	details: {
+		hash: string;
+		message: string;
+		author: string;
+		date: string;
+		files: Array<{
+			path: string;
+			status: string;
+			additions: number;
+			deletions: number;
+		}>;
+	};
+}) {
+	return (
+		<div className="flex flex-col h-full">
+			{/* Commit info header */}
+			<div className="shrink-0 border-b border-surgent-border p-3 space-y-2">
+				<div className="flex items-center gap-2">
+					<span className="font-mono text-[11px] text-surgent-accent font-medium">
+						{details.hash.slice(0, 7)}
+					</span>
+					<span className="text-[10px] text-surgent-text-3">
+						{details.date}
+					</span>
+				</div>
+				<p className="text-[11px] text-surgent-text leading-relaxed">
+					{details.message}
+				</p>
+				<p className="text-[10px] text-surgent-text-2">{details.author}</p>
+			</div>
+
+			{/* Files changed */}
+			<div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-surgent-border/50 bg-surgent-text/[0.02]">
+				<span className="text-[9px] font-medium text-surgent-text-2">
+					Files Changed
+				</span>
+				<span className="text-[9px] text-surgent-text-3">
+					{details.files.length}
+				</span>
+			</div>
+
+			{/* File list */}
+			<div className="flex-1 min-h-0 overflow-y-auto">
+				{details.files.map((file, i) => (
+					<div
+						key={i}
+						className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-surgent-text/5 cursor-pointer"
+					>
+						<FileStatusIcon status={file.status} />
+						<span className="flex-1 truncate text-[10px] font-mono text-surgent-text-2">
+							{file.path.split("/").pop()}
+						</span>
+						<div className="shrink-0 flex items-center gap-1 text-[9px] tabular-nums">
+							{file.additions > 0 && (
+								<span className="text-git-added">+{file.additions}</span>
+							)}
+							{file.deletions > 0 && (
+								<span className="text-git-deleted">-{file.deletions}</span>
+							)}
+						</div>
+					</div>
+				))}
+			</div>
+
+			{/* Stats summary */}
+			<div className="shrink-0 flex items-center justify-center gap-3 px-3 py-2 border-t border-surgent-border text-[10px]">
+				<span className="text-git-added">
+					+{details.files.reduce((sum, f) => sum + f.additions, 0)}
+				</span>
+				<span className="text-git-deleted">
+					-{details.files.reduce((sum, f) => sum + f.deletions, 0)}
+				</span>
+			</div>
+		</div>
+	);
+}
+
+// File status icon component
+function FileStatusIcon({ status }: { status: string }) {
+	// M = modified, A = added, D = deleted, R = renamed, ? = untracked
+	const getStatusConfig = () => {
+		switch (status) {
+			case "M":
+				return {
+					icon: "M",
+					color: "text-amber-400",
+					bg: "bg-amber-400/15",
+					title: "Modified",
+				};
+			case "A":
+				return {
+					icon: "+",
+					color: "text-git-added",
+					bg: "bg-git-added/15",
+					title: "Added",
+				};
+			case "D":
+				return {
+					icon: "−",
+					color: "text-git-deleted",
+					bg: "bg-git-deleted/15",
+					title: "Deleted",
+				};
+			case "R":
+				return {
+					icon: "R",
+					color: "text-blue-400",
+					bg: "bg-blue-400/15",
+					title: "Renamed",
+				};
+			case "?":
+				return {
+					icon: "?",
+					color: "text-surgent-text-3",
+					bg: "bg-surgent-text/10",
+					title: "Untracked",
+				};
+			default:
+				return {
+					icon: "•",
+					color: "text-surgent-text-3",
+					bg: "bg-surgent-text/10",
+					title: status,
+				};
+		}
+	};
+
+	const config = getStatusConfig();
+	return (
+		<span
+			className={`shrink-0 flex items-center justify-center w-4 h-4 rounded text-[8px] font-bold ${config.color} ${config.bg}`}
+			title={config.title}
+		>
+			{config.icon}
+		</span>
+	);
+}
+
+// Build tree structure from flat file list
+interface TreeNode {
+	name: string;
+	path: string;
+	children: Map<string, TreeNode>;
+	file?: GitFileEntry;
+}
+
+function buildFileTree(files: GitFileEntry[]): TreeNode {
+	const root: TreeNode = { name: "", path: "", children: new Map() };
+
+	for (const file of files) {
+		const parts = file.path.split("/");
+		let current = root;
+		let currentPath = "";
+
+		for (let i = 0; i < parts.length; i++) {
+			const part = parts[i]!;
+			currentPath = currentPath ? `${currentPath}/${part}` : part;
+
+			if (!current.children.has(part)) {
+				current.children.set(part, {
+					name: part,
+					path: currentPath,
+					children: new Map(),
+				});
+			}
+			current = current.children.get(part)!;
+
+			// If this is the last part, attach the file
+			if (i === parts.length - 1) {
+				current.file = file;
+			}
+		}
+	}
+
+	return root;
+}
+
+function TreeNodeRow({
+	node,
+	depth,
+	selected,
+	onSelect,
+	onAction,
+	actionLabel,
+	expandedDirs,
+	toggleDir,
+}: {
+	node: TreeNode;
+	depth: number;
+	selected: SelectedFile | null;
+	onSelect: (f: GitFileEntry) => void;
+	onAction?: (path: string) => void;
+	actionLabel?: string;
+	expandedDirs: Set<string>;
+	toggleDir: (path: string) => void;
+}) {
+	const isDir = node.children.size > 0 && !node.file;
+	const isExpanded = expandedDirs.has(node.path);
+	const file = node.file;
+	const active =
+		file && selected?.path === file.path && selected?.staged === file.staged;
+
+	const sortedChildren = [...node.children.values()].sort((a, b) => {
+		// Directories first
+		const aIsDir = a.children.size > 0 && !a.file;
+		const bIsDir = b.children.size > 0 && !b.file;
+		if (aIsDir && !bIsDir) return -1;
+		if (!aIsDir && bIsDir) return 1;
+		return a.name.localeCompare(b.name);
+	});
+
+	return (
+		<>
+			<div
+				className={`group flex h-[26px] items-center gap-1 cursor-pointer transition-colors ${
+					active ? "bg-surgent-accent/10" : "hover:bg-surgent-text/5"
+				}`}
+				style={{ paddingLeft: `${8 + depth * 12}px` }}
+				onClick={() => {
+					if (isDir) {
+						toggleDir(node.path);
+					} else if (file) {
+						onSelect(file);
+					}
+				}}
+			>
+				{isDir ? (
+					<>
+						<svg
+							className={`w-2.5 h-2.5 text-surgent-text-3 transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+						>
+							<polyline points="9 18 15 12 9 6" />
+						</svg>
+						<svg
+							className="w-3 h-3 text-surgent-text-3 shrink-0"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+						>
+							<path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+						</svg>
+						<span className="truncate text-[10px] text-surgent-text-2">
+							{node.name}
+						</span>
+					</>
+				) : file ? (
+					<>
+						<FileStatusIcon status={file.status} />
+						<span
+							className={`truncate text-[10px] font-mono transition-colors ${
+								active
+									? "text-surgent-text"
+									: "text-surgent-text-2 group-hover:text-surgent-text"
+							}`}
+						>
+							{node.name}
+						</span>
+						{onAction && (
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									onAction(file.path);
+								}}
+								className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 rounded px-1 py-0.5 text-[8px] text-surgent-text-3 hover:bg-surgent-text/10 hover:text-surgent-text transition-all"
+							>
+								{actionLabel}
+							</button>
+						)}
+					</>
+				) : null}
+			</div>
+			{isDir &&
+				isExpanded &&
+				sortedChildren.map((child) => (
+					<TreeNodeRow
+						key={child.path}
+						node={child}
+						depth={depth + 1}
+						selected={selected}
+						onSelect={onSelect}
+						onAction={onAction}
+						actionLabel={actionLabel}
+						expandedDirs={expandedDirs}
+						toggleDir={toggleDir}
+					/>
+				))}
+		</>
+	);
+}
+
 function FileGroup({
 	title,
 	files,
@@ -848,6 +1355,8 @@ function FileGroup({
 	actionLabel,
 	onAction,
 	onActionAll,
+	isCollapsible = true,
+	viewMode = "path",
 }: {
 	title: string;
 	files: GitFileEntry[];
@@ -857,65 +1366,152 @@ function FileGroup({
 	actionLabel?: string;
 	onAction?: (path: string) => void;
 	onActionAll?: () => void;
+	isCollapsible?: boolean;
+	viewMode?: "path" | "tree";
 }) {
+	const [isCollapsed, setIsCollapsed] = useState(false);
+	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
+		// Start with all directories expanded
+		const dirs = new Set<string>();
+		for (const f of files) {
+			const parts = f.path.split("/");
+			let path = "";
+			for (let i = 0; i < parts.length - 1; i++) {
+				path = path ? `${path}/${parts[i]}` : parts[i]!;
+				dirs.add(path);
+			}
+		}
+		return dirs;
+	});
+
+	const toggleDir = useCallback((path: string) => {
+		setExpandedDirs((prev) => {
+			const next = new Set(prev);
+			if (next.has(path)) {
+				next.delete(path);
+			} else {
+				next.add(path);
+			}
+			return next;
+		});
+	}, []);
+
+	const tree = useMemo(() => buildFileTree(files), [files]);
+
 	if (!files.length) return null;
 	return (
 		<div>
-			<div className="sticky top-0 z-10 flex h-7 items-center justify-between border-b border-surgent-border/30 bg-surgent-bg px-2.5">
-				<span
-					className={`text-[8px] font-medium uppercase tracking-[0.1em] ${color}`}
+			<div className="sticky top-0 z-10 flex h-7 items-center justify-between border-b border-surgent-border/30 bg-surgent-bg px-2">
+				<button
+					type="button"
+					onClick={() => isCollapsible && setIsCollapsed(!isCollapsed)}
+					className={`flex items-center gap-1.5 ${isCollapsible ? "cursor-pointer" : "cursor-default"}`}
 				>
-					{title} ({files.length})
-				</span>
-				{onActionAll && (
+					{isCollapsible && (
+						<svg
+							className={`w-2.5 h-2.5 text-surgent-text-3 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+						>
+							<polyline points="9 18 15 12 9 6" />
+						</svg>
+					)}
+					<span
+						className={`text-[9px] font-medium uppercase tracking-wide ${color}`}
+					>
+						{title}
+					</span>
+					<span className="text-[9px] text-surgent-text-3">
+						({files.length})
+					</span>
+				</button>
+				{onActionAll && !isCollapsed && (
 					<button
 						type="button"
 						onClick={onActionAll}
-						className="rounded px-1.5 py-0.5 text-[8px] text-surgent-text-3 hover:bg-surgent-surface-2 hover:text-surgent-text transition-colors"
+						className="rounded px-1.5 py-0.5 text-[8px] text-surgent-accent hover:bg-surgent-accent/10 transition-colors"
 					>
 						{actionLabel} All
 					</button>
 				)}
 			</div>
-			{files.map((f) => {
-				const active =
-					selected?.path === f.path && selected?.staged === f.staged;
-				const name = f.path.split("/").pop() || f.path;
-				return (
-					<div
-						key={`${f.staged ? "s" : "u"}-${f.path}`}
-						className={`group flex h-[26px] items-center px-1 ${
-							active ? "bg-surgent-text/10" : "hover:bg-surgent-text/5"
-						}`}
-					>
-						<button
-							type="button"
-							onClick={() => onSelect(f)}
-							className="flex-1 min-w-0 h-full flex items-center px-1.5 text-left"
-							title={f.path}
+			{!isCollapsed &&
+				viewMode === "path" &&
+				files.map((f) => {
+					const active =
+						selected?.path === f.path && selected?.staged === f.staged;
+					const name = f.path.split("/").pop() || f.path;
+					const dir = f.path.includes("/")
+						? f.path.slice(0, f.path.lastIndexOf("/"))
+						: "";
+					return (
+						<div
+							key={`${f.staged ? "s" : "u"}-${f.path}`}
+							className={`group flex h-[28px] items-center gap-1.5 px-2 ${
+								active ? "bg-surgent-accent/10" : "hover:bg-surgent-text/5"
+							}`}
 						>
-							<span
-								className={`truncate text-[10.5px] font-mono transition-colors ${active ? "text-surgent-text" : "text-surgent-text-3 group-hover:text-surgent-text-2"}`}
-							>
-								{name}
-							</span>
-						</button>
-						{onAction && (
+							<FileStatusIcon status={f.status} />
 							<button
 								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									onAction(f.path);
-								}}
-								className="shrink-0 opacity-0 group-hover:opacity-100 rounded px-1.5 py-0.5 text-[8px] text-surgent-text-3 hover:bg-surgent-text/10 hover:text-surgent-text transition-all"
-								title={`${actionLabel} ${f.path}`}
+								onClick={() => onSelect(f)}
+								className="flex-1 min-w-0 h-full flex items-center gap-1 text-left"
+								title={f.path}
 							>
-								{actionLabel}
+								<span
+									className={`truncate text-[10px] font-mono transition-colors ${active ? "text-surgent-text" : "text-surgent-text-2 group-hover:text-surgent-text"}`}
+								>
+									{name}
+								</span>
+								{dir && (
+									<span className="truncate text-[9px] text-surgent-text-3/60">
+										{dir}
+									</span>
+								)}
 							</button>
-						)}
-					</div>
-				);
-			})}
+							{onAction && (
+								<button
+									type="button"
+									onClick={(e) => {
+										e.stopPropagation();
+										onAction(f.path);
+									}}
+									className="shrink-0 opacity-0 group-hover:opacity-100 rounded px-1.5 py-0.5 text-[8px] text-surgent-text-3 hover:bg-surgent-text/10 hover:text-surgent-text transition-all"
+									title={`${actionLabel} ${f.path}`}
+								>
+									{actionLabel}
+								</button>
+							)}
+						</div>
+					);
+				})}
+			{!isCollapsed && viewMode === "tree" && (
+				<div>
+					{[...tree.children.values()]
+						.sort((a, b) => {
+							const aIsDir = a.children.size > 0 && !a.file;
+							const bIsDir = b.children.size > 0 && !b.file;
+							if (aIsDir && !bIsDir) return -1;
+							if (!aIsDir && bIsDir) return 1;
+							return a.name.localeCompare(b.name);
+						})
+						.map((child) => (
+							<TreeNodeRow
+								key={child.path}
+								node={child}
+								depth={0}
+								selected={selected}
+								onSelect={onSelect}
+								onAction={onAction}
+								actionLabel={actionLabel}
+								expandedDirs={expandedDirs}
+								toggleDir={toggleDir}
+							/>
+						))}
+				</div>
+			)}
 		</div>
 	);
 }

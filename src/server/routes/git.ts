@@ -3,8 +3,12 @@ import { badRequest, tryRoute } from "../lib/route-helpers.ts";
 import {
 	type GitStatusResult,
 	commit,
+	getBlame,
 	getBranches,
+	getCommitDetails,
 	getDiff,
+	getFileHistory,
+	getGraphLog,
 	getLog,
 	getStatus,
 	stageAll,
@@ -415,6 +419,51 @@ export function gitRoutes() {
 				if (!cwd) return badRequest("Missing cwd parameter");
 				const log = await getLog(cwd, limit);
 				return Response.json({ log });
+			}),
+		},
+
+		"/api/git/graph": {
+			GET: tryRoute(async (req) => {
+				const url = new URL(req.url);
+				const cwd = url.searchParams.get("cwd");
+				const limit = Number(url.searchParams.get("limit") || 50);
+				if (!cwd) return badRequest("Missing cwd parameter");
+				const commits = await getGraphLog(cwd, limit);
+				return Response.json({ commits });
+			}),
+		},
+
+		"/api/git/blame": {
+			GET: tryRoute(async (req) => {
+				const url = new URL(req.url);
+				const cwd = url.searchParams.get("cwd");
+				const file = url.searchParams.get("file");
+				if (!cwd || !file) return badRequest("Missing cwd or file parameter");
+				const blame = await getBlame(cwd, file);
+				return Response.json({ blame });
+			}),
+		},
+
+		"/api/git/file-history": {
+			GET: tryRoute(async (req) => {
+				const url = new URL(req.url);
+				const cwd = url.searchParams.get("cwd");
+				const file = url.searchParams.get("file");
+				const limit = Number(url.searchParams.get("limit") || 20);
+				if (!cwd || !file) return badRequest("Missing cwd or file parameter");
+				const history = await getFileHistory(cwd, file, limit);
+				return Response.json({ history });
+			}),
+		},
+
+		"/api/git/commit-details": {
+			GET: tryRoute(async (req) => {
+				const url = new URL(req.url);
+				const cwd = url.searchParams.get("cwd");
+				const hash = url.searchParams.get("hash");
+				if (!cwd || !hash) return badRequest("Missing cwd or hash parameter");
+				const details = await getCommitDetails(cwd, hash);
+				return Response.json({ details });
 			}),
 		},
 
