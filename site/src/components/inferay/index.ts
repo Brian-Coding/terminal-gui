@@ -14,3 +14,4 @@ export { ChatPanel, VerticalChatPanel, ChatGridView } from "./ChatPanel";
 export { UnifiedSidebar } from "./Sidebar";
 export { GraphView } from "./GraphView";
 export { TimelineView } from "./TimelineView";
+export { TerminalPanel } from "./TerminalPanel";
