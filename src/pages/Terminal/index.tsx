@@ -8,6 +8,11 @@ import {
 } from "react";
 import type { ClaudeChatHandle } from "../../components/chat/ClaudeChatView.tsx";
 import { clearChatMessages } from "../../components/chat/ClaudeChatView.tsx";
+import { Button } from "../../components/ui/Button.tsx";
+import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
+import { EmptyState } from "../../components/ui/EmptyState.tsx";
+import { GroupTabs } from "../../components/ui/GroupTabs.tsx";
+import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
 	IconArrowLeft,
 	IconChevronDown,
@@ -16,29 +21,23 @@ import {
 	IconFolder,
 	IconFolderOpen,
 	IconGlobe,
-	IconLayout,
 	IconLayoutGrid,
 	IconLayoutRows,
 	IconPalette,
 	IconPlus,
-	IconRobot,
 	IconX,
 } from "../../components/ui/Icons.tsx";
-import { Button } from "../../components/ui/Button.tsx";
-import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
-import { EmptyState } from "../../components/ui/EmptyState.tsx";
-import { GroupTabs } from "../../components/ui/GroupTabs.tsx";
-import { IconButton } from "../../components/ui/IconButton.tsx";
 import { useAgentSessions } from "../../hooks/useAgentSessions.ts";
 import { useClaudeProcesses } from "../../hooks/useClaudeProcesses.ts";
 import { useRunningPorts } from "../../hooks/useRunningPorts.ts";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
+import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { AgentSidebar, CollapsedAgentBar } from "./AgentSidebar.tsx";
 import { ClaudeProcessesSidebar } from "./ClaudeProcessesSidebar.tsx";
 import { CollapsibleSidebarSection } from "./CollapsibleSidebarSection.tsx";
-import { PopoutHeader } from "./PopoutHeader.tsx";
 import { NewSessionButtons } from "./NewSessionButtons.tsx";
+import { PopoutHeader } from "./PopoutHeader.tsx";
 import { TerminalGrid } from "./TerminalGrid.tsx";
 import { TerminalSettingsPanel } from "./TerminalSettingsPanel.tsx";
 
@@ -87,7 +86,9 @@ function markPopoutRestored() {
 	} catch {}
 }
 
-function cwdLabel(cwd: string): string {
+const logoUrl = resolveServerUrl("/logo.png");
+
+function _cwdLabel(cwd: string): string {
 	if (!cwd) return "unknown";
 	const parts = cwd.split("/");
 	return parts[parts.length - 1] || cwd;
@@ -96,11 +97,7 @@ function cwdLabel(cwd: string): string {
 function TerminalEmptyStateBrand() {
 	return (
 		<div className="rounded-2xl border border-surgent-border bg-surgent-surface p-4 shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
-			<img
-				src="/logo.png"
-				alt="Terminal GUI logo"
-				className="h-14 w-14 rounded-xl"
-			/>
+			<img src={logoUrl} alt="inferay logo" className="h-14 w-14 rounded-xl" />
 		</div>
 	);
 }
@@ -268,7 +265,7 @@ export function TerminalPage({
 		new Map()
 	);
 	const { ports: runningPorts, killPort, openInBrowser } = useRunningPorts();
-	const { sessions: agentSessions } = useAgentSessions();
+	useAgentSessions();
 	const {
 		processes: claudeProcesses,
 		killProcess: killClaudeProcess,
@@ -498,9 +495,10 @@ export function TerminalPage({
 	const removeGroup = useCallback(
 		(groupId: string) => {
 			if (groups.length <= 1) return;
-			groups
-				.find((g) => g.id === groupId)
-				?.panes.forEach((p) => cleanupPane(p.id));
+			const group = groups.find((g) => g.id === groupId);
+			if (group) {
+				for (const p of group.panes) cleanupPane(p.id);
+			}
 			groupsDispatch({ type: "removeGroup", groupId });
 			if (selectedGroupId === groupId)
 				setSelectedGroupId(groups.find((g) => g.id !== groupId)?.id ?? null);
@@ -623,9 +621,9 @@ export function TerminalPage({
 		>
 			<div className="relative flex flex-1 flex-col overflow-hidden">
 				<div
-					className={`relative flex items-center gap-2 border-b border-surgent-border bg-surgent-bg px-2 sm:gap-3 sm:px-3 ${isStandalone ? "py-1.5" : "h-12"}`}
+					className={`electrobun-webkit-app-region-drag relative flex items-center gap-2 border-b border-surgent-border bg-surgent-bg px-2 sm:gap-3 sm:px-3 ${isStandalone ? "py-1.5" : "h-12"}`}
 				>
-					<div className="relative z-10 overflow-x-auto shrink-0">
+					<div className="electrobun-webkit-app-region-no-drag relative z-10 overflow-x-auto shrink-0">
 						<GroupTabs
 							items={groupTabItems}
 							activeId={selectedGroupId}
@@ -637,7 +635,7 @@ export function TerminalPage({
 						/>
 					</div>
 					<div className="flex-1 min-w-0" />
-					<div className="relative z-10 flex items-center gap-2 sm:gap-3 shrink-0">
+					<div className="electrobun-webkit-app-region-no-drag relative z-10 flex items-center gap-2 sm:gap-3 shrink-0">
 						<Button
 							size="sm"
 							variant={showSettings ? "secondary" : "ghost"}

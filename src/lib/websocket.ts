@@ -1,5 +1,4 @@
-type MessageHandler = (data: any) => void;
-type BinaryMessageHandler = (data: ArrayBuffer) => void;
+import { getServerWebSocketUrl } from "./server-origin.ts";
 
 export interface WSMessage {
 	type: string;
@@ -9,8 +8,11 @@ export interface WSMessage {
 	exitCode?: number;
 	ok?: boolean;
 	error?: string;
-	[key: string]: any;
+	[key: string]: unknown;
 }
+
+type MessageHandler = (data: WSMessage) => void;
+type BinaryMessageHandler = (data: ArrayBuffer) => void;
 
 class WebSocketClient {
 	private ws: WebSocket | null = null;
@@ -22,8 +24,12 @@ class WebSocketClient {
 	private pendingMessages: string[] = [];
 	private url: string;
 	constructor(host?: string) {
-		const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-		this.url = `${protocol}//${host || window.location.host}/ws`;
+		if (host) {
+			const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+			this.url = `${protocol}//${host}/ws`;
+			return;
+		}
+		this.url = getServerWebSocketUrl("/ws");
 	}
 	connect() {
 		if (
@@ -86,7 +92,7 @@ class WebSocketClient {
 		if (!this.listeners.has(runId)) {
 			this.listeners.set(runId, new Set());
 		}
-		this.listeners.get(runId)!.add(handler);
+		this.listeners.get(runId)?.add(handler);
 		return () => {
 			this.listeners.get(runId)?.delete(handler);
 			if (this.listeners.get(runId)?.size === 0) {

@@ -23,7 +23,7 @@ export interface GitProjectStatus {
 }
 
 export function useGitStatus(cwds: string[]) {
-	const cwdKey = cwds.sort().join(",");
+	const _cwdKey = cwds.sort().join(",");
 
 	const fetcher = useCallback(
 		async () => {
@@ -31,13 +31,14 @@ export function useGitStatus(cwds: string[]) {
 			return postJson<GitProjectStatus[]>("/api/git/statuses", { cwds });
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[cwdKey]
+		[cwds]
 	);
 
 	const { data: projects, refetch } = usePollingResource<GitProjectStatus[]>(
 		fetcher,
 		5000,
-		[]
+		[],
+		{ deferInitialFetch: true }
 	);
 
 	const projectMap = useMemo(() => {

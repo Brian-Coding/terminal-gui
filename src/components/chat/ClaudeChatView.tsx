@@ -7,10 +7,11 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { usePrompts } from "../../hooks/usePrompts.ts";
 import { getAgentDefinition } from "../../lib/agents.ts";
-import { measureTextHeight } from "../../lib/pretext-utils.ts";
+import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
+import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
+import { useShikiSnippet } from "../../hooks/useShikiHighlighter.ts";
 import {
 	type AgentKind,
 	formatElapsedTime,
@@ -22,6 +23,7 @@ import {
 	IconCheck,
 	IconCircle,
 	IconMessageCircle,
+	IconPause,
 	IconPencil,
 	IconSparkles,
 	IconTerminal,
@@ -34,6 +36,7 @@ interface QueuedMessage {
 	id: string;
 	text: string;
 	displayText: string;
+	images?: string[];
 }
 
 let queueIdCounter = 0;
@@ -53,9 +56,41 @@ interface ClaudeChatViewProps {
 	onStatusChange?: (paneId: string, status: string) => void;
 }
 
+export interface ToolActivity {
+	id: string;
+	toolName: string;
+	isStreaming: boolean;
+	summary: string;
+}
+
+export interface QueuedMessageInfo {
+	id: string;
+	text: string;
+	displayText: string;
+	images?: string[];
+}
+
+export interface AttachedImageInfo {
+	name: string;
+	path: string;
+	previewUrl: string;
+}
+
 export interface ClaudeChatHandle {
 	sendMessage: (text: string) => void;
+	sendMessageWithImages: (text: string, images?: string[]) => void;
 	getStatus: () => string;
+	focusInput: (atEnd?: boolean) => void;
+	getToolActivities: () => ToolActivity[];
+	getQueuedCount: () => number;
+	getQueuedMessages: () => QueuedMessageInfo[];
+	removeQueuedMessage: (id: string) => void;
+	updateQueuedMessage: (id: string, text: string) => void;
+	stopGeneration: () => void;
+	isLoading: () => boolean;
+	getAttachedImages: () => AttachedImageInfo[];
+	attachImageFile: (file: File) => Promise<void>;
+	removeAttachedImage: (path: string) => void;
 }
 
 interface ChatMessage {
@@ -65,6 +100,8 @@ interface ChatMessage {
 	toolName?: string;
 	isStreaming?: boolean;
 	btwQuestion?: string;
+	/** Image paths attached to user messages */
+	images?: string[];
 }
 
 interface CheckpointInfo {
@@ -79,10 +116,11 @@ interface CheckpointInfo {
 
 type RenderItem =
 	| { type: "message"; message: ChatMessage }
-	| { type: "tool-group"; messages: ChatMessage[] };
+	| { type: "edit-group"; filePath: string; edits: ChatMessage[] };
 
-const MAX_MESSAGES = 100;
-const MAX_TOTAL_CHARS = 200000;
+const MAX_MESSAGES = 80;
+const MAX_TOTAL_CHARS = 150000;
+const TRIM_CHECK_INTERVAL = 5; // Only check trim every N new messages
 const STORAGE_KEY_PREFIX = "surgent-chat-";
 const SESSION_KEY_PREFIX = "surgent-chat-session-";
 const INPUT_KEY_PREFIX = "surgent-chat-input-";
@@ -93,42 +131,127 @@ function nextId() {
 	return `c${++msgId}-${Date.now().toString(36)}`;
 }
 
+// Quick check - only do expensive char count if message count is high
 function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
-	let trimmed = msgs.length > MAX_MESSAGES ? msgs.slice(-MAX_MESSAGES) : msgs;
+	// Fast path: under message limit, skip expensive char calculation
+	if (msgs.length <= MAX_MESSAGES) return msgs;
 
-	let totalChars = trimmed.reduce((sum, m) => sum + m.content.length, 0);
-	while (totalChars > MAX_TOTAL_CHARS && trimmed.length > 1) {
-		totalChars -= trimmed[0]!.content.length;
-		trimmed = trimmed.slice(1);
+	// Over message limit - trim from front
+	let trimmed = msgs.slice(-MAX_MESSAGES);
+
+	// Only check char limit if we have many messages (expensive operation)
+	if (trimmed.length > 50) {
+		let totalChars = trimmed.reduce((sum, m) => sum + m.content.length, 0);
+		while (totalChars > MAX_TOTAL_CHARS && trimmed.length > 1) {
+			totalChars -= trimmed[0]?.content.length ?? 0;
+			trimmed = trimmed.slice(1);
+		}
 	}
 
 	return trimmed;
 }
 
-function isGroupedToolMessage(msg: ChatMessage): boolean {
-	return msg.role === "tool" && msg.toolName !== "AskUserQuestion";
+// Lightweight version - just adds message, no trimming (for streaming)
+function addMessage(msgs: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+	return [...msgs, msg];
+}
+
+// Tools shown in activity bar, not rendered inline (except Edit and AskUserQuestion)
+function isActivityBarTool(msg: ChatMessage): boolean {
+	return (
+		msg.role === "tool" &&
+		msg.toolName !== "AskUserQuestion" &&
+		msg.toolName !== "Edit"
+	);
+}
+
+function getEditFilePath(msg: ChatMessage): string | null {
+	if (msg.role !== "tool" || msg.toolName !== "Edit" || !msg.content)
+		return null;
+	try {
+		const parsed = JSON.parse(msg.content);
+		return parsed.file_path || null;
+	} catch {
+		return null;
+	}
 }
 
 function buildRenderItems(messages: ChatMessage[]): RenderItem[] {
 	const items: RenderItem[] = [];
-	let currentToolGroup: ChatMessage[] = [];
+	const filtered = messages.filter((msg) => !isActivityBarTool(msg));
 
-	const flushToolGroup = () => {
-		if (currentToolGroup.length === 0) return;
-		items.push({ type: "tool-group", messages: currentToolGroup });
-		currentToolGroup = [];
-	};
+	// First pass: identify edit groups by file path
+	// Track which edit message IDs belong to groups (to skip them later)
+	const editGroups = new Map<
+		number,
+		{ filePath: string; edits: ChatMessage[]; lastIdx: number }
+	>();
+	const skipIndices = new Set<number>();
 
-	for (const message of messages) {
-		if (isGroupedToolMessage(message)) {
-			currentToolGroup.push(message);
-			continue;
+	for (let i = 0; i < filtered.length; i++) {
+		if (skipIndices.has(i)) continue;
+
+		const msg = filtered[i]!;
+		const filePath = getEditFilePath(msg);
+
+		if (filePath) {
+			const edits: ChatMessage[] = [msg];
+			const editIndices: number[] = [i];
+			let j = i + 1;
+
+			// Look ahead for more edits to the same file (allow other messages between)
+			while (j < filtered.length) {
+				const nextMsg = filtered[j]!;
+				const nextFilePath = getEditFilePath(nextMsg);
+
+				if (nextFilePath === filePath) {
+					// Same file edit - add to group
+					edits.push(nextMsg);
+					editIndices.push(j);
+					j++;
+				} else if (nextMsg.role === "assistant" || nextMsg.role === "user") {
+					// Non-edit message - skip over but keep looking for more edits
+					j++;
+				} else if (nextFilePath && nextFilePath !== filePath) {
+					// Different file edit - stop looking
+					break;
+				} else {
+					j++;
+				}
+			}
+
+			if (edits.length > 1) {
+				// Mark all these indices to be skipped
+				for (const idx of editIndices) {
+					skipIndices.add(idx);
+				}
+				// Store the group at the position of the last edit
+				const lastEditIdx = editIndices[editIndices.length - 1]!;
+				editGroups.set(lastEditIdx, { filePath, edits, lastIdx: lastEditIdx });
+			}
 		}
-		flushToolGroup();
-		items.push({ type: "message", message });
 	}
 
-	flushToolGroup();
+	// Second pass: build render items in order
+	for (let i = 0; i < filtered.length; i++) {
+		// Check if there's an edit group that should be rendered at this position
+		const group = editGroups.get(i);
+		if (group) {
+			items.push({
+				type: "edit-group",
+				filePath: group.filePath,
+				edits: group.edits,
+			});
+			continue;
+		}
+
+		// Skip if this index is part of a group (but not the last one)
+		if (skipIndices.has(i)) continue;
+
+		// Normal message
+		items.push({ type: "message", message: filtered[i]! });
+	}
+
 	return items;
 }
 
@@ -186,6 +309,198 @@ interface SlashCommand {
 	isFromLibrary?: boolean;
 }
 
+// Render input text with inline highlights for /commands and @files
+// This is for the overlay that sits behind the transparent textarea
+// Critical: must maintain exact same text flow as the textarea
+function renderInputWithHighlights(
+	text: string,
+	theme?: { accent?: string; text?: string }
+): React.ReactNode {
+	if (!text) return <span style={{ color: "transparent" }}>{"\u00A0"}</span>;
+
+	// Find all tokens to highlight
+	const tokens: { start: number; end: number }[] = [];
+
+	// Find slash commands: /word (at start or after whitespace)
+	// Using a simple approach without lookbehind for compatibility
+	const slashRegex = /(^|\s)(\/[a-zA-Z][\w-]*)/g;
+	let match: RegExpExecArray | null;
+	while ((match = slashRegex.exec(text)) !== null) {
+		const prefix = match[1]!;
+		const token = match[2]!;
+		const start = match.index + prefix.length;
+		tokens.push({ start, end: start + token.length });
+	}
+
+	// Find file references: @path (at start or after whitespace)
+	const fileRegex = /(^|\s)(@[^\s]+)/g;
+	while ((match = fileRegex.exec(text)) !== null) {
+		const prefix = match[1]!;
+		const token = match[2]!;
+		const start = match.index + prefix.length;
+		tokens.push({ start, end: start + token.length });
+	}
+
+	// Sort by position and remove duplicates
+	tokens.sort((a, b) => a.start - b.start);
+
+	if (tokens.length === 0) {
+		// No tokens - render all text in theme color
+		return (
+			<span style={{ color: theme?.text ?? "var(--color-surgent-text)" }}>
+				{text}
+			</span>
+		);
+	}
+
+	// Build segments with highlights
+	const segments: React.ReactNode[] = [];
+	let lastEnd = 0;
+
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i]!;
+		// Skip if overlapping with previous
+		if (token.start < lastEnd) continue;
+
+		// Plain text before token
+		if (token.start > lastEnd) {
+			segments.push(
+				<span
+					key={`t-${lastEnd}`}
+					style={{ color: theme?.text ?? "var(--color-surgent-text)" }}
+				>
+					{text.slice(lastEnd, token.start)}
+				</span>
+			);
+		}
+		// Highlighted token - use background highlight
+		const tokenText = text.slice(token.start, token.end);
+		segments.push(
+			<span
+				key={`h-${token.start}`}
+				className="rounded-sm"
+				style={{
+					color: theme?.accent ?? "var(--color-surgent-accent)",
+					backgroundColor: theme?.accent
+						? `${theme.accent}20`
+						: "var(--color-surgent-accent-15, rgba(0, 122, 255, 0.15))",
+				}}
+			>
+				{tokenText}
+			</span>
+		);
+		lastEnd = token.end;
+	}
+
+	// Remaining text
+	if (lastEnd < text.length) {
+		segments.push(
+			<span
+				key={`t-${lastEnd}`}
+				style={{ color: theme?.text ?? "var(--color-surgent-text)" }}
+			>
+				{text.slice(lastEnd)}
+			</span>
+		);
+	}
+
+	return <>{segments}</>;
+}
+
+// Parse text and return segments with pills for /commands and @files
+// Uses theme CSS variables for consistent theming
+// When bubbleTheme is provided (for terminal panes with custom themes), uses those colors
+function parseTextWithPills(
+	text: string,
+	bubbleTheme?: { cursor?: string; fg?: string }
+): React.ReactNode[] {
+	if (!text) return [];
+
+	// Find all matches
+	const matches: {
+		start: number;
+		end: number;
+		text: string;
+		type: "command" | "file";
+	}[] = [];
+
+	// Find slash commands
+	let match: RegExpExecArray | null;
+	const slashRegex = /(?:^|\s)(\/[a-zA-Z][\w-]*)/g;
+	while ((match = slashRegex.exec(text)) !== null) {
+		const fullMatch = match[1]!;
+		const start = match.index + (match[0].length - fullMatch.length);
+		matches.push({
+			start,
+			end: start + fullMatch.length,
+			text: fullMatch,
+			type: "command",
+		});
+	}
+
+	// Find file references
+	const fileRegex = /(?:^|\s)(@[^\s]+)/g;
+	while ((match = fileRegex.exec(text)) !== null) {
+		const fullMatch = match[1]!;
+		const start = match.index + (match[0].length - fullMatch.length);
+		matches.push({
+			start,
+			end: start + fullMatch.length,
+			text: fullMatch,
+			type: "file",
+		});
+	}
+
+	// Sort by position
+	matches.sort((a, b) => a.start - b.start);
+
+	// If no matches, return plain text
+	if (matches.length === 0) return [text];
+
+	// Build segments
+	const segments: React.ReactNode[] = [];
+	let lastEnd = 0;
+
+	for (const m of matches) {
+		// Add text before this match
+		if (m.start > lastEnd) {
+			segments.push(text.slice(lastEnd, m.start));
+		}
+		// Add the pill - use bubbleTheme colors if provided (terminal panes), otherwise CSS variables
+		if (bubbleTheme?.cursor) {
+			segments.push(
+				<span
+					key={`${m.type}-${m.start}`}
+					className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] font-medium leading-none"
+					style={{
+						backgroundColor: `${bubbleTheme.cursor}20`,
+						color: bubbleTheme.cursor,
+					}}
+				>
+					{m.text}
+				</span>
+			);
+		} else {
+			segments.push(
+				<span
+					key={`${m.type}-${m.start}`}
+					className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] font-medium leading-none bg-surgent-accent/15 text-surgent-accent"
+				>
+					{m.text}
+				</span>
+			);
+		}
+		lastEnd = m.end;
+	}
+
+	// Add remaining text
+	if (lastEnd < text.length) {
+		segments.push(text.slice(lastEnd));
+	}
+
+	return segments;
+}
+
 // Local-only commands that don't send to the active agent
 const LOCAL_COMMANDS: SlashCommand[] = [
 	{
@@ -214,8 +529,23 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 		},
 		ref
 	) {
-		const [messages, setMessages] = useState<ChatMessage[]>(() =>
+		const [messages, setMessagesRaw] = useState<ChatMessage[]>(() =>
 			loadMessages(paneId)
+		);
+		const messagesRef = useRef(messages);
+		messagesRef.current = messages;
+		const setMessages = useCallback(
+			(update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+				setMessagesRaw((prev) => {
+					const next =
+						typeof update === "function"
+							? (update as (prev: ChatMessage[]) => ChatMessage[])(prev)
+							: update;
+					messagesRef.current = next;
+					return next;
+				});
+			},
+			[]
 		);
 		const [input, setInputRaw] = useState(() => {
 			try {
@@ -291,9 +621,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				maxHeight: number;
 			} | null;
 		}>({ show: false, selectedIdx: 0, position: null });
-		const showCommands = commandMenu.show;
-		const selectedCommandIdx = commandMenu.selectedIdx;
-		const menuPosition = commandMenu.position;
+		const _menuPosition = commandMenu.position;
 		// @ file reference menu
 		const [fileMenu, setFileMenu] = useState<{
 			show: boolean;
@@ -307,6 +635,13 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				maxHeight: number;
 			} | null;
 		}>({ show: false, selectedIdx: 0, query: "", atIndex: -1, position: null });
+		// / command menu for mid-sentence detection
+		const [slashMenu, setSlashMenu] = useState<{
+			show: boolean;
+			selectedIdx: number;
+			query: string;
+			slashIndex: number; // cursor position of the '/'
+		}>({ show: false, selectedIdx: 0, query: "", slashIndex: -1 });
 		const [fileResults, setFileResults] = useState<
 			{ name: string; path: string; isDir: boolean }[]
 		>([]);
@@ -327,6 +662,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 		);
 		const scrollRef = useRef<HTMLDivElement>(null);
 		const textareaRef = useRef<HTMLTextAreaElement>(null);
+		const highlightOverlayRef = useRef<HTMLDivElement>(null);
 		const inputContainerRef = useRef<HTMLDivElement>(null);
 		const currentAssistantRef = useRef<string | null>(null);
 		const currentToolRef = useRef<string | null>(null);
@@ -339,8 +675,53 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 		const fileInputRef = useRef<HTMLInputElement>(null);
 		const currentBtwRef = useRef<string | null>(null);
 
+		// Markdown file preview modal state
+		const [mdPreview, setMdPreview] = useState<{
+			show: boolean;
+			path: string;
+			content: string | null;
+			loading: boolean;
+			error: string | null;
+		}>({ show: false, path: "", content: null, loading: false, error: null });
+
+		const handleMdFileClick = useCallback((filePath: string) => {
+			setMdPreview({
+				show: true,
+				path: filePath,
+				content: null,
+				loading: true,
+				error: null,
+			});
+			// Fetch the file content via websocket
+			wsClient.send({ type: "file:read", path: filePath });
+		}, []);
+
+		// Listen for file read response
+		useEffect(() => {
+			const handleMessage = (msg: Record<string, unknown>) => {
+				if (msg.type === "file:content" && mdPreview.loading) {
+					setMdPreview((prev) => ({
+						...prev,
+						content: msg.content as string,
+						loading: false,
+					}));
+				} else if (msg.type === "file:error" && mdPreview.loading) {
+					setMdPreview((prev) => ({
+						...prev,
+						error: (msg.error as string) || "Failed to read file",
+						loading: false,
+					}));
+				}
+			};
+			return wsClient.onMessage(handleMessage);
+		}, [mdPreview.loading]);
+
+		useEffect(() => {
+			requestAnimationFrame(() => textareaRef.current?.focus());
+		}, []);
+
 		const appendLocalMessages = useCallback(
-			(pending: Array<Pick<ChatMessage, "role" | "content">>) => {
+			(pending: Array<Pick<ChatMessage, "role" | "content" | "images">>) => {
 				if (pending.length === 0) return;
 				setMessages((prev) =>
 					trimMessages([
@@ -349,20 +730,25 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 							id: nextId(),
 							role: msg.role,
 							content: msg.content,
+							images: msg.images,
 						})),
 					])
 				);
 			},
+			[setMessages]
+		);
+		const queueMessage = useCallback(
+			(text: string, displayText: string, images?: string[]) => {
+				queueRef.current.push({
+					id: String(++queueIdCounter),
+					text,
+					displayText,
+					images: images?.length ? images : undefined,
+				});
+				setQueuedMessages([...queueRef.current]);
+			},
 			[]
 		);
-		const queueMessage = useCallback((text: string, displayText: string) => {
-			queueRef.current.push({
-				id: String(++queueIdCounter),
-				text,
-				displayText,
-			});
-			setQueuedMessages([...queueRef.current]);
-		}, []);
 
 		// Load prompts from local JSON
 		const { prompts: localPrompts, incrementUsage: incrementLocalUsage } =
@@ -387,14 +773,32 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				action: "send",
 				isLocalCommand: true,
 			}));
-			return [...LOCAL_COMMANDS, ...nativeCommands, ...libraryCommands];
+			const deduped = new Map<string, SlashCommand>();
+			for (const cmd of [
+				...LOCAL_COMMANDS,
+				...libraryCommands,
+				...nativeCommands,
+			]) {
+				const key = cmd.name.toLowerCase();
+				if (!deduped.has(key)) deduped.set(key, cmd);
+			}
+			return [...deduped.values()];
 		}, [agentKind, localPrompts]);
 
-		const filteredCommands = input.startsWith("/")
-			? allCommands.filter((cmd) =>
-					cmd.name.toLowerCase().startsWith(input.slice(1).toLowerCase())
-				)
-			: [];
+		// Mid-sentence slash command detection
+		const slashCommandInfo = useMemo(() => {
+			if (!slashMenu.show || slashMenu.slashIndex === -1) {
+				return { query: "", filtered: [] };
+			}
+			const query = slashMenu.query.toLowerCase();
+			const filtered = allCommands.filter((cmd) =>
+				cmd.name.toLowerCase().startsWith(query)
+			);
+			return { query, filtered };
+		}, [slashMenu.show, slashMenu.slashIndex, slashMenu.query, allCommands]);
+
+		const filteredCommands = slashCommandInfo.filtered;
+		const showCommands = slashMenu.show && filteredCommands.length > 0;
 
 		// Cache container rects to avoid repeated getBoundingClientRect reflows
 		const cachedRects = useRef<{ input: DOMRect; container: DOMRect } | null>(
@@ -429,17 +833,40 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			};
 		}, []);
 
-		useEffect(() => {
-			if (input.startsWith("/") && !input.includes(" ")) {
-				setCommandMenu({
+		// Handle slash command menu detection (mid-sentence)
+		const handleInputForSlashMenu = useCallback(
+			(value: string, cursorPos: number) => {
+				// Find the last '/' before cursor that starts a command reference
+				let slashIdx = -1;
+				for (let i = cursorPos - 1; i >= 0; i--) {
+					if (value[i] === "/") {
+						// Valid if at start or preceded by whitespace
+						if (i === 0 || /\s/.test(value[i - 1]!)) {
+							slashIdx = i;
+						}
+						break;
+					}
+					// Stop searching if we hit whitespace before finding /
+					if (/\s/.test(value[i]!)) break;
+				}
+
+				if (slashIdx === -1) {
+					if (slashMenu.show)
+						setSlashMenu((prev) => ({ ...prev, show: false }));
+					return;
+				}
+
+				const query = value.slice(slashIdx + 1, cursorPos);
+
+				setSlashMenu({
 					show: true,
 					selectedIdx: 0,
-					position: getMenuPosition(400),
+					query,
+					slashIndex: slashIdx,
 				});
-			} else {
-				setCommandMenu({ show: false, selectedIdx: 0, position: null });
-			}
-		}, [input, getMenuPosition]);
+			},
+			[slashMenu.show]
+		);
 
 		// @ file reference: detect trigger and search
 		const handleInputForFileMenu = useCallback(
@@ -494,14 +921,12 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 				}, 150);
 			},
-			[cwd, fileMenu.show, fileMenu.position]
+			[cwd, fileMenu.show, fileMenu.position, getMenuPosition]
 		);
 
 		// Debounced save as crash safety net (2s), skips during active streaming
 		// Main saves happen on chat:done/chat:error
 		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-		const messagesRef = useRef(messages);
-		messagesRef.current = messages;
 		useEffect(() => {
 			if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 			// Don't save on every streaming delta — wait for a pause
@@ -512,7 +937,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			return () => {
 				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 			};
-		}, [paneId, messages]);
+		}, [paneId]);
 
 		// Notify parent of status changes
 		useEffect(() => {
@@ -531,6 +956,84 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			}
 		}, [isLoading, startTime]);
 
+		const sendToServer = useCallback(
+			(text: string) => {
+				setLoadingState({
+					isLoading: true,
+					status: "thinking",
+					startTime: Date.now(),
+				});
+				currentAssistantRef.current = null;
+				let sessionId: string | null = null;
+				try {
+					sessionId = localStorage.getItem(SESSION_KEY_PREFIX + paneId);
+				} catch {}
+				wsClient.send({
+					type: "chat:send",
+					paneId,
+					text,
+					cwd,
+					sessionId,
+					agentKind,
+				});
+			},
+			[paneId, cwd, agentKind, setLoadingState]
+		);
+
+		// Extract tool activities from messages (same logic as ChatStatusBar)
+		const extractToolActivities = useCallback((): ToolActivity[] => {
+			const activities: ToolActivity[] = [];
+			for (const msg of messagesRef.current) {
+				if (msg.role === "tool" && msg.toolName) {
+					let summary = "";
+					try {
+						if (msg.content) {
+							const parsed = JSON.parse(msg.content);
+							if (parsed.file_path) {
+								summary = parsed.file_path.split("/").pop() || parsed.file_path;
+							} else if (parsed.command) {
+								const cmd = parsed.command.slice(0, 40);
+								summary = `${cmd}${parsed.command.length > 40 ? "..." : ""}`;
+							} else if (parsed.pattern) {
+								summary = `/${parsed.pattern.slice(0, 30)}/`;
+							} else if (parsed.query) {
+								summary = parsed.query.slice(0, 40);
+							} else if (parsed.url) {
+								try {
+									const url = new URL(parsed.url);
+									summary = url.hostname;
+								} catch {
+									summary = parsed.url.slice(0, 40);
+								}
+							} else if (parsed.skill) {
+								summary = `/${parsed.skill}`;
+							} else if (parsed.prompt) {
+								summary = parsed.prompt.slice(0, 40);
+							}
+						}
+					} catch {}
+					activities.push({
+						id: msg.id,
+						toolName: msg.toolName,
+						isStreaming: msg.isStreaming ?? false,
+						summary: summary || msg.toolName,
+					});
+				}
+			}
+			return activities;
+		}, []);
+
+		const stopGeneration = useCallback(() => {
+			wsClient.send({ type: "chat:stop", paneId });
+			setLoadingState({ isLoading: false, status: "idle", startTime: null });
+			setMessages((prev) =>
+				trimMessages([
+					...prev,
+					{ id: nextId(), role: "system", content: "Generation stopped" },
+				])
+			);
+		}, [paneId, setLoadingState, setMessages]);
+
 		useImperativeHandle(
 			ref,
 			() => ({
@@ -543,9 +1046,70 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						sendToServer(text.trim());
 					}
 				},
+				sendMessageWithImages: (text: string, images?: string[]) => {
+					if (!text.trim()) return;
+					if (isLoading) {
+						queueMessage(text.trim(), text.trim(), images);
+					} else {
+						appendLocalMessages([
+							{ role: "user", content: text.trim(), images },
+						]);
+						sendToServer(text.trim());
+					}
+				},
 				getStatus: () => status,
+				focusInput: (atEnd?: boolean) => {
+					const ta = textareaRef.current;
+					if (ta) {
+						ta.focus();
+						if (atEnd) {
+							const len = ta.value.length;
+							ta.setSelectionRange(len, len);
+						}
+					}
+				},
+				getToolActivities: extractToolActivities,
+				getQueuedCount: () => queuedMessages.length,
+				getQueuedMessages: () =>
+					queuedMessages.map((q) => ({
+						id: q.id,
+						text: q.text,
+						displayText: q.displayText,
+						images: q.images,
+					})),
+				removeQueuedMessage: (id: string) => {
+					queueRef.current = queueRef.current.filter((q) => q.id !== id);
+					setQueuedMessages([...queueRef.current]);
+				},
+				updateQueuedMessage: (id: string, text: string) => {
+					const item = queueRef.current.find((q) => q.id === id);
+					if (item) {
+						item.text = text;
+						item.displayText = text;
+						setQueuedMessages([...queueRef.current]);
+					}
+				},
+				stopGeneration,
+				isLoading: () => isLoading,
+				getAttachedImages: () => [...attachedImages],
+				attachImageFile: async (file: File) => {
+					await attachImage(file);
+				},
+				removeAttachedImage: (path: string) => {
+					removeAttachedImage(path);
+				},
 			}),
-			[appendLocalMessages, isLoading, queueMessage, status]
+			[
+				appendLocalMessages,
+				isLoading,
+				queueMessage,
+				status,
+				sendToServer,
+				extractToolActivities,
+				queuedMessages,
+				stopGeneration,
+				attachedImages,
+			]
 		);
 
 		useEffect(() => {
@@ -594,19 +1158,23 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					currentAssistantRef.current = null;
 					currentToolRef.current = null;
 					hasStreamedRef.current = false;
+					wsClient.send({ type: "chat:reconnect", paneId });
 					const next = queueRef.current.shift();
 					setQueuedMessages([...queueRef.current]);
 					if (next) {
-						appendLocalMessages([{ role: "user", content: next.displayText }]);
+						appendLocalMessages([
+							{
+								role: "user",
+								content: next.displayText,
+								images: next.images,
+							},
+						]);
 						sendToServer(next.text);
 					}
 				} else if (msg.type === "chat:user_message") {
-					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{ id: nextId(), role: "user", content: msg.text },
-						])
-					);
+					// User message already added locally with display text in sendMessage()
+					// Server echoes back the full/expanded text - ignore it to keep display clean
+					// Just update loading state
 					setLoadingState({
 						isLoading: true,
 						status: "thinking",
@@ -630,7 +1198,13 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					const next = queueRef.current.shift();
 					setQueuedMessages([...queueRef.current]);
 					if (next) {
-						appendLocalMessages([{ role: "user", content: next.displayText }]);
+						appendLocalMessages([
+							{
+								role: "user",
+								content: next.displayText,
+								images: next.images,
+							},
+						]);
 						sendToServer(next.text);
 					}
 				} else if (msg.type === "chat:system") {
@@ -650,7 +1224,55 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}));
 				} else if (msg.type === "chat:sync") {
 					const serverMessages: ChatMessage[] = msg.messages;
-					setMessages(trimMessages(serverMessages));
+					// Don't replace local history if server has nothing (e.g., after server restart)
+					// Local history from localStorage is more valuable than empty server state
+					if (serverMessages.length === 0) return;
+
+					// Check if we should skip this sync (server has stale/fewer messages)
+					const currentMessages = messagesRef.current;
+					const shouldSkipSync =
+						serverMessages.length < currentMessages.length && !msg.isStreaming;
+
+					if (shouldSkipSync) {
+						// Server lost state (restart) - don't update anything, keep local state
+						return;
+					}
+
+					// Preserve local user message display text instead of server's expanded version
+					// Match by position since IDs differ between client and server
+					setMessages((prev) => {
+						const localUserMsgs = prev.filter((m) => m.role === "user");
+						const serverUserMsgs = serverMessages.filter(
+							(m) => m.role === "user"
+						);
+						// Build a map of server user message index -> local display text
+						const displayTextMap = new Map<number, string>();
+						for (
+							let i = 0;
+							i < serverUserMsgs.length && i < localUserMsgs.length;
+							i++
+						) {
+							// Only preserve if local version is shorter (likely a /command)
+							if (
+								localUserMsgs[i]!.content.length <
+								serverUserMsgs[i]!.content.length
+							) {
+								displayTextMap.set(i, localUserMsgs[i]!.content);
+							}
+						}
+						let userIdx = 0;
+						const merged = serverMessages.map((m) => {
+							if (m.role === "user") {
+								const displayText = displayTextMap.get(userIdx);
+								userIdx++;
+								if (displayText) {
+									return { ...m, content: displayText };
+								}
+							}
+							return m;
+						});
+						return trimMessages(merged);
+					});
 					saveMessages(paneId, serverMessages);
 					if (msg.isStreaming) {
 						setLoadingState({
@@ -667,10 +1289,15 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						);
 						if (lastTool) currentToolRef.current = lastTool.id;
 					} else {
-						setLoadingState({
-							isLoading: false,
-							status: "idle",
-							startTime: null,
+						// Only set to idle if we're not already in a loading state
+						// (prevents flicker when reconnect sync comes after user sends new message)
+						setLoadingState((prev) => {
+							if (prev.isLoading) return prev; // Don't interrupt active loading
+							return {
+								isLoading: false,
+								status: "idle",
+								startTime: null,
+							};
 						});
 						currentAssistantRef.current = null;
 						currentToolRef.current = null;
@@ -699,11 +1326,11 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					if (targetId) {
 						setMessages((prev) => {
 							for (let i = prev.length - 1; i >= 0; i--) {
-								if (prev[i]!.id === targetId) {
+								if (prev[i]?.id === targetId) {
 									const updated = prev.slice();
 									updated[i] = {
 										...updated[i]!,
-										content: updated[i]!.content + msg.text,
+										content: updated[i]?.content + msg.text,
 									};
 									return updated;
 								}
@@ -718,7 +1345,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						setMessages((prev) => {
 							const updated = prev.slice();
 							for (let i = prev.length - 1; i >= 0; i--) {
-								if (updated[i]!.id === targetId) {
+								if (updated[i]?.id === targetId) {
 									updated[i] = {
 										...updated[i]!,
 										content: msg.answer,
@@ -813,7 +1440,14 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				cleanupReconnect();
 				cleanup();
 			};
-		}, [paneId]);
+		}, [
+			paneId,
+			appendLocalMessages,
+			handleChatEvent,
+			sendToServer,
+			setLoadingState,
+			setMessages,
+		]);
 
 		function handleChatEvent(event: any) {
 			if (!event?.type) return;
@@ -887,16 +1521,14 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					const id = nextId();
 					currentAssistantRef.current = id;
 					setLoadingState((prev) => ({ ...prev, status: "responding" }));
+					// Use addMessage during streaming - no expensive trim
 					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id,
-								role: "assistant",
-								content: block.text || "",
-								isStreaming: true,
-							},
-						])
+						addMessage(prev, {
+							id,
+							role: "assistant",
+							content: block.text || "",
+							isStreaming: true,
+						})
 					);
 				} else if (block?.type === "tool_use") {
 					currentAssistantRef.current = null;
@@ -906,17 +1538,15 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						...prev,
 						status: `tool:${block.name}`,
 					}));
+					// Use addMessage during streaming - no expensive trim
 					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id,
-								role: "tool",
-								content: "",
-								toolName: block.name,
-								isStreaming: true,
-							},
-						])
+						addMessage(prev, {
+							id,
+							role: "tool",
+							content: "",
+							toolName: block.name,
+							isStreaming: true,
+						})
 					);
 				}
 			} else if (event.type === "content_block_delta") {
@@ -930,11 +1560,11 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					setMessages((prev) => {
 						// Streaming target is always near the end — search backwards
 						for (let i = prev.length - 1; i >= 0; i--) {
-							if (prev[i]!.id === targetId) {
+							if (prev[i]?.id === targetId) {
 								const updated = prev.slice();
 								updated[i] = {
 									...updated[i]!,
-									content: updated[i]!.content + delta.text,
+									content: updated[i]?.content + delta.text,
 								};
 								return updated;
 							}
@@ -949,11 +1579,11 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					const targetId = currentToolRef.current;
 					setMessages((prev) => {
 						for (let i = prev.length - 1; i >= 0; i--) {
-							if (prev[i]!.id === targetId) {
+							if (prev[i]?.id === targetId) {
 								const updated = prev.slice();
 								updated[i] = {
 									...updated[i]!,
-									content: updated[i]!.content + delta.partial_json,
+									content: updated[i]?.content + delta.partial_json,
 								};
 								return updated;
 							}
@@ -963,12 +1593,12 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				}
 			} else if (event.type === "content_block_stop") {
 				setMessages((prev) => {
-					const updated = prev.slice();
+					let updated = prev.slice();
 					let changed = false;
 					if (currentAssistantRef.current) {
 						const targetId = currentAssistantRef.current;
 						for (let i = prev.length - 1; i >= 0; i--) {
-							if (prev[i]!.id === targetId) {
+							if (prev[i]?.id === targetId) {
 								updated[i] = { ...updated[i]!, isStreaming: false };
 								changed = true;
 								break;
@@ -978,7 +1608,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					if (currentToolRef.current) {
 						const targetId = currentToolRef.current;
 						for (let i = prev.length - 1; i >= 0; i--) {
-							if (prev[i]!.id === targetId) {
+							if (prev[i]?.id === targetId) {
 								updated[i] = { ...updated[i]!, isStreaming: false };
 								changed = true;
 								break;
@@ -987,6 +1617,10 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 					currentAssistantRef.current = null;
 					currentToolRef.current = null;
+					// Trim after message is finalized (not during streaming)
+					if (changed) {
+						updated = trimMessages(updated);
+					}
 					return changed ? updated : prev;
 				});
 			} else if (event.type === "result") {
@@ -1026,79 +1660,37 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			}
 		}
 
-		// Smart scroll anchoring — only auto-scroll if user is near the bottom
-		const wasAtBottom = useRef(true);
-		useEffect(() => {
-			const el = scrollRef.current;
-			if (!el) return;
-			const handleScroll = () => {
-				wasAtBottom.current =
-					el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-			};
-			el.addEventListener("scroll", handleScroll, { passive: true });
-			return () => el.removeEventListener("scroll", handleScroll);
-		}, []);
-		useEffect(() => {
-			const el = scrollRef.current;
-			if (el && wasAtBottom.current) {
-				el.scrollTop = el.scrollHeight;
-			}
-		}, [messages]);
+		// Removed auto-scroll - was causing lag when scrolling up
 
 		useEffect(() => {
 			const ta = textareaRef.current;
 			if (!ta) return;
-			// Use pretext to measure text height without DOM reflow
+			// Use pretext with pre-wrap mode for accurate textarea measurement
 			const width = ta.clientWidth - 24; // px-3 padding both sides
 			if (width > 0 && input) {
-				const measured = measureTextHeight(
+				const measured = measureTextareaHeight(
 					input,
 					width,
 					"12px Geist, -apple-system, system-ui, sans-serif",
-					19.2
+					18 // Match lineHeight in textarea style
 				);
 				const target = Math.min(Math.max(measured + 16, 36), 120); // +padding, min 36, max 120
-				ta.style.height = target + "px";
+				ta.style.height = `${target}px`;
 			} else {
-				ta.style.height = "auto";
+				ta.style.height = "36px";
+			}
+			// Sync overlay scroll position after height change
+			if (highlightOverlayRef.current && ta) {
+				highlightOverlayRef.current.style.transform = `translateY(-${ta.scrollTop}px)`;
 			}
 		}, [input]);
 
-		function sendToServer(text: string) {
-			setLoadingState({
-				isLoading: true,
-				status: "thinking",
-				startTime: Date.now(),
-			});
-			currentAssistantRef.current = null;
-			let sessionId: string | null = null;
-			try {
-				sessionId = localStorage.getItem(SESSION_KEY_PREFIX + paneId);
-			} catch {}
-			wsClient.send({
-				type: "chat:send",
-				paneId,
-				text,
-				cwd,
-				sessionId,
-				agentKind,
-			});
-		}
-
-		function stopGeneration() {
-			wsClient.send({ type: "chat:stop", paneId });
-			setLoadingState({ isLoading: false, status: "idle", startTime: null });
-			setMessages((prev) =>
-				trimMessages([
-					...prev,
-					{ id: nextId(), role: "system", content: "Generation stopped" },
-				])
-			);
-		}
-
-		function revertCheckpoint(checkpointId: string) {
-			wsClient.send({ type: "checkpoint:revert", paneId, checkpointId });
-		}
+		const revertCheckpoint = useCallback(
+			(checkpointId: string) => {
+				wsClient.send({ type: "checkpoint:revert", paneId, checkpointId });
+			},
+			[paneId]
+		);
 
 		const executeCommand = useCallback(
 			(cmd: SlashCommand, args?: string) => {
@@ -1167,12 +1759,12 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 
 					if (isLoading) {
-						queueMessage(prompt, `/${cmd.name}${args ? " " + args : ""}`);
+						queueMessage(prompt, `/${cmd.name}${args ? ` ${args}` : ""}`);
 					} else {
 						appendLocalMessages([
 							{
 								role: "user",
-								content: `/${cmd.name}${args ? " " + args : ""}`,
+								content: `/${cmd.name}${args ? ` ${args}` : ""}`,
 							},
 							{
 								role: "system",
@@ -1189,20 +1781,36 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				allCommands,
 				incrementLocalUsage,
 				queueMessage,
+				cwd,
+				paneId,
+				sendToServer,
+				setInput,
+				setMessages,
 			]
 		);
 
 		const selectCommand = useCallback(
 			(idx: number) => {
-				if (filteredCommands[idx]) {
-					const cmd = filteredCommands[idx];
-					const args = input.slice(1).includes(" ")
-						? input.slice(input.indexOf(" ") + 1)
-						: undefined;
-					executeCommand(cmd, args);
-				}
+				const cmd = filteredCommands[idx];
+				if (!cmd) return;
+				// Insert command inline (like file references) instead of executing
+				const before = input.slice(0, slashMenu.slashIndex);
+				const cursorPos = textareaRef.current?.selectionStart ?? input.length;
+				const after = input.slice(cursorPos);
+				const newInput = `${before}/${cmd.name}${after ? after : " "}`;
+				setInput(newInput);
+				setSlashMenu((prev) => ({ ...prev, show: false }));
+				// Focus textarea and set cursor after the inserted command
+				requestAnimationFrame(() => {
+					const ta = textareaRef.current;
+					if (ta) {
+						const pos = before.length + 1 + cmd.name.length + (after ? 0 : 1);
+						ta.focus();
+						ta.setSelectionRange(pos, pos);
+					}
+				});
 			},
-			[filteredCommands, input, executeCommand]
+			[filteredCommands, input, slashMenu.slashIndex, setInput]
 		);
 
 		const selectFile = useCallback(
@@ -1226,44 +1834,90 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 				});
 			},
-			[fileResults, fileMenu.atIndex, input]
+			[fileResults, fileMenu.atIndex, input, setInput]
 		);
 
 		const sendMessage = useCallback(() => {
 			const text = input.trim();
 			if (!text && attachedImages.length === 0) return;
 
-			if (text.startsWith("/")) {
-				const parts = text.slice(1).split(" ");
-				const cmdName = parts[0]?.toLowerCase();
-				const args = parts.slice(1).join(" ");
-				const cmd = allCommands.find((c) => c.name === cmdName);
+			// Handle message that starts with just a command (legacy behavior)
+			if (text.startsWith("/") && !text.includes(" ")) {
+				const cmdName = text.slice(1).toLowerCase();
+				const cmd = allCommands.find((c) => c.name.toLowerCase() === cmdName);
 				if (cmd) {
-					executeCommand(cmd, args || undefined);
+					executeCommand(cmd, undefined);
 					return;
 				}
 			}
 
 			// Build the full message with image references
 			const imagePaths = attachedImages.map((img) => img.path);
+
+			// Expand any /commands in the text to their full prompts for sending
+			// But keep the display text showing just the /command
+			let expandedText = text;
+
+			// Find and expand all /commands in the message
+			const cmdRegex = /(^|\s)(\/[a-zA-Z][\w-]*)(?=\s|$)/g;
+			let match: RegExpExecArray | null;
+			const expansions: {
+				original: string;
+				expanded: string;
+				cmd: SlashCommand;
+			}[] = [];
+
+			while ((match = cmdRegex.exec(text)) !== null) {
+				const cmdToken = match[2]!;
+				const cmdName = cmdToken.slice(1).toLowerCase();
+				const cmd = allCommands.find((c) => c.name.toLowerCase() === cmdName);
+				if (cmd) {
+					let expanded: string;
+					if (cmd.promptTemplate) {
+						expanded = cmd.promptTemplate.replace("{args}", "").trim();
+						// Track usage for library prompts
+						if (cmd.id) {
+							incrementLocalUsage(cmd.id).catch(() => {});
+						}
+					} else {
+						expanded = cmdToken; // Native commands stay as-is
+					}
+					expansions.push({ original: cmdToken, expanded, cmd });
+				}
+			}
+
+			// Apply expansions to the text for sending to agent
+			for (const exp of expansions) {
+				expandedText = expandedText.replace(exp.original, exp.expanded);
+			}
+
+			// Display text keeps the /command tokens, doesn't show expanded prompts
 			const displayText =
-				text || "Attached image" + (attachedImages.length > 1 ? "s" : "");
+				text || `Attached image${attachedImages.length > 1 ? "s" : ""}`;
+
 			const fullText =
 				imagePaths.length > 0
-					? `${text}${text ? "\n\n" : ""}Here are the images at these paths:\n${imagePaths.join("\n")}`
-					: text;
+					? `${expandedText}${expandedText ? "\n\n" : ""}Here are the images at these paths:\n${imagePaths.join("\n")}`
+					: expandedText;
 
 			setInput("");
+			setSlashMenu((prev) => ({ ...prev, show: false }));
 			setFileMenu((prev) => ({ ...prev, show: false }));
 			// Clean up preview URLs
 			for (const img of attachedImages) URL.revokeObjectURL(img.previewUrl);
 			setAttachedImages([]);
-			if (textareaRef.current) textareaRef.current.style.height = "auto";
+			if (textareaRef.current) textareaRef.current.style.height = "36px";
 
 			if (isLoading) {
-				queueMessage(fullText, displayText);
+				queueMessage(fullText, displayText, imagePaths);
 			} else {
-				appendLocalMessages([{ role: "user", content: displayText }]);
+				appendLocalMessages([
+					{
+						role: "user",
+						content: displayText,
+						images: imagePaths.length > 0 ? imagePaths : undefined,
+					},
+				]);
 				sendToServer(fullText);
 			}
 		}, [
@@ -1273,6 +1927,10 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			attachedImages,
 			appendLocalMessages,
 			queueMessage,
+			allCommands,
+			incrementLocalUsage,
+			sendToServer,
+			setInput,
 		]);
 
 		const handleKeyDown = useCallback(
@@ -1313,7 +1971,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				if (showCommands && filteredCommands.length > 0) {
 					if (e.key === "ArrowDown") {
 						e.preventDefault();
-						setCommandMenu((prev) => ({
+						setSlashMenu((prev) => ({
 							...prev,
 							selectedIdx: (prev.selectedIdx + 1) % filteredCommands.length,
 						}));
@@ -1321,7 +1979,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 					if (e.key === "ArrowUp") {
 						e.preventDefault();
-						setCommandMenu((prev) => ({
+						setSlashMenu((prev) => ({
 							...prev,
 							selectedIdx:
 								(prev.selectedIdx - 1 + filteredCommands.length) %
@@ -1331,12 +1989,12 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 					if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
 						e.preventDefault();
-						selectCommand(selectedCommandIdx);
+						selectCommand(slashMenu.selectedIdx);
 						return;
 					}
 					if (e.key === "Escape") {
 						e.preventDefault();
-						setCommandMenu((prev) => ({ ...prev, show: false }));
+						setSlashMenu((prev) => ({ ...prev, show: false }));
 						return;
 					}
 				}
@@ -1350,7 +2008,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 				sendMessage,
 				showCommands,
 				filteredCommands,
-				selectedCommandIdx,
+				slashMenu.selectedIdx,
 				selectCommand,
 				fileMenu.show,
 				fileMenu.selectedIdx,
@@ -1367,7 +2025,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					if (file.type.startsWith("image/")) await attachImage(file);
 				}
 			},
-			[paneId]
+			[attachImage]
 		);
 
 		const handlePaste = useCallback(
@@ -1381,7 +2039,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					}
 				}
 			},
-			[paneId]
+			[attachImage]
 		);
 
 		async function attachImage(file: File) {
@@ -1411,13 +2069,16 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			});
 		}
 
-		const toggleTool = useCallback((id: string) => {
-			setExpandedTools((prev) => {
-				const next = new Set(prev);
-				next.has(id) ? next.delete(id) : next.add(id);
-				return next;
-			});
-		}, []);
+		const toggleTool = useCallback(
+			(id: string) => {
+				setExpandedTools((prev) => {
+					const next = new Set(prev);
+					next.has(id) ? next.delete(id) : next.add(id);
+					return next;
+				});
+			},
+			[setExpandedTools]
+		);
 
 		const handleSendMessage = useCallback(
 			(text: string) => {
@@ -1429,16 +2090,16 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 					sendToServer(text.trim());
 				}
 			},
-			[appendLocalMessages, isLoading, queueMessage]
+			[appendLocalMessages, isLoading, queueMessage, sendToServer]
 		);
 
 		const bgColor = theme?.bg ?? "#000000";
 		const fgColor = theme?.fg ?? "#e5e5e5";
 		const cursorColor = theme?.cursor ?? "#d6ff00";
-		const fgMuted = fgColor + "88";
-		const fgDim = fgColor + "55";
+		const fgMuted = `${fgColor}88`;
+		const fgDim = `${fgColor}55`;
 		const surfaceColor = theme ? adjustBrightness(bgColor, 15) : undefined;
-		const borderColor = theme ? fgColor + "15" : undefined;
+		const borderColor = theme ? `${fgColor}15` : undefined;
 		const bubbleTheme = useMemo<BubbleTheme | undefined>(
 			() =>
 				theme
@@ -1464,6 +2125,16 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			]
 		);
 
+		// Memoize input highlight to avoid recalculation on status/elapsedTime changes
+		const inputHighlightTheme = useMemo(
+			() => (theme ? { accent: cursorColor, text: fgColor } : undefined),
+			[theme, cursorColor, fgColor]
+		);
+		const inputHighlights = useMemo(
+			() => renderInputWithHighlights(input, inputHighlightTheme),
+			[input, inputHighlightTheme]
+		);
+
 		return (
 			<div
 				ref={containerRef}
@@ -1478,10 +2149,10 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 			>
 				<div
 					ref={scrollRef}
-					className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-none"
+					className="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-none"
 					style={theme ? { backgroundColor: bgColor } : undefined}
 				>
-					<VirtualizedMessages
+					<MessageList
 						messages={messages}
 						expandedTools={expandedTools}
 						toggleTool={toggleTool}
@@ -1492,95 +2163,21 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						handleSendMessage={handleSendMessage}
 						fgDim={fgDim}
 						theme={theme}
+						onMdFileClick={handleMdFileClick}
 					/>
 				</div>
 
-				{/* Status indicator bar */}
-				{status !== "idle" &&
-					(() => {
-						const statusInfo = getStatusInfo(status);
-						const statusColor = theme ? cursorColor : undefined;
-						const iconProps = {
-							size: 13,
-							className: `shrink-0 ${theme ? "" : statusInfo.iconColor} ${statusInfo.isActive ? "animate-pulse" : ""}`,
-							...(theme ? { style: { color: statusColor } } : {}),
-						};
-						const StatusIconEl = () => {
-							switch (statusInfo.iconType) {
-								case "sparkles":
-									return <IconSparkles {...iconProps} />;
-								case "message":
-									return <IconMessageCircle {...iconProps} />;
-								case "alert":
-									return <IconAlertTriangle {...iconProps} />;
-								case "wrench":
-									return <IconWrench {...iconProps} />;
-								case "terminal":
-									return <IconTerminal {...iconProps} />;
-								case "circle":
-								default:
-									return <IconCircle {...iconProps} />;
-							}
-						};
-						return (
-							<div
-								className="shrink-0 px-3 py-1.5 flex items-center gap-2"
-								style={{
-									borderTop: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
-									backgroundColor: theme ? bgColor : "var(--color-surgent-bg)",
-								}}
-							>
-								<StatusIconEl />
-								<span
-									className={`text-[10px] font-medium ${theme ? "" : statusInfo.textColor}`}
-									style={theme ? { color: statusColor } : undefined}
-								>
-									{statusInfo.toolName ? (
-										<>
-											Running{" "}
-											<span className="font-mono">{statusInfo.toolName}</span>
-										</>
-									) : (
-										statusInfo.label
-									)}
-								</span>
-								<span className="flex-1" />
-								{elapsedTime > 0 && (
-									<span
-										className="text-[9px] tabular-nums"
-										style={{
-											color: theme ? fgDim : "var(--color-surgent-text-3)",
-										}}
-									>
-										{formatElapsedTime(elapsedTime)}
-									</span>
-								)}
-								{queuedMessages.length > 0 && (
-									<span
-										className="px-1.5 py-0.5 rounded text-[9px] font-medium tabular-nums"
-										style={{
-											backgroundColor: theme
-												? cursorColor + "20"
-												: "rgba(0,122,255,0.15)",
-											color: theme
-												? cursorColor
-												: "var(--color-surgent-accent)",
-										}}
-									>
-										{queuedMessages.length} queued
-									</span>
-								)}
-								{isLoading && (
-									<button
-										onClick={stopGeneration}
-										className="px-1.5 py-0.5 rounded text-[9px] font-medium transition-colors bg-red-500/20 text-red-400 hover:bg-red-500/30"
-									>
-										Stop
-									</button>
-								)}
-							</div>
-						);
-					})()}
+				{/* Status bar with activity pill and stop button */}
+				<ChatStatusBar
+					messages={messages}
+					isLoading={isLoading}
+					status={status}
+					onStop={stopGeneration}
+					theme={theme}
+					borderColor={borderColor}
+					bgColor={bgColor}
+					fgDim={fgDim}
+				/>
 
 				{/* Queued messages panel */}
 				{queuedMessages.length > 0 && (
@@ -1589,14 +2186,14 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						style={{
 							maxHeight: "140px",
 							borderTop: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
-							backgroundColor: theme ? bgColor + "cc" : "rgba(0,0,0,0.4)",
+							backgroundColor: theme ? `${bgColor}cc` : "rgba(0,0,0,0.4)",
 						}}
 					>
 						<div
 							className="px-3 py-1 text-[9px] font-semibold tracking-wide uppercase"
 							style={{
 								color: theme ? fgDim : "var(--color-surgent-text-3)",
-								borderBottom: `1px solid ${theme ? borderColor + "60" : "rgba(255,255,255,0.06)"}`,
+								borderBottom: `1px solid ${theme ? `${borderColor}60` : "rgba(255,255,255,0.06)"}`,
 							}}
 						>
 							Queued messages
@@ -1608,12 +2205,12 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 								style={{
 									borderBottom:
 										idx < queuedMessages.length - 1
-											? `1px solid ${theme ? borderColor + "40" : "rgba(255,255,255,0.04)"}`
+											? `1px solid ${theme ? `${borderColor}40` : "rgba(255,255,255,0.04)"}`
 											: undefined,
 								}}
 								onMouseEnter={(e) => {
 									e.currentTarget.style.backgroundColor = theme
-										? cursorColor + "08"
+										? `${cursorColor}08`
 										: "rgba(255,255,255,0.03)";
 								}}
 								onMouseLeave={(e) => {
@@ -1662,6 +2259,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 											}}
 										/>
 										<button
+											type="button"
 											onClick={() => {
 												const trimmed = editingQueueText.trim();
 												if (trimmed) {
@@ -1687,6 +2285,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 											<IconCheck size={11} />
 										</button>
 										<button
+											type="button"
 											onClick={() => setEditingQueueId(null)}
 											className="shrink-0 p-0.5 rounded transition-colors"
 											style={{
@@ -1709,6 +2308,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 										</span>
 										<div className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
 											<button
+												type="button"
 												onClick={() => {
 													setEditingQueueId(qm.id);
 													setEditingQueueText(qm.text);
@@ -1722,6 +2322,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 												<IconPencil size={11} />
 											</button>
 											<button
+												type="button"
 												onClick={() => {
 													queueRef.current = queueRef.current.filter(
 														(q) => q.id !== qm.id
@@ -1766,6 +2367,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 											}}
 										/>
 										<button
+											type="button"
 											onClick={() => removeAttachedImage(img.path)}
 											className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
 										>
@@ -1802,7 +2404,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 								}}
 								onMouseEnter={(e) => {
 									e.currentTarget.style.backgroundColor = theme
-										? cursorColor + "15"
+										? `${cursorColor}15`
 										: "rgba(255,255,255,0.06)";
 								}}
 								onMouseLeave={(e) => {
@@ -1811,6 +2413,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 								title="Attach image"
 							>
 								<svg
+									aria-hidden="true"
 									width="16"
 									height="16"
 									viewBox="0 0 24 24"
@@ -1826,217 +2429,218 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 							</button>
 							<div className="relative flex-1">
 								{/* @ file reference menu */}
-								{fileMenu.show &&
-									fileResults.length > 0 &&
-									fileMenu.position &&
-									createPortal(
+								{fileMenu.show && fileResults.length > 0 && (
+									<div
+										className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg overflow-y-auto z-[9999]"
+										style={{
+											maxHeight: 300,
+											backgroundColor: theme
+												? surfaceColor
+												: "var(--color-surgent-surface)",
+											borderColor: theme
+												? borderColor
+												: "var(--color-surgent-border)",
+										}}
+									>
 										<div
-											className="fixed rounded-lg border shadow-lg overflow-y-auto z-[9999]"
+											className="px-3 py-1.5 text-[9px] font-semibold tracking-wide"
 											style={{
-												top: fileMenu.position.top,
-												left: fileMenu.position.left,
-												width: fileMenu.position.width,
-												maxHeight: fileMenu.position.maxHeight,
-												transform: "translateY(-100%) translateY(-4px)",
-												backgroundColor: theme
-													? surfaceColor
-													: "var(--color-surgent-surface)",
-												borderColor: theme
-													? borderColor
-													: "var(--color-surgent-border)",
+												color: theme ? fgDim : "var(--color-surgent-text-3)",
+												borderBottom: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
 											}}
 										>
-											<div
-												className="px-3 py-1.5 text-[9px] font-semibold tracking-wide"
+											FILES
+											{fileMenu.query ? ` matching "${fileMenu.query}"` : ""}
+										</div>
+										{fileResults.map((file, idx) => (
+											<button
+												type="button"
+												key={file.path}
+												onClick={() => selectFile(idx)}
+												onMouseEnter={() =>
+													setFileMenu((prev) => ({
+														...prev,
+														selectedIdx: idx,
+													}))
+												}
+												className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
 												style={{
-													color: theme ? fgDim : "var(--color-surgent-text-3)",
-													borderBottom: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
+													backgroundColor:
+														idx === fileMenu.selectedIdx
+															? theme
+																? `${cursorColor}20`
+																: "rgba(0,122,255,0.15)"
+															: "transparent",
 												}}
 											>
-												FILES
-												{fileMenu.query ? ` matching "${fileMenu.query}"` : ""}
-											</div>
-											{fileResults.map((file, idx) => (
-												<button
-													key={file.path}
-													onClick={() => selectFile(idx)}
-													onMouseEnter={() =>
-														setFileMenu((prev) => ({
-															...prev,
-															selectedIdx: idx,
-														}))
-													}
-													className="w-full px-3 py-1.5 text-left flex items-center gap-2 transition-colors"
+												<span
+													className="shrink-0 text-[11px]"
 													style={{
-														backgroundColor:
-															idx === fileMenu.selectedIdx
-																? theme
-																	? cursorColor + "20"
-																	: "rgba(0,122,255,0.15)"
-																: "transparent",
+														color: theme
+															? fgDim
+															: "var(--color-surgent-text-3)",
 													}}
 												>
-													<span
-														className="text-[11px] shrink-0"
-														style={{
-															color: theme
-																? fgDim
-																: "var(--color-surgent-text-3)",
-														}}
-													>
-														{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
-													</span>
-													<span
-														className="font-mono text-[11px] font-medium truncate"
-														style={{
-															color: theme
-																? cursorColor
-																: "var(--color-surgent-accent)",
-														}}
-													>
-														{file.name}
-													</span>
-													<span
-														className="text-[9px] truncate flex-1 text-right"
-														style={{
-															color: theme
-																? fgDim
-																: "var(--color-surgent-text-3)",
-														}}
-													>
-														{file.path}
-													</span>
-												</button>
-											))}
-										</div>,
-										document.body
-									)}
-								{/* / command menu */}
-								{showCommands &&
-									filteredCommands.length > 0 &&
-									menuPosition &&
-									createPortal(
+													{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
+												</span>
+												<span
+													className="truncate font-mono text-[11px] font-medium"
+													style={{
+														color: theme
+															? cursorColor
+															: "var(--color-surgent-accent)",
+													}}
+												>
+													{file.name}
+												</span>
+												<span
+													className="flex-1 truncate text-right text-[9px]"
+													style={{
+														color: theme
+															? fgDim
+															: "var(--color-surgent-text-3)",
+													}}
+												>
+													{file.path}
+												</span>
+											</button>
+										))}
+									</div>
+								)}
+								{/* / command menu - Skills dropdown */}
+								{showCommands && filteredCommands.length > 0 && (
+									<div
+										className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border shadow-2xl overflow-hidden z-[9999]"
+										style={{
+											maxHeight: 320,
+											backgroundColor: "#1a1a1a",
+											borderColor: "#333",
+										}}
+									>
+										{/* Skills header */}
 										<div
-											className="fixed rounded-lg border shadow-lg overflow-y-auto z-[9999]"
-											style={{
-												top: menuPosition.top,
-												left: menuPosition.left,
-												width: menuPosition.width,
-												maxHeight: menuPosition.maxHeight,
-												transform: "translateY(-100%) translateY(-4px)",
-												backgroundColor: theme
-													? surfaceColor
-													: "var(--color-surgent-surface)",
-												borderColor: theme
-													? borderColor
-													: "var(--color-surgent-border)",
-											}}
+											className="px-3 py-2 text-[10px] font-medium tracking-wide uppercase"
+											style={{ color: "#888" }}
 										>
-											{filteredCommands.map((cmd, idx) => (
-												<button
-													key={cmd.id || cmd.name}
-													onClick={() => selectCommand(idx)}
-													onMouseEnter={() =>
-														setCommandMenu((prev) => ({
-															...prev,
-															selectedIdx: idx,
-														}))
-													}
-													className="w-full px-3 py-1.5 text-left flex items-center gap-2 transition-colors"
-													style={{
-														backgroundColor:
-															idx === selectedCommandIdx
-																? theme
-																	? cursorColor + "20"
-																	: "rgba(0,122,255,0.15)"
+											Skills
+										</div>
+										<div className="overflow-y-auto" style={{ maxHeight: 280 }}>
+											{filteredCommands.map((cmd, idx) => {
+												const isSelected = idx === slashMenu.selectedIdx;
+												return (
+													<button
+														type="button"
+														key={cmd.id || cmd.name}
+														onClick={() => selectCommand(idx)}
+														onMouseEnter={() =>
+															setSlashMenu((prev) => ({
+																...prev,
+																selectedIdx: idx,
+															}))
+														}
+														className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors"
+														style={{
+															backgroundColor: isSelected
+																? "#2a2a2a"
 																: "transparent",
-													}}
-												>
-													<span
-														className="font-mono text-[11px] font-medium shrink-0"
-														style={{
-															color: theme
-																? cursorColor
-																: "var(--color-surgent-accent)",
 														}}
 													>
-														/{cmd.name}
-													</span>
-													<span
-														className="text-[10px] truncate flex-1"
-														style={{
-															color: theme
-																? fgDim
-																: "var(--color-surgent-text-3)",
-														}}
-													>
-														{cmd.description}
-													</span>
-													{cmd.isLocalCommand && (
 														<span
-															className="text-[8px] px-1 py-0.5 rounded shrink-0"
+															className="font-mono text-[12px] font-medium"
 															style={{
-																backgroundColor: theme
-																	? cursorColor + "15"
-																	: "rgba(0,122,255,0.1)",
-																color: theme
-																	? cursorColor
-																	: "var(--color-surgent-accent)",
+																color: isSelected ? "#f5a623" : "#e5e5e5",
 															}}
 														>
-															claude code
+															/{cmd.name}
 														</span>
-													)}
-												</button>
-											))}
-										</div>,
-										document.body
-									)}
-								<textarea
-									ref={textareaRef}
-									value={input}
-									onChange={(e) => {
-										const val = e.target.value;
-										setInput(val);
-										handleInputForFileMenu(
-											val,
-											e.target.selectionStart ?? val.length
-										);
-									}}
-									onKeyDown={handleKeyDown}
-									onPaste={handlePaste}
-									placeholder={
-										isLoading
-											? "Type to queue next message..."
-											: "Message... (/ commands, @ files)"
-									}
-									rows={1}
-									aria-label="Message input"
-									spellCheck
-									autoCorrect="on"
-									autoCapitalize="sentences"
-									className={
-										theme
-											? "block w-full resize-none rounded-lg px-3 py-2 pr-10 text-[12px] outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none transition-colors"
-											: "block w-full resize-none rounded-lg bg-surgent-surface px-3 py-2 pr-10 text-[12px] text-surgent-text placeholder-surgent-text-3 outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none transition-colors"
-									}
+														<span
+															className="text-[11px]"
+															style={{ color: "#888" }}
+														>
+															{cmd.description}
+														</span>
+													</button>
+												);
+											})}
+										</div>
+									</div>
+								)}
+								{/* Textarea with highlight backdrop */}
+								<div
+									className="relative flex-1 rounded-lg overflow-hidden"
 									style={{
-										maxHeight: "80px",
-										backgroundColor: theme ? surfaceColor : undefined,
-										color: theme ? fgColor : undefined,
-										outline: "none",
-										boxShadow: "none",
-										border: "none",
-										WebkitAppearance: "none",
+										backgroundColor: theme
+											? surfaceColor
+											: "var(--color-surgent-surface)",
+										maxHeight: "120px",
 									}}
-								/>
+								>
+									{/* Backdrop div that shows highlighted text - scrolls with textarea */}
+									<div
+										ref={highlightOverlayRef}
+										className="absolute top-0 left-0 right-0 px-3 py-2 pr-10 text-[12px] pointer-events-none whitespace-pre-wrap"
+										style={{
+											lineHeight: "18px",
+											wordBreak: "break-word",
+											overflowWrap: "break-word",
+										}}
+										aria-hidden="true"
+									>
+										{inputHighlights}
+									</div>
+									<textarea
+										ref={textareaRef}
+										value={input}
+										onChange={(e) => {
+											const val = e.target.value;
+											setInput(val);
+											const cursor = e.target.selectionStart ?? val.length;
+											handleInputForFileMenu(val, cursor);
+											handleInputForSlashMenu(val, cursor);
+											// Height is managed by useEffect with pretext - just sync overlay scroll
+											if (highlightOverlayRef.current) {
+												highlightOverlayRef.current.style.transform = `translateY(-${e.target.scrollTop}px)`;
+											}
+										}}
+										onScroll={(e) => {
+											// Move overlay up/down to match textarea scroll
+											if (highlightOverlayRef.current) {
+												highlightOverlayRef.current.style.transform = `translateY(-${e.currentTarget.scrollTop}px)`;
+											}
+										}}
+										onKeyDown={handleKeyDown}
+										onPaste={handlePaste}
+										placeholder={
+											isLoading
+												? "Type to queue next message..."
+												: "Message... (/ commands, @ files)"
+										}
+										rows={1}
+										aria-label="Message input"
+										spellCheck
+										autoCorrect="on"
+										autoCapitalize="sentences"
+										className="relative block w-full resize-none rounded-lg px-3 py-2 pr-10 text-[12px] outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none bg-transparent overflow-y-auto scrollbar-none"
+										style={{
+											minHeight: "36px",
+											color: "transparent",
+											caretColor: theme
+												? cursorColor
+												: "var(--color-surgent-text)",
+											WebkitTextFillColor: "transparent",
+											lineHeight: "18px",
+											wordBreak: "break-word",
+											overflowWrap: "break-word",
+										}}
+									/>
+								</div>
 								{isLoading && (
 									<div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
 										<span
 											className="h-1 w-1 rounded-full animate-pulse"
 											style={
 												theme
-													? { backgroundColor: cursorColor + "b3" }
+													? { backgroundColor: `${cursorColor}b3` }
 													: undefined
 											}
 										/>
@@ -2045,7 +2649,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 											style={
 												theme
 													? {
-															backgroundColor: cursorColor + "b3",
+															backgroundColor: `${cursorColor}b3`,
 															animationDelay: "150ms",
 														}
 													: { animationDelay: "150ms" }
@@ -2056,7 +2660,7 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 											style={
 												theme
 													? {
-															backgroundColor: cursorColor + "b3",
+															backgroundColor: `${cursorColor}b3`,
 															animationDelay: "300ms",
 														}
 													: { animationDelay: "300ms" }
@@ -2068,19 +2672,110 @@ export const ClaudeChatView = forwardRef<ClaudeChatHandle, ClaudeChatViewProps>(
 						</div>
 					</div>
 				)}
+
+				{/* Markdown file preview modal */}
+				{mdPreview.show && (
+					<div
+						className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+						onClick={() =>
+							setMdPreview({
+								show: false,
+								path: "",
+								content: null,
+								loading: false,
+								error: null,
+							})
+						}
+					>
+						<div
+							className="relative w-[90%] max-w-2xl max-h-[80%] rounded-lg border overflow-hidden flex flex-col"
+							style={{
+								backgroundColor: theme ? bgColor : "var(--color-surgent-bg)",
+								borderColor: theme
+									? borderColor
+									: "var(--color-surgent-border)",
+							}}
+							onClick={(e) => e.stopPropagation()}
+						>
+							{/* Header */}
+							<div
+								className="flex items-center justify-between px-3 py-2 border-b"
+								style={{
+									borderColor: theme
+										? borderColor
+										: "var(--color-surgent-border)",
+								}}
+							>
+								<span
+									className="text-[11px] font-medium truncate"
+									style={{
+										color: theme ? fgColor : "var(--color-surgent-text)",
+									}}
+								>
+									{mdPreview.path}
+								</span>
+								<button
+									type="button"
+									onClick={() =>
+										setMdPreview({
+											show: false,
+											path: "",
+											content: null,
+											loading: false,
+											error: null,
+										})
+									}
+									className="p-1 rounded hover:bg-white/10 transition-colors"
+								>
+									<IconX
+										className="w-3.5 h-3.5"
+										style={{
+											color: theme ? fgDim : "var(--color-surgent-text-3)",
+										}}
+									/>
+								</button>
+							</div>
+							{/* Content */}
+							<div
+								className="flex-1 overflow-y-auto p-4 text-[12px]"
+								style={{
+									color: theme ? fgColor : "var(--color-surgent-text)",
+								}}
+							>
+								{mdPreview.loading && (
+									<div className="flex items-center justify-center py-8">
+										<span
+											className="text-[10px]"
+											style={{
+												color: theme ? fgDim : "var(--color-surgent-text-3)",
+											}}
+										>
+											Loading...
+										</span>
+									</div>
+								)}
+								{mdPreview.error && (
+									<div className="flex items-center justify-center py-8">
+										<span className="text-[10px] text-surgent-error">
+											{mdPreview.error}
+										</span>
+									</div>
+								)}
+								{mdPreview.content && (
+									<Markdown text={mdPreview.content} theme={bubbleTheme} />
+								)}
+							</div>
+						</div>
+					</div>
+				)}
 			</div>
 		);
 	}
 );
 
-// Virtualized message list — renders all messages but with smart scroll anchoring
-// Uses pretext for height estimation. For conversations under 200 messages,
-// renders everything (fast enough). For longer ones, only renders visible range.
-const VIRTUALIZE_THRESHOLD = 200;
-const MSG_OVERSCAN = 30;
-const EST_MSG_HEIGHT = 48; // rough estimate per message for virtualization
-
-function VirtualizedMessages({
+// Simple message list - no virtualization to avoid scroll conflicts
+// The parent container handles all scrolling
+function MessageList({
 	messages,
 	expandedTools,
 	toggleTool,
@@ -2091,6 +2786,7 @@ function VirtualizedMessages({
 	handleSendMessage,
 	fgDim,
 	theme,
+	onMdFileClick,
 }: {
 	messages: ChatMessage[];
 	expandedTools: Set<string>;
@@ -2102,185 +2798,59 @@ function VirtualizedMessages({
 	handleSendMessage?: (text: string) => void;
 	fgDim: string;
 	theme?: any;
+	onMdFileClick?: (path: string) => void;
 }) {
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
 
-	// For short conversations, render everything normally
-	if (renderItems.length < VIRTUALIZE_THRESHOLD) {
-		return (
-			<div className="min-w-0 px-3 py-2 space-y-2">
-				{messages.length === 0 && (
-					<p
-						className="pt-8 text-center text-[10px]"
-						style={theme ? { color: fgDim } : undefined}
-					>
-						Ready
-					</p>
-				)}
-				{renderItems.map((item, idx) => {
-					if (item.type === "tool-group") {
-						return (
-							<ToolActivityGroup
-								key={`tool-group-${item.messages[0]?.id ?? idx}`}
-								messages={item.messages}
-								expandedTools={expandedTools}
-								onToggle={toggleTool}
-								theme={bubbleTheme}
-							/>
-						);
-					}
-					const msg = item.message;
-					return (
-						<React.Fragment key={msg.id}>
-							<Bubble
-								msg={msg}
-								collapsed={!expandedTools.has(msg.id)}
-								onToggle={toggleTool}
-								theme={bubbleTheme}
-								onSendMessage={handleSendMessage}
-							/>
-							{msg.role === "assistant" &&
-								!msg.isStreaming &&
-								(() => {
-									const cp = checkpoints.find(
-										(c) => c.afterMessageId === msg.id
-									);
-									if (!cp) return null;
-									return (
-										<CheckpointMarker
-											checkpoint={cp}
-											theme={bubbleTheme}
-											onRevert={revertCheckpoint}
-											disabled={isLoading}
-										/>
-									);
-								})()}
-						</React.Fragment>
-					);
-				})}
-			</div>
-		);
-	}
-
-	// For long conversations, virtualize — only render visible + overscan
 	return (
-		<VirtualizedLongMessages
-			renderItems={renderItems}
-			expandedTools={expandedTools}
-			toggleTool={toggleTool}
-			bubbleTheme={bubbleTheme}
-			checkpoints={checkpoints}
-			revertCheckpoint={revertCheckpoint}
-			isLoading={isLoading}
-			handleSendMessage={handleSendMessage}
-		/>
-	);
-}
-
-function VirtualizedLongMessages({
-	renderItems,
-	expandedTools,
-	toggleTool,
-	bubbleTheme,
-	checkpoints,
-	revertCheckpoint,
-	isLoading,
-	handleSendMessage,
-}: {
-	renderItems: RenderItem[];
-	expandedTools: Set<string>;
-	toggleTool: (id: string) => void;
-	bubbleTheme?: BubbleTheme;
-	checkpoints: any[];
-	revertCheckpoint: (id: string) => void;
-	isLoading: boolean;
-	handleSendMessage?: (text: string) => void;
-}) {
-	const containerRef = useRef<HTMLDivElement>(null);
-	const [scrollTop, setScrollTop] = useState(0);
-	const [viewHeight, setViewHeight] = useState(600);
-
-	useEffect(() => {
-		const el = containerRef.current;
-		if (!el) return;
-		setViewHeight(el.clientHeight);
-		const obs = new ResizeObserver((entries) => {
-			for (const e of entries) setViewHeight(e.contentRect.height);
-		});
-		obs.observe(el);
-		return () => obs.disconnect();
-	}, []);
-
-	const handleScroll = useCallback(() => {
-		const el = containerRef.current;
-		if (el) setScrollTop(el.scrollTop);
-	}, []);
-
-	const totalHeight = renderItems.length * EST_MSG_HEIGHT;
-	const startIdx = Math.max(
-		0,
-		Math.floor(scrollTop / EST_MSG_HEIGHT) - MSG_OVERSCAN
-	);
-	const endIdx = Math.min(
-		renderItems.length,
-		Math.ceil((scrollTop + viewHeight) / EST_MSG_HEIGHT) + MSG_OVERSCAN
-	);
-
-	return (
-		<div
-			ref={containerRef}
-			onScroll={handleScroll}
-			className="min-w-0 px-3 py-2 h-full overflow-y-auto"
-		>
-			<div style={{ height: totalHeight, position: "relative" }}>
-				<div
-					className="space-y-2"
-					style={{ transform: `translateY(${startIdx * EST_MSG_HEIGHT}px)` }}
+		<div className="min-w-0 px-3 py-2 space-y-2">
+			{messages.length === 0 && (
+				<p
+					className="pt-8 text-center text-[10px]"
+					style={theme ? { color: fgDim } : undefined}
 				>
-					{renderItems.slice(startIdx, endIdx).map((item, i) => {
-						const idx = startIdx + i;
-						if (item.type === "tool-group") {
-							return (
-								<ToolActivityGroup
-									key={`tool-group-${item.messages[0]?.id ?? idx}`}
-									messages={item.messages}
-									expandedTools={expandedTools}
-									onToggle={toggleTool}
-									theme={bubbleTheme}
-								/>
-							);
-						}
-						const msg = item.message;
-						return (
-							<React.Fragment key={msg.id}>
-								<Bubble
-									msg={msg}
-									collapsed={!expandedTools.has(msg.id)}
-									onToggle={toggleTool}
-									theme={bubbleTheme}
-									onSendMessage={handleSendMessage}
-								/>
-								{msg.role === "assistant" &&
-									!msg.isStreaming &&
-									(() => {
-										const cp = checkpoints.find(
-											(c) => c.afterMessageId === msg.id
-										);
-										if (!cp) return null;
-										return (
-											<CheckpointMarker
-												checkpoint={cp}
-												theme={bubbleTheme}
-												onRevert={revertCheckpoint}
-												disabled={isLoading}
-											/>
-										);
-									})()}
-							</React.Fragment>
-						);
-					})}
-				</div>
-			</div>
+					Ready
+				</p>
+			)}
+			{renderItems.map((item, idx) => {
+				if (item.type === "edit-group") {
+					return (
+						<GroupedEditViewer
+							key={`edit-group-${item.filePath}-${idx}`}
+							filePath={item.filePath}
+							edits={item.edits}
+							theme={bubbleTheme}
+						/>
+					);
+				}
+				const msg = item.message;
+				return (
+					<React.Fragment key={msg.id}>
+						<Bubble
+							msg={msg}
+							collapsed={!expandedTools.has(msg.id)}
+							onToggle={toggleTool}
+							theme={bubbleTheme}
+							onSendMessage={handleSendMessage}
+							onMdFileClick={onMdFileClick}
+						/>
+						{msg.role === "assistant" &&
+							!msg.isStreaming &&
+							(() => {
+								const cp = checkpoints.find((c) => c.afterMessageId === msg.id);
+								if (!cp) return null;
+								return (
+									<CheckpointMarker
+										checkpoint={cp}
+										theme={bubbleTheme}
+										onRevert={revertCheckpoint}
+										disabled={isLoading}
+									/>
+								);
+							})()}
+					</React.Fragment>
+				);
+			})}
 		</div>
 	);
 }
@@ -2291,12 +2861,14 @@ const Bubble = React.memo(function Bubble({
 	onToggle,
 	theme,
 	onSendMessage,
+	onMdFileClick,
 }: {
 	msg: ChatMessage;
 	collapsed: boolean;
 	onToggle: (id: string) => void;
 	theme?: BubbleTheme;
 	onSendMessage?: (text: string) => void;
+	onMdFileClick?: (path: string) => void;
 }) {
 	if (msg.role === "user") {
 		// Skip rendering user message if it's a slash command (the system "Running /..." message will show instead)
@@ -2304,15 +2876,49 @@ const Bubble = React.memo(function Bubble({
 			return null;
 		}
 
+		// Extract image paths from content if not in msg.images
+		// Pattern: "Here are the images at these paths:\n/path/to/image.png"
+		let imagePaths = msg.images ?? [];
+		let displayContent = msg.content;
+		if (
+			imagePaths.length === 0 &&
+			msg.content.includes("Here are the images at these paths:")
+		) {
+			const parts = msg.content.split("Here are the images at these paths:\n");
+			displayContent = parts[0]?.trim() ?? "";
+			const pathLines = parts[1]?.split("\n").filter((p) => p.trim()) ?? [];
+			imagePaths = pathLines.filter((p) => p.includes("/.tmp/"));
+		}
+
 		return (
 			<div className="flex justify-end">
 				<div className="max-w-[85%] rounded-lg rounded-br-sm px-2.5 py-1.5">
-					<p
-						className="whitespace-pre-wrap break-words text-[12px]"
-						style={theme ? { color: theme.fg } : undefined}
-					>
-						{msg.content}
-					</p>
+					{imagePaths.length > 0 && (
+						<div className="flex flex-wrap gap-1.5 mb-1.5">
+							{imagePaths.map((imgPath) => (
+								<img
+									key={imgPath}
+									src={`/api/file?path=${encodeURIComponent(imgPath)}`}
+									alt=""
+									className="rounded max-h-24 max-w-32 object-cover"
+									style={{
+										border: `1px solid ${theme?.fgDim ?? "rgba(255,255,255,0.2)"}`,
+									}}
+								/>
+							))}
+						</div>
+					)}
+					{displayContent && (
+						<p
+							className="whitespace-pre-wrap break-words text-[12px]"
+							style={theme ? { color: theme.fg } : undefined}
+						>
+							{parseTextWithPills(
+								displayContent,
+								theme ? { cursor: theme.cursor, fg: theme.fg } : undefined
+							)}
+						</p>
+					)}
 				</div>
 			</div>
 		);
@@ -2320,7 +2926,7 @@ const Bubble = React.memo(function Bubble({
 
 	if (msg.role === "system") {
 		const runningMatch = msg.content.match(/^Running \/(.+)\.\.\.$/);
-		if (runningMatch && runningMatch[1]) {
+		if (runningMatch?.[1]) {
 			const commandName = runningMatch[1];
 			return (
 				<div className="flex justify-center py-1">
@@ -2396,7 +3002,11 @@ const Bubble = React.memo(function Bubble({
 					style={theme ? { color: theme.fgMuted } : undefined}
 				>
 					{msg.content ? (
-						<Markdown text={msg.content} theme={theme} />
+						<Markdown
+							text={msg.content}
+							theme={theme}
+							onMdFileClick={onMdFileClick}
+						/>
 					) : msg.isStreaming ? (
 						<div className="flex items-center gap-[3px] py-1">
 							<span
@@ -2448,14 +3058,40 @@ const Bubble = React.memo(function Bubble({
 			);
 		}
 
+		// Edit tool renders as a standalone diff viewer (even while streaming if we can parse it)
+		if (msg.toolName === "Edit" && msg.content) {
+			try {
+				const parsed = JSON.parse(msg.content);
+				if (
+					parsed.file_path &&
+					parsed.old_string !== undefined &&
+					parsed.new_string !== undefined
+				) {
+					return (
+						<MiniDiffViewer
+							oldStr={parsed.old_string}
+							newStr={parsed.new_string}
+							filePath={parsed.file_path}
+							theme={theme}
+							isStreaming={msg.isStreaming}
+						/>
+					);
+				}
+			} catch {
+				// JSON not complete yet during streaming - fall through to normal tool rendering
+			}
+		}
+
 		return (
 			<div>
 				<button
+					type="button"
 					onClick={() => onToggle(msg.id)}
 					className="flex items-center gap-1 text-[10px]"
 					style={theme ? { color: theme.fgDim } : undefined}
 				>
 					<svg
+						aria-hidden="true"
 						width="7"
 						height="7"
 						viewBox="0 0 8 8"
@@ -2476,7 +3112,7 @@ const Bubble = React.memo(function Bubble({
 						<span
 							className="h-1 w-1 rounded-full animate-pulse"
 							style={
-								theme ? { backgroundColor: theme.cursor + "99" } : undefined
+								theme ? { backgroundColor: `${theme.cursor}99` } : undefined
 							}
 						/>
 					)}
@@ -2502,11 +3138,15 @@ const Bubble = React.memo(function Bubble({
 			className="group/msg relative w-full min-w-0 break-words text-[12px] leading-[1.6]"
 			style={theme ? { color: theme.fgMuted } : undefined}
 		>
-			<Markdown text={msg.content} theme={theme} />
+			<Markdown
+				text={msg.content}
+				theme={theme}
+				onMdFileClick={onMdFileClick}
+			/>
 			{msg.isStreaming && (
 				<span
 					className="inline-block ml-0.5 h-2.5 w-[1.5px] animate-pulse align-text-bottom"
-					style={theme ? { backgroundColor: theme.cursor + "b3" } : undefined}
+					style={theme ? { backgroundColor: `${theme.cursor}b3` } : undefined}
 				/>
 			)}
 			{!msg.isStreaming && msg.content.length > 0 && (
@@ -2518,192 +3158,416 @@ const Bubble = React.memo(function Bubble({
 	);
 });
 
-const ToolActivityGroup = React.memo(function ToolActivityGroup({
-	messages,
-	expandedTools,
-	onToggle,
-	theme,
+// Status icon component - extracted to avoid recreating on every render
+function StatusIcon({
+	iconType,
+	size,
+	className,
+	style,
 }: {
-	messages: ChatMessage[];
-	expandedTools: Set<string>;
-	onToggle: (id: string) => void;
-	theme?: BubbleTheme;
+	iconType: string;
+	size: number;
+	className: string;
+	style?: React.CSSProperties;
 }) {
-	const activeCount = messages.filter((msg) => msg.isStreaming).length;
-	const toolCounts = new Map<string, number>();
-	for (const msg of messages) {
-		if (!msg.toolName) continue;
-		toolCounts.set(msg.toolName, (toolCounts.get(msg.toolName) ?? 0) + 1);
+	const props = { size, className, style };
+	switch (iconType) {
+		case "sparkles":
+			return <IconSparkles {...props} />;
+		case "message":
+			return <IconMessageCircle {...props} />;
+		case "alert":
+			return <IconAlertTriangle {...props} />;
+		case "wrench":
+			return <IconWrench {...props} />;
+		case "terminal":
+			return <IconTerminal {...props} />;
+		default:
+			return <IconCircle {...props} />;
 	}
-	const summary = Array.from(toolCounts.entries())
-		.slice(0, 4)
-		.map(([name, count]) => `${name}${count > 1 ? ` x${count}` : ""}`)
-		.join(", ");
+}
+
+// Memoized status bar to prevent re-renders from parent state changes
+const StatusBar = React.memo(function StatusBar({
+	status,
+	elapsedTime,
+	queuedCount,
+	isLoading,
+	onStop,
+	theme,
+	cursorColor,
+	borderColor,
+	bgColor,
+	fgDim,
+}: {
+	status: string;
+	elapsedTime: number;
+	queuedCount: number;
+	isLoading: boolean;
+	onStop: () => void;
+	theme?: { bg: string; fg: string; cursor: string };
+	cursorColor: string;
+	borderColor?: string;
+	bgColor: string;
+	fgDim: string;
+}) {
+	// Don't render anything when idle - avoids layout shift
+	if (status === "idle") return null;
+
+	const statusInfo = getStatusInfo(status);
+	const statusColor = theme ? cursorColor : undefined;
+	const iconClassName = `shrink-0 ${theme ? "" : statusInfo.iconColor} ${statusInfo.isActive ? "animate-pulse" : ""}`;
 
 	return (
 		<div
-			className="w-full overflow-hidden rounded-xl border"
+			className="shrink-0 px-3 py-1.5 flex items-center gap-2"
 			style={{
-				borderColor: theme?.border ?? "rgba(255,255,255,0.08)",
-				backgroundColor: theme?.bg ?? "transparent",
+				borderTop: `1px solid ${theme ? borderColor : "var(--color-surgent-border)"}`,
+				backgroundColor: theme ? bgColor : "var(--color-surgent-bg)",
 			}}
 		>
-			<div
-				className="flex items-start justify-between gap-3 px-3 py-2"
-				style={{
-					borderBottom: `1px solid ${theme?.border ?? "rgba(255,255,255,0.08)"}`,
-					backgroundColor: theme?.surface ?? "rgba(255,255,255,0.02)",
-				}}
+			<StatusIcon
+				iconType={statusInfo.iconType}
+				size={13}
+				className={iconClassName}
+				style={theme ? { color: statusColor } : undefined}
+			/>
+			<span
+				className={`text-[10px] font-medium ${theme ? "" : statusInfo.textColor}`}
+				style={theme ? { color: statusColor } : undefined}
 			>
-				<div className="min-w-0">
-					<div
-						className="text-[10px] font-medium"
-						style={{ color: theme?.fg ?? "var(--color-surgent-text)" }}
-					>
-						Tool Activity
-					</div>
-					{summary && (
-						<div
-							className="mt-0.5 truncate text-[10px]"
-							style={{ color: theme?.fgDim ?? "var(--color-surgent-text-3)" }}
-						>
-							{summary}
-						</div>
-					)}
-				</div>
-				<div className="shrink-0 flex items-center gap-2">
-					{activeCount > 0 && (
-						<span
-							className="inline-flex items-center gap-1 text-[9px] font-medium"
-							style={{ color: theme?.cursor ?? "var(--color-surgent-accent)" }}
-						>
-							<span
-								className="h-1.5 w-1.5 rounded-full animate-pulse"
-								style={{
-									backgroundColor:
-										theme?.cursor ?? "var(--color-surgent-accent)",
-								}}
-							/>
-							Running
-						</span>
-					)}
-					<span
-						className="rounded-full px-2 py-0.5 text-[9px] font-medium tabular-nums"
-						style={{
-							backgroundColor: theme?.bg ?? "rgba(255,255,255,0.04)",
-							color: theme?.fgDim ?? "var(--color-surgent-text-3)",
-							border: `1px solid ${theme?.border ?? "rgba(255,255,255,0.08)"}`,
-						}}
-					>
-						{messages.length} steps
-					</span>
-				</div>
-			</div>
-			<div className="overflow-x-auto">
-				<table className="w-full border-collapse text-[10px]">
-					<tbody>
-						{messages.map((msg, index) => {
-							const expanded = expandedTools.has(msg.id);
-							return (
-								<React.Fragment key={msg.id}>
-									<tr
-										className="cursor-pointer"
-										onClick={() => onToggle(msg.id)}
-										style={{
-											backgroundColor: expanded
-												? (theme?.surface ?? "rgba(255,255,255,0.02)")
-												: "transparent",
-											borderBottom:
-												index < messages.length - 1 || expanded
-													? `1px solid ${theme?.border ?? "rgba(255,255,255,0.06)"}`
-													: "none",
-										}}
-									>
-										<td className="w-6 px-2 py-1.5 align-top">
-											<svg
-												width="7"
-												height="7"
-												viewBox="0 0 8 8"
-												fill="none"
-												stroke="currentColor"
-												strokeWidth="1.5"
-												className={`transition-transform ${expanded ? "" : "-rotate-90"}`}
-												style={{
-													color: theme?.fgDim ?? "var(--color-surgent-text-3)",
-												}}
-											>
-												<path d="M2 2.5L4 5.5L6 2.5" />
-											</svg>
-										</td>
-										<td
-											className="px-2 py-1.5 align-top"
-											style={{
-												color: theme?.fg ?? "var(--color-surgent-text)",
-											}}
-										>
-											<div className="font-medium">{msg.toolName}</div>
-										</td>
-										<td
-											className="w-16 px-2 py-1.5 align-top text-right"
-											style={{
-												color: theme?.fgDim ?? "var(--color-surgent-text-3)",
-											}}
-										>
-											{msg.isStreaming ? (
-												<span
-													className="inline-flex items-center gap-1"
-													style={{
-														color:
-															theme?.cursor ?? "var(--color-surgent-accent)",
-													}}
-												>
-													<span
-														className="h-1.5 w-1.5 rounded-full animate-pulse"
-														style={{
-															backgroundColor:
-																theme?.cursor ?? "var(--color-surgent-accent)",
-														}}
-													/>
-													Live
-												</span>
-											) : (
-												"Done"
-											)}
-										</td>
-									</tr>
-									{expanded && msg.content && (
-										<tr>
-											<td colSpan={3} className="px-2 pb-2 pt-0">
-												<pre
-													className="mt-1 max-h-32 overflow-auto rounded-lg border px-3 py-2 font-mono text-[9px] leading-relaxed whitespace-pre-wrap break-all"
-													style={{
-														backgroundColor:
-															theme?.surface ?? "rgba(255,255,255,0.03)",
-														borderColor:
-															theme?.border ?? "rgba(255,255,255,0.08)",
-														color:
-															theme?.fgDim ?? "var(--color-surgent-text-3)",
-													}}
-												>
-													<ToolOutputHighlight
-														content={msg.content}
-														theme={theme}
-													/>
-												</pre>
-											</td>
-										</tr>
-									)}
-								</React.Fragment>
-							);
-						})}
-					</tbody>
-				</table>
-			</div>
+				{statusInfo.toolName ? (
+					<>
+						Running <span className="font-mono">{statusInfo.toolName}</span>
+					</>
+				) : (
+					statusInfo.label
+				)}
+			</span>
+			<span className="flex-1" />
+			{elapsedTime > 0 && (
+				<span
+					className="text-[9px] tabular-nums"
+					style={{
+						color: theme ? fgDim : "var(--color-surgent-text-3)",
+					}}
+				>
+					{formatElapsedTime(elapsedTime)}
+				</span>
+			)}
+			{queuedCount > 0 && (
+				<span
+					className="px-1.5 py-0.5 rounded text-[9px] font-medium tabular-nums"
+					style={{
+						backgroundColor: theme
+							? `${cursorColor}20`
+							: "rgba(0,122,255,0.15)",
+						color: theme ? cursorColor : "var(--color-surgent-accent)",
+					}}
+				>
+					{queuedCount} queued
+				</span>
+			)}
+			{isLoading && (
+				<button
+					type="button"
+					onClick={onStop}
+					className="p-1 rounded-md transition-all border"
+					style={{
+						color: theme ? fgDim : "var(--color-surgent-text-3)",
+						backgroundColor: theme
+							? `${bgColor}`
+							: "var(--color-surgent-surface)",
+						borderColor: theme ? borderColor : "var(--color-surgent-border)",
+					}}
+					title="Stop"
+				>
+					<IconPause size={10} />
+				</button>
+			)}
 		</div>
 	);
 });
 
-function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
+// Bottom toolbar showing status, activity pill, and stop button
+const ChatStatusBar = React.memo(function ChatStatusBar({
+	messages,
+	isLoading,
+	status,
+	onStop,
+	theme,
+	borderColor,
+	bgColor,
+	fgDim,
+}: {
+	messages: ChatMessage[];
+	isLoading: boolean;
+	status: string;
+	onStop: () => void;
+	theme?: { bg: string; fg: string; cursor: string };
+	borderColor?: string;
+	bgColor: string;
+	fgDim: string;
+}) {
+	const [isHovered, setIsHovered] = useState(false);
+
+	// Extract tool activity from messages
+	const toolActivities = useMemo(() => {
+		const activities: {
+			id: string;
+			toolName: string;
+			isStreaming: boolean;
+			summary: string;
+		}[] = [];
+
+		for (const msg of messages) {
+			if (msg.role === "tool" && msg.toolName) {
+				let summary = "";
+				try {
+					if (msg.content) {
+						const parsed = JSON.parse(msg.content);
+						if (parsed.file_path) {
+							summary = parsed.file_path.split("/").pop() || parsed.file_path;
+						} else if (parsed.command) {
+							const cmd = parsed.command.slice(0, 40);
+							summary = `${cmd}${parsed.command.length > 40 ? "..." : ""}`;
+						} else if (parsed.pattern) {
+							summary = `/${parsed.pattern.slice(0, 30)}/`;
+						} else if (parsed.query) {
+							summary = parsed.query.slice(0, 40);
+						} else if (parsed.url) {
+							try {
+								const url = new URL(parsed.url);
+								summary = url.hostname;
+							} catch {
+								summary = parsed.url.slice(0, 40);
+							}
+						} else if (parsed.skill) {
+							summary = `/${parsed.skill}`;
+						} else if (parsed.prompt) {
+							summary = parsed.prompt.slice(0, 40);
+						}
+					}
+				} catch {}
+				activities.push({
+					id: msg.id,
+					toolName: msg.toolName,
+					isStreaming: msg.isStreaming ?? false,
+					summary: summary || msg.toolName,
+				});
+			}
+		}
+		return activities;
+	}, [messages]);
+
+	if (!isLoading) return null;
+
+	// If we have tool activities from messages, use those.
+	// Otherwise, derive activity from the current status (helps with timing before tool message arrives)
+	const latestActivity = toolActivities[toolActivities.length - 1];
+	const statusToolName = status?.startsWith("tool:") ? status.slice(5) : null;
+
+	// Show either tool activities or status-derived activity
+	const hasActivity = toolActivities.length > 0 || statusToolName;
+
+	const getToolIcon = (toolName: string) => {
+		const baseClass = "w-3 h-3 shrink-0";
+		switch (toolName.toLowerCase()) {
+			case "read":
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+						<circle cx="12" cy="12" r="3" />
+					</svg>
+				);
+			case "edit":
+			case "patch": // Codex patch tool
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+						<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+					</svg>
+				);
+			case "write":
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+						<polyline points="14 2 14 8 20 8" />
+						<line x1="12" y1="18" x2="12" y2="12" />
+						<line x1="9" y1="15" x2="15" y2="15" />
+					</svg>
+				);
+			case "bash":
+			case "exec": // Codex exec tool
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<polyline points="4 17 10 11 4 5" />
+						<line x1="12" y1="19" x2="20" y2="19" />
+					</svg>
+				);
+			case "grep":
+			case "glob":
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<circle cx="11" cy="11" r="8" />
+						<line x1="21" y1="21" x2="16.65" y2="16.65" />
+					</svg>
+				);
+			case "web_search": // Codex web search
+			case "websearch":
+			case "webfetch":
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<circle cx="12" cy="12" r="10" />
+						<line x1="2" y1="12" x2="22" y2="12" />
+						<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+					</svg>
+				);
+			default:
+				return (
+					<svg
+						className={baseClass}
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+					</svg>
+				);
+		}
+	};
+
+	// Determine the display name and count
+	const displayToolName = latestActivity?.toolName ?? statusToolName;
+	const displaySummary = latestActivity?.summary ?? statusToolName;
+	const activityCount = toolActivities.length;
+
+	return (
+		<div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 bg-surgent-bg border-t border-surgent-border">
+			{/* Left side: Activity pill with hover dropdown */}
+			{hasActivity ? (
+				<div
+					className="relative"
+					onMouseEnter={() => setIsHovered(true)}
+					onMouseLeave={() => setIsHovered(false)}
+				>
+					{/* The pill */}
+					<div className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-xs font-medium cursor-default bg-surgent-surface-2 text-surgent-text-2 hover:bg-surgent-surface-3 transition-all border border-surgent-border">
+						{displayToolName && (
+							<span className="text-surgent-text-3">
+								{getToolIcon(displayToolName)}
+							</span>
+						)}
+						<span className="max-w-[150px] truncate">
+							{displaySummary || "Working..."}
+						</span>
+						{activityCount > 1 && (
+							<span className="text-[9px] tabular-nums text-surgent-text-3">
+								+{activityCount - 1}
+							</span>
+						)}
+					</div>
+
+					{/* Dropdown (appears above) - only show if we have tool activities */}
+					{isHovered && activityCount > 0 && (
+						<div className="absolute bottom-full left-0 mb-1 min-w-[240px] max-w-[320px] rounded-lg overflow-hidden bg-surgent-surface shadow-lg border border-surgent-border">
+							<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-surgent-border text-surgent-text-3">
+								<span>Activity</span>
+								<span className="tabular-nums">{activityCount}</span>
+							</div>
+							<div className="overflow-y-auto" style={{ maxHeight: "200px" }}>
+								{toolActivities.map((activity, idx) => (
+									<div
+										key={activity.id}
+										className={`flex items-center gap-2 px-2.5 py-1.5 text-[10px] ${
+											idx < toolActivities.length - 1
+												? "border-b border-surgent-border/50"
+												: ""
+										}`}
+									>
+										<span className="shrink-0 text-surgent-text-3">
+											{getToolIcon(activity.toolName)}
+										</span>
+										<span className="flex-1 truncate text-surgent-text-2">
+											{activity.summary}
+										</span>
+										{activity.isStreaming && (
+											<span className="h-1.5 w-1.5 rounded-full shrink-0 bg-surgent-text-3" />
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					)}
+				</div>
+			) : (
+				<div className="flex items-center gap-2">
+					<span className="h-1.5 w-1.5 rounded-full animate-pulse bg-surgent-text-3" />
+					<span className="text-[10px] text-surgent-text-3">Working...</span>
+				</div>
+			)}
+
+			{/* Right side: Stop button with icon */}
+			<button
+				type="button"
+				onClick={onStop}
+				className="shrink-0 flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-medium transition-all bg-surgent-surface-2 text-surgent-text-2 hover:bg-surgent-surface-3 border border-surgent-border"
+			>
+				<svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+					<rect x="6" y="6" width="12" height="12" rx="1" />
+				</svg>
+				Stop
+			</button>
+		</div>
+	);
+});
+
+function Markdown({
+	text,
+	theme,
+	onMdFileClick,
+}: {
+	text: string;
+	theme?: BubbleTheme;
+	onMdFileClick?: (path: string) => void;
+}) {
 	const blocks = useMemo(() => parseBlocks(text), [text]);
 	return (
 		<div className="min-w-0 space-y-1 break-words">
@@ -2752,7 +3616,11 @@ function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
 								{b.bullet}
 							</span>
 							<span className="min-w-0">
-								<Inline text={b.content} theme={theme} />
+								<Inline
+									text={b.content}
+									theme={theme}
+									onMdFileClick={onMdFileClick}
+								/>
 							</span>
 						</div>
 					);
@@ -2799,7 +3667,11 @@ function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
 														color: theme?.fg ?? "#e5e5e5",
 													}}
 												>
-													<Inline text={cell} theme={theme} />
+													<Inline
+														text={cell}
+														theme={theme}
+														onMdFileClick={onMdFileClick}
+													/>
 												</td>
 											))}
 										</tr>
@@ -2811,7 +3683,11 @@ function Markdown({ text, theme }: { text: string; theme?: BubbleTheme }) {
 				}
 				return (
 					<p key={blockKey}>
-						<Inline text={b.content} theme={theme} />
+						<Inline
+							text={b.content}
+							theme={theme}
+							onMdFileClick={onMdFileClick}
+						/>
 					</p>
 				);
 			})}
@@ -2835,7 +3711,7 @@ function parseBlocks(text: string): Block[] {
 		if (line.trimStart().startsWith("```")) {
 			const code: string[] = [];
 			i++;
-			while (i < lines.length && !lines[i]!.trimStart().startsWith("```")) {
+			while (i < lines.length && !lines[i]?.trimStart().startsWith("```")) {
 				code.push(lines[i]!);
 				i++;
 			}
@@ -2845,7 +3721,11 @@ function parseBlocks(text: string): Block[] {
 		}
 		const hm = line.match(/^(#{1,4})\s+(.+)/);
 		if (hm) {
-			blocks.push({ type: "heading", content: hm[2]!, level: hm[1]!.length });
+			blocks.push({
+				type: "heading",
+				content: hm[2] ?? "",
+				level: hm[1]?.length ?? 1,
+			});
 			i++;
 			continue;
 		}
@@ -2853,8 +3733,8 @@ function parseBlocks(text: string): Block[] {
 		if (lm) {
 			blocks.push({
 				type: "list-item",
-				content: lm[2]!,
-				bullet: lm[1]!.trim(),
+				content: lm[2] ?? "",
+				bullet: lm[1]?.trim() ?? "-",
 			});
 			i++;
 			continue;
@@ -2865,8 +3745,8 @@ function parseBlocks(text: string): Block[] {
 			i++;
 			while (
 				i < lines.length &&
-				lines[i]!.trim().startsWith("|") &&
-				lines[i]!.trim().endsWith("|")
+				lines[i]?.trim().startsWith("|") &&
+				lines[i]?.trim().endsWith("|")
 			) {
 				tableLines.push(lines[i]!);
 				i++;
@@ -2879,7 +3759,7 @@ function parseBlocks(text: string): Block[] {
 						.map((c) => c.trim());
 				const headers = parseCells(tableLines[0]!);
 				// Skip separator row (e.g. |---|---|)
-				const startRow = tableLines[1]!.trim().match(/^\|[\s:?-]+\|/) ? 2 : 1;
+				const startRow = tableLines[1]?.trim().match(/^\|[\s:?-]+\|/) ? 2 : 1;
 				const rows = tableLines.slice(startRow).map(parseCells);
 				blocks.push({ type: "table", headers, rows });
 			} else {
@@ -2895,10 +3775,10 @@ function parseBlocks(text: string): Block[] {
 		i++;
 		while (
 			i < lines.length &&
-			lines[i]!.trim() &&
-			!lines[i]!.trimStart().startsWith("```") &&
-			!lines[i]!.match(/^#{1,4}\s+/) &&
-			!lines[i]!.match(/^\s*(?:[-*]|\d+\.)\s+/)
+			lines[i]?.trim() &&
+			!lines[i]?.trimStart().startsWith("```") &&
+			!lines[i]?.match(/^#{1,4}\s+/) &&
+			!lines[i]?.match(/^\s*(?:[-*]|\d+\.)\s+/)
 		) {
 			p.push(lines[i]!);
 			i++;
@@ -3036,6 +3916,7 @@ function AskUserQuestionCard({
 							style={{ borderBottom: `1px solid ${borderClr}` }}
 						>
 							<svg
+								aria-hidden="true"
 								width="12"
 								height="12"
 								viewBox="0 0 24 24"
@@ -3053,7 +3934,7 @@ function AskUserQuestionCard({
 								<span
 									className="rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider"
 									style={{
-										backgroundColor: accentColor + "18",
+										backgroundColor: `${accentColor}18`,
 										color: accentColor,
 									}}
 								>
@@ -3093,17 +3974,18 @@ function AskUserQuestionCard({
 									const isSelected = qSelections.has(oi);
 									return (
 										<button
+											type="button"
 											key={oi}
 											onClick={() => toggleOption(qi, oi, !!q.multiSelect)}
 											disabled={submitted}
 											className="flex w-full items-start gap-2 rounded-md px-2.5 py-1.5 text-left transition-all"
 											style={{
 												backgroundColor: isSelected
-													? accentColor + "18"
+													? `${accentColor}18`
 													: theme
-														? theme.bg + "80"
+														? `${theme.bg}80`
 														: "rgba(0,0,0,0.15)",
-												border: `1px solid ${isSelected ? accentColor + "50" : borderClr}`,
+												border: `1px solid ${isSelected ? `${accentColor}50` : borderClr}`,
 												cursor: submitted ? "default" : "pointer",
 												opacity: submitted && !isSelected ? 0.4 : 1,
 											}}
@@ -3113,12 +3995,13 @@ function AskUserQuestionCard({
 												style={{
 													backgroundColor: isSelected
 														? accentColor
-														: accentColor + "20",
+														: `${accentColor}20`,
 													color: isSelected ? "#fff" : accentColor,
 												}}
 											>
 												{isSelected ? (
 													<svg
+														aria-hidden="true"
 														width="8"
 														height="8"
 														viewBox="0 0 24 24"
@@ -3162,17 +4045,19 @@ function AskUserQuestionCard({
 			{/* Submit button */}
 			{!submitted && !isStreaming && onSendMessage && (
 				<button
+					type="button"
 					onClick={handleSubmit}
 					disabled={!hasSelections}
 					className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-medium transition-all"
 					style={{
-						backgroundColor: hasSelections ? accentColor : accentColor + "30",
+						backgroundColor: hasSelections ? accentColor : `${accentColor}30`,
 						color: hasSelections ? "#fff" : fgDim,
 						cursor: hasSelections ? "pointer" : "not-allowed",
 						opacity: hasSelections ? 1 : 0.6,
 					}}
 				>
 					<svg
+						aria-hidden="true"
 						width="10"
 						height="10"
 						viewBox="0 0 24 24"
@@ -3196,6 +4081,7 @@ function AskUserQuestionCard({
 					style={{ color: fgDim }}
 				>
 					<svg
+						aria-hidden="true"
 						width="10"
 						height="10"
 						viewBox="0 0 24 24"
@@ -3208,6 +4094,646 @@ function AskUserQuestionCard({
 						<path d="M20 6L9 17l-5-5" />
 					</svg>
 					Selections sent
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Mini diff viewer — inline diff for Edit tool operations with syntax highlighting
+// ---------------------------------------------------------------------------
+
+const SYNTAX_TOKEN_CLASSES: Record<string, string> = {
+	keyword: "text-syntax-keyword",
+	string: "text-syntax-string",
+	comment: "text-syntax-comment",
+	number: "text-syntax-number",
+	punctuation: "text-syntax-punctuation",
+	tag: "text-syntax-tag",
+	attr: "text-syntax-attr",
+	default: "",
+};
+
+// Compute diff hunks between old and new strings
+// Returns array of hunks, each containing lines with type: 'context' | 'removed' | 'added'
+function computeDiffHunks(
+	oldStr: string,
+	newStr: string,
+	contextLines = 2
+): {
+	type: "context" | "removed" | "added";
+	text: string;
+	oldLineNum?: number;
+	newLineNum?: number;
+}[][] {
+	const oldLines = oldStr.split("\n");
+	const newLines = newStr.split("\n");
+
+	// Simple LCS-based diff
+	const lcs: number[][] = [];
+	for (let i = 0; i <= oldLines.length; i++) {
+		lcs[i] = [];
+		for (let j = 0; j <= newLines.length; j++) {
+			if (i === 0 || j === 0) {
+				lcs[i][j] = 0;
+			} else if (oldLines[i - 1] === newLines[j - 1]) {
+				lcs[i][j] = lcs[i - 1]![j - 1]! + 1;
+			} else {
+				lcs[i][j] = Math.max(lcs[i - 1]![j]!, lcs[i]![j - 1]!);
+			}
+		}
+	}
+
+	// Backtrack to get diff operations
+	const ops: {
+		type: "equal" | "delete" | "insert";
+		oldIdx?: number;
+		newIdx?: number;
+	}[] = [];
+	let i = oldLines.length;
+	let j = newLines.length;
+	while (i > 0 || j > 0) {
+		if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+			ops.unshift({ type: "equal", oldIdx: i - 1, newIdx: j - 1 });
+			i--;
+			j--;
+		} else if (j > 0 && (i === 0 || lcs[i]![j - 1]! >= lcs[i - 1]![j]!)) {
+			ops.unshift({ type: "insert", newIdx: j - 1 });
+			j--;
+		} else {
+			ops.unshift({ type: "delete", oldIdx: i - 1 });
+			i--;
+		}
+	}
+
+	// Convert to diff lines
+	const diffLines: {
+		type: "context" | "removed" | "added";
+		text: string;
+		oldLineNum?: number;
+		newLineNum?: number;
+		opIdx: number;
+	}[] = [];
+	for (let idx = 0; idx < ops.length; idx++) {
+		const op = ops[idx]!;
+		if (op.type === "equal") {
+			diffLines.push({
+				type: "context",
+				text: oldLines[op.oldIdx!]!,
+				oldLineNum: op.oldIdx! + 1,
+				newLineNum: op.newIdx! + 1,
+				opIdx: idx,
+			});
+		} else if (op.type === "delete") {
+			diffLines.push({
+				type: "removed",
+				text: oldLines[op.oldIdx!]!,
+				oldLineNum: op.oldIdx! + 1,
+				opIdx: idx,
+			});
+		} else {
+			diffLines.push({
+				type: "added",
+				text: newLines[op.newIdx!]!,
+				newLineNum: op.newIdx! + 1,
+				opIdx: idx,
+			});
+		}
+	}
+
+	// Group into hunks with context
+	const hunks: {
+		type: "context" | "removed" | "added";
+		text: string;
+		oldLineNum?: number;
+		newLineNum?: number;
+	}[][] = [];
+	let currentHunk: (typeof hunks)[0] = [];
+	let lastChangeIdx = -999;
+
+	for (let idx = 0; idx < diffLines.length; idx++) {
+		const line = diffLines[idx]!;
+		const isChange = line.type !== "context";
+
+		if (isChange) {
+			// Add context lines before this change
+			const contextStart = Math.max(
+				lastChangeIdx + contextLines + 1,
+				idx - contextLines
+			);
+			for (let c = contextStart; c < idx; c++) {
+				const contextLine = diffLines[c];
+				if (contextLine && contextLine.type === "context") {
+					currentHunk.push({
+						type: contextLine.type,
+						text: contextLine.text,
+						oldLineNum: contextLine.oldLineNum,
+						newLineNum: contextLine.newLineNum,
+					});
+				}
+			}
+			currentHunk.push({
+				type: line.type,
+				text: line.text,
+				oldLineNum: line.oldLineNum,
+				newLineNum: line.newLineNum,
+			});
+			lastChangeIdx = idx;
+		} else if (idx - lastChangeIdx <= contextLines && lastChangeIdx >= 0) {
+			// Context line within range after a change
+			currentHunk.push({
+				type: line.type,
+				text: line.text,
+				oldLineNum: line.oldLineNum,
+				newLineNum: line.newLineNum,
+			});
+		} else if (currentHunk.length > 0 && idx - lastChangeIdx > contextLines) {
+			// End of hunk
+			hunks.push(currentHunk);
+			currentHunk = [];
+		}
+	}
+
+	if (currentHunk.length > 0) {
+		hunks.push(currentHunk);
+	}
+
+	return hunks;
+}
+
+function MiniDiffViewer({
+	oldStr,
+	newStr,
+	filePath,
+	theme,
+	isStreaming,
+}: {
+	oldStr: string;
+	newStr: string;
+	filePath: string;
+	theme?: BubbleTheme;
+	isStreaming?: boolean;
+}) {
+	const fileName = filePath.split("/").pop() || filePath;
+
+	// Compute hunks with minimal context (just 1 line)
+	const { hunks, stats, totalChanges, allLines } = useMemo(() => {
+		const computedHunks = computeDiffHunks(oldStr, newStr, 1);
+		let added = 0;
+		let removed = 0;
+		const lines: string[] = [];
+		for (const hunk of computedHunks) {
+			for (const line of hunk) {
+				if (line.type === "added") added++;
+				else if (line.type === "removed") removed++;
+				// Collect all lines for highlighting
+				if (line.type !== "context" && line.text.trim() !== "") {
+					lines.push(line.text);
+				}
+			}
+		}
+		return {
+			hunks: computedHunks,
+			stats: { added, removed },
+			totalChanges: added + removed,
+			allLines: lines,
+		};
+	}, [oldStr, newStr]);
+
+	// Use Shiki for syntax highlighting
+	const { highlighted, isReady } = useShikiSnippet(allLines, filePath, true);
+
+	// Auto-expand for small diffs (3 lines or less), collapse for larger ones
+	const [isExpanded, setIsExpanded] = useState(totalChanges <= 3);
+
+	// Colors
+	const removedBg = "rgba(248,81,73,0.12)";
+	const removedBorder = "rgba(248,81,73,0.5)";
+	const addedBg = "rgba(46,160,67,0.12)";
+	const addedBorder = "rgba(46,160,67,0.5)";
+
+	// Track line index for highlighting lookup
+	let globalLineIdx = 0;
+
+	return (
+		<div
+			className="rounded-lg border overflow-hidden text-[10px] font-mono"
+			style={{
+				backgroundColor: theme?.surface ?? "var(--color-surgent-surface)",
+				borderColor: theme?.border ?? "var(--color-surgent-border)",
+			}}
+		>
+			{/* Compact header - clickable to expand */}
+			<button
+				type="button"
+				onClick={() => setIsExpanded(!isExpanded)}
+				className="w-full flex items-center gap-1.5 px-2 py-1 text-[9px] font-medium text-left hover:opacity-80 transition-all"
+				style={{
+					color: theme?.fg ?? "var(--color-surgent-text-2)",
+					backgroundColor: theme?.bg ?? "var(--color-surgent-surface-2)",
+					borderBottom: isExpanded
+						? `1px solid ${theme?.border ?? "var(--color-surgent-border)"}`
+						: "none",
+				}}
+			>
+				{/* Chevron */}
+				<svg
+					className={`w-2.5 h-2.5 opacity-40 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2"
+				>
+					<polyline points="9 18 15 12 9 6" />
+				</svg>
+				{/* File icon or streaming indicator */}
+				{isStreaming ? (
+					<span className="w-2 h-2 rounded-full bg-current opacity-50 animate-pulse" />
+				) : (
+					<svg
+						className="w-2.5 h-2.5 opacity-40"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						strokeWidth="2"
+					>
+						<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+						<polyline points="14 2 14 8 20 8" />
+					</svg>
+				)}
+				<span className="flex-1 truncate opacity-80">{fileName}</span>
+				{/* Stats */}
+				<span className="flex items-center gap-1 text-[8px]">
+					{stats.added > 0 && (
+						<span style={{ color: "rgba(46,160,67,0.8)" }}>+{stats.added}</span>
+					)}
+					{stats.removed > 0 && (
+						<span style={{ color: "rgba(248,81,73,0.8)" }}>
+							−{stats.removed}
+						</span>
+					)}
+				</span>
+			</button>
+			{/* Diff content - collapsible */}
+			{isExpanded && (
+				<div className="max-h-60 overflow-auto">
+					{hunks.map((hunk, hunkIdx) => {
+						// Reset line counter for each render
+						let hunkLineIdx = globalLineIdx;
+
+						return (
+							<div key={hunkIdx}>
+								{/* Subtle hunk separator - just a thin line */}
+								{hunkIdx > 0 && (
+									<div
+										className="h-px my-0.5"
+										style={{
+											backgroundColor:
+												theme?.border ?? "var(--color-surgent-border)",
+											opacity: 0.3,
+										}}
+									/>
+								)}
+								{/* Hunk lines - skip context lines and empty lines */}
+								{hunk
+									.filter(
+										(line) => line.type !== "context" && line.text.trim() !== ""
+									)
+									.map((line, lineIdx) => {
+										const currentLineIdx = hunkLineIdx++;
+										const highlightedHtml = highlighted.get(currentLineIdx);
+										const isRemoved = line.type === "removed";
+										const isAdded = line.type === "added";
+
+										// Update global counter
+										if (
+											hunkIdx === hunks.length - 1 &&
+											lineIdx ===
+												hunk.filter(
+													(l) => l.type !== "context" && l.text.trim() !== ""
+												).length -
+													1
+										) {
+											globalLineIdx = currentLineIdx + 1;
+										}
+
+										return (
+											<div
+												key={`${hunkIdx}-${lineIdx}`}
+												className="flex leading-[12px]"
+												style={{
+													backgroundColor: isRemoved
+														? removedBg
+														: isAdded
+															? addedBg
+															: "transparent",
+													borderLeft: `2px solid ${isRemoved ? removedBorder : isAdded ? addedBorder : "transparent"}`,
+												}}
+											>
+												<span
+													className="shrink-0 w-4 text-center select-none text-[8px]"
+													style={{
+														color: isRemoved
+															? "rgba(248,81,73,0.7)"
+															: "rgba(46,160,67,0.7)",
+													}}
+												>
+													{isRemoved ? "−" : "+"}
+												</span>
+												<span
+													className="flex-1 whitespace-pre pr-1 overflow-hidden text-[8px] shiki-line"
+													style={{
+														color: theme?.fg ?? "var(--color-surgent-text)",
+													}}
+													dangerouslySetInnerHTML={
+														isReady && highlightedHtml
+															? { __html: highlightedHtml }
+															: undefined
+													}
+												>
+													{!(isReady && highlightedHtml)
+														? line.text || " "
+														: undefined}
+												</span>
+											</div>
+										);
+									})}
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// Applies a series of edits to build the final content, then diffs against original
+function applyEditsSequentially(
+	edits: { old_string: string; new_string: string }[]
+): { originalText: string; finalText: string } | null {
+	if (edits.length === 0) return null;
+
+	// The first edit's old_string is our starting point
+	// We'll track what the "original" would look like and what the "final" is
+	let currentText = edits[0]!.old_string;
+	const originalText = currentText;
+
+	for (const edit of edits) {
+		// Apply this edit
+		const idx = currentText.indexOf(edit.old_string);
+		if (idx !== -1) {
+			currentText =
+				currentText.slice(0, idx) +
+				edit.new_string +
+				currentText.slice(idx + edit.old_string.length);
+		} else {
+			// old_string not found - this edit might be based on a different state
+			// Try to find partial match or just append the new content
+			currentText = edit.new_string;
+		}
+	}
+
+	return { originalText, finalText: currentText };
+}
+
+function GroupedEditViewer({
+	filePath,
+	edits,
+	theme,
+}: {
+	filePath: string;
+	edits: ChatMessage[];
+	theme?: BubbleTheme;
+}) {
+	const fileName = filePath.split("/").pop() || filePath;
+	const editCount = edits.length;
+
+	// Parse all edits and compute combined diff
+	const { hunks, stats, totalChanges, allLines } = useMemo(() => {
+		const parsedEdits: { old_string: string; new_string: string }[] = [];
+
+		for (const edit of edits) {
+			if (!edit.content) continue;
+			try {
+				const parsed = JSON.parse(edit.content);
+				if (
+					parsed.old_string !== undefined &&
+					parsed.new_string !== undefined
+				) {
+					parsedEdits.push({
+						old_string: parsed.old_string,
+						new_string: parsed.new_string,
+					});
+				}
+			} catch {}
+		}
+
+		const result = applyEditsSequentially(parsedEdits);
+		if (!result) {
+			return { hunks: [], stats: { added: 0, removed: 0 }, allLines: [] };
+		}
+
+		const computedHunks = computeDiffHunks(
+			result.originalText,
+			result.finalText,
+			1
+		);
+
+		// Count added/removed lines and collect lines for highlighting
+		let added = 0;
+		let removed = 0;
+		const lines: string[] = [];
+		for (const hunk of computedHunks) {
+			for (const line of hunk) {
+				if (line.type === "added") added++;
+				else if (line.type === "removed") removed++;
+				// Collect all lines for highlighting
+				if (line.type !== "context" && line.text.trim() !== "") {
+					lines.push(line.text);
+				}
+			}
+		}
+
+		const total = added + removed;
+		return {
+			hunks: computedHunks,
+			stats: { added, removed },
+			totalChanges: total,
+			allLines: lines,
+		};
+	}, [edits]);
+
+	// Use Shiki for syntax highlighting
+	const { highlighted, isReady } = useShikiSnippet(allLines, filePath, true);
+
+	// Auto-expand for small diffs (4 lines or less), collapse for larger ones
+	const [isExpanded, setIsExpanded] = useState(() => (totalChanges ?? 0) <= 4);
+
+	// Colors
+	const removedBg = "rgba(248,81,73,0.12)";
+	const removedBorder = "rgba(248,81,73,0.5)";
+	const addedBg = "rgba(46,160,67,0.12)";
+	const addedBorder = "rgba(46,160,67,0.5)";
+
+	if (hunks.length === 0) {
+		return null;
+	}
+
+	// Track line index for highlighting lookup
+	let globalLineIdx = 0;
+
+	return (
+		<div
+			className="rounded-lg border overflow-hidden text-[10px] font-mono"
+			style={{
+				backgroundColor: theme?.surface ?? "var(--color-surgent-surface)",
+				borderColor: theme?.border ?? "var(--color-surgent-border)",
+			}}
+		>
+			{/* Compact header - clickable to expand */}
+			<button
+				type="button"
+				onClick={() => setIsExpanded(!isExpanded)}
+				className="w-full flex items-center gap-1.5 px-2 py-1 text-[9px] font-medium text-left hover:opacity-80 transition-all"
+				style={{
+					color: theme?.fg ?? "var(--color-surgent-text-2)",
+					backgroundColor: theme?.bg ?? "var(--color-surgent-surface-2)",
+					borderBottom: isExpanded
+						? `1px solid ${theme?.border ?? "var(--color-surgent-border)"}`
+						: "none",
+				}}
+			>
+				{/* Chevron */}
+				<svg
+					className={`w-2.5 h-2.5 opacity-40 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2"
+				>
+					<polyline points="9 18 15 12 9 6" />
+				</svg>
+				{/* File icon */}
+				<svg
+					className="w-2.5 h-2.5 opacity-40"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2"
+				>
+					<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+					<polyline points="14 2 14 8 20 8" />
+				</svg>
+				<span className="flex-1 truncate opacity-80">{fileName}</span>
+				{/* Stats */}
+				<span className="flex items-center gap-1 text-[8px]">
+					{stats.added > 0 && (
+						<span style={{ color: "rgba(46,160,67,0.8)" }}>+{stats.added}</span>
+					)}
+					{stats.removed > 0 && (
+						<span style={{ color: "rgba(248,81,73,0.8)" }}>
+							−{stats.removed}
+						</span>
+					)}
+				</span>
+				<span
+					className="text-[8px] px-1 py-px rounded opacity-60"
+					style={{
+						backgroundColor: theme?.surface ?? "var(--color-surgent-surface)",
+						color: theme?.fgDim ?? "var(--color-surgent-text-3)",
+					}}
+				>
+					{editCount}×
+				</span>
+			</button>
+			{/* Diff content - collapsible */}
+			{isExpanded && (
+				<div className="max-h-60 overflow-auto">
+					{hunks.map((hunk, hunkIdx) => {
+						// Reset line counter for each render
+						let hunkLineIdx = globalLineIdx;
+
+						return (
+							<div key={hunkIdx}>
+								{/* Subtle hunk separator - just a thin line */}
+								{hunkIdx > 0 && (
+									<div
+										className="h-px my-0.5"
+										style={{
+											backgroundColor:
+												theme?.border ?? "var(--color-surgent-border)",
+											opacity: 0.3,
+										}}
+									/>
+								)}
+								{/* Hunk lines - skip context lines and empty lines */}
+								{hunk
+									.filter(
+										(line) => line.type !== "context" && line.text.trim() !== ""
+									)
+									.map((line, lineIdx) => {
+										const currentLineIdx = hunkLineIdx++;
+										const highlightedHtml = highlighted.get(currentLineIdx);
+										const isRemoved = line.type === "removed";
+										const isAdded = line.type === "added";
+
+										// Update global counter
+										if (
+											hunkIdx === hunks.length - 1 &&
+											lineIdx ===
+												hunk.filter(
+													(l) => l.type !== "context" && l.text.trim() !== ""
+												).length -
+													1
+										) {
+											globalLineIdx = currentLineIdx + 1;
+										}
+
+										return (
+											<div
+												key={`${hunkIdx}-${lineIdx}`}
+												className="flex leading-[12px]"
+												style={{
+													backgroundColor: isRemoved
+														? removedBg
+														: isAdded
+															? addedBg
+															: "transparent",
+													borderLeft: `2px solid ${isRemoved ? removedBorder : isAdded ? addedBorder : "transparent"}`,
+												}}
+											>
+												<span
+													className="shrink-0 w-4 text-center select-none text-[8px]"
+													style={{
+														color: isRemoved
+															? "rgba(248,81,73,0.7)"
+															: "rgba(46,160,67,0.7)",
+													}}
+												>
+													{isRemoved ? "−" : "+"}
+												</span>
+												<span
+													className="flex-1 whitespace-pre pr-1 overflow-hidden text-[8px] shiki-line"
+													style={{
+														color: theme?.fg ?? "var(--color-surgent-text)",
+													}}
+													dangerouslySetInnerHTML={
+														isReady && highlightedHtml
+															? { __html: highlightedHtml }
+															: undefined
+													}
+												>
+													{!(isReady && highlightedHtml)
+														? line.text || " "
+														: undefined}
+												</span>
+											</div>
+										);
+									})}
+							</div>
+						);
+					})}
 				</div>
 			)}
 		</div>
@@ -3250,7 +4776,7 @@ function ToolOutputHighlight({
 			if (parsed.file_path && parsed.content) {
 				const preview =
 					parsed.content.length > 300
-						? parsed.content.slice(0, 300) + "..."
+						? `${parsed.content.slice(0, 300)}...`
 						: parsed.content;
 				return (
 					<>
@@ -3323,6 +4849,7 @@ function CopyButton({
 
 	return (
 		<button
+			type="button"
 			onClick={handleCopy}
 			className={`flex items-center justify-center h-5 w-5 rounded transition-colors ${className ?? ""}`}
 			style={{
@@ -3337,6 +4864,7 @@ function CopyButton({
 		>
 			{copied ? (
 				<svg
+					aria-hidden="true"
 					width="10"
 					height="10"
 					viewBox="0 0 24 24"
@@ -3350,6 +4878,7 @@ function CopyButton({
 				</svg>
 			) : (
 				<svg
+					aria-hidden="true"
 					width="10"
 					height="10"
 					viewBox="0 0 24 24"
@@ -3391,18 +4920,19 @@ function CheckpointMarker({
 		<div
 			className="rounded my-1"
 			style={{
-				backgroundColor: baseColor + "08",
-				borderLeft: `2px solid ${baseColor + "40"}`,
+				backgroundColor: `${baseColor}08`,
+				borderLeft: `2px solid ${`${baseColor}40`}`,
 			}}
 		>
 			<div className="flex items-center gap-2 px-2 py-1">
 				{/* Clock icon */}
 				<svg
+					aria-hidden="true"
 					width="11"
 					height="11"
 					viewBox="0 0 24 24"
 					fill="none"
-					stroke={baseColor + "80"}
+					stroke={`${baseColor}80`}
 					strokeWidth="2"
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -3413,10 +4943,11 @@ function CheckpointMarker({
 
 				{/* File count badge (clickable to expand) */}
 				<button
+					type="button"
 					onClick={() => setExpanded(!expanded)}
 					className="text-[9px] font-mono px-1.5 py-0.5 rounded transition-colors"
 					style={{
-						backgroundColor: accentColor + "15",
+						backgroundColor: `${accentColor}15`,
 						color: accentColor,
 					}}
 				>
@@ -3429,11 +4960,12 @@ function CheckpointMarker({
 				{/* Revert / reverted state */}
 				{!checkpoint.reverted ? (
 					<button
+						type="button"
 						onClick={() => onRevert(checkpoint.id)}
 						disabled={disabled}
 						className="text-[9px] px-2 py-0.5 rounded font-medium transition-colors disabled:opacity-40"
 						style={{
-							backgroundColor: revertedColor + "15",
+							backgroundColor: `${revertedColor}15`,
 							color: revertedColor,
 						}}
 					>
@@ -3486,22 +5018,31 @@ function CheckpointMarker({
 	);
 }
 
-function Inline({ text, theme }: { text: string; theme?: BubbleTheme }) {
+function Inline({
+	text,
+	theme,
+	onMdFileClick,
+}: {
+	text: string;
+	theme?: BubbleTheme;
+	onMdFileClick?: (path: string) => void;
+}) {
 	const parts = useMemo(
 		() =>
 			text.split(
-				/(`[^`\n]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)<>]+)/g
+				// Match: inline code, bold, italic, markdown links, URLs with protocol, domain URLs, .md file paths
+				/(`[^`\n]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)<>]+|[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}[^\s)<>]*|[\w./-]+\.md\b)/g
 			),
 		[text]
 	);
-	const linkStyle = theme ? { color: theme.cursor + "cc" } : undefined;
+	const linkStyle = theme ? { color: `${theme.cursor}cc` } : undefined;
 	return (
 		<>
 			{parts.map((p, i) => {
 				const partKey = `${i}-${p.slice(0, 12)}`;
 				if (p.startsWith("`") && p.endsWith("`") && p.length > 2) {
 					const cs = theme
-						? { backgroundColor: theme.surface, color: theme.cursor + "cc" }
+						? { backgroundColor: theme.surface, color: `${theme.cursor}cc` }
 						: undefined;
 					return (
 						<code
@@ -3546,6 +5087,21 @@ function Inline({ text, theme }: { text: string; theme?: BubbleTheme }) {
 							{lm[1]}
 						</a>
 					);
+				// File path ending in .md - open preview modal (check FIRST before URL checks)
+				if (/\.md$/i.test(p) && onMdFileClick) {
+					return (
+						<button
+							key={partKey}
+							type="button"
+							onClick={() => onMdFileClick(p)}
+							className="underline decoration-current/30 hover:decoration-current/60 cursor-pointer"
+							style={linkStyle}
+						>
+							{p}
+						</button>
+					);
+				}
+				// Full URL with protocol
 				if (/^https?:\/\//.test(p))
 					return (
 						<a
@@ -3559,6 +5115,22 @@ function Inline({ text, theme }: { text: string; theme?: BubbleTheme }) {
 							{p}
 						</a>
 					);
+				// Domain URL without protocol (e.g., example.com/path)
+				if (/^[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}/.test(p)) {
+					const href = `https://${p}`;
+					return (
+						<a
+							key={partKey}
+							href={href}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="underline decoration-current/30 hover:decoration-current/60"
+							style={linkStyle}
+						>
+							{p}
+						</a>
+					);
+				}
 				return <React.Fragment key={partKey}>{p}</React.Fragment>;
 			})}
 		</>

@@ -4,6 +4,7 @@ node_modules
 # output
 out
 dist
+build
 *.tgz
 
 # code coverage
@@ -16,8 +17,7 @@ _.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
-.env
-.env.local
+.env*
 
 # caches
 .eslintcache
@@ -36,3 +36,5 @@ src/data/terminal-state.json
 data/terminal-state.json
 
 src/data/checkpoints.json
+
+.env.codesign

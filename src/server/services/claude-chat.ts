@@ -1,12 +1,12 @@
 import type { ServerWebSocket } from "bun";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { ChatAgentKind } from "../../lib/agents.ts";
+import { getAgentAdapter } from "../agents/registry.ts";
 import type {
 	AgentHandle,
 	AgentRunContext,
 	SessionUsage,
 } from "../agents/types.ts";
-import { getAgentAdapter } from "../agents/registry.ts";
-import type { ChatAgentKind } from "../../lib/agents.ts";
 import { CheckpointService } from "./checkpoint.ts";
 
 interface ServerChatMessage {
@@ -166,7 +166,7 @@ class ChatMessageBuffer {
 			0
 		);
 		while (totalChars > MAX_BUFFER_CHARS && this.messages.length > 1) {
-			totalChars -= this.messages[0]!.content.length;
+			totalChars -= this.messages[0]?.content.length;
 			this.messages.shift();
 			this.currentAssistantIdx =
 				this.currentAssistantIdx >= 1 ? this.currentAssistantIdx - 1 : -1;

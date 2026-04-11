@@ -1,40 +1,80 @@
-import "./index.css";
+import { Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { Sidebar } from "./components/layout/Sidebar.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
-import { GitPage } from "./pages/GitPage";
-import { PromptsPage } from "./pages/PromptsPage";
-import { TerminalPage } from "./pages/Terminal";
+import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
 
-for (const attrs of [
-	{ rel: "manifest", href: "/manifest.json" },
-	{ rel: "icon", type: "image/png", href: "/app-icon.png" },
-	{ rel: "apple-touch-icon", href: "/app-icon.png" },
-]) {
-	const el = document.createElement("link");
-	for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-	document.head.appendChild(el);
+const TerminalPage = lazy(() =>
+	import("./pages/Terminal").then((m) => ({ default: m.TerminalPage }))
+);
+const ExperimentalPage = lazy(() =>
+	import("./pages/ExperimentalPage").then((m) => ({
+		default: m.ExperimentalPage,
+	}))
+);
+const GitPage = lazy(() =>
+	import("./pages/GitPage").then((m) => ({ default: m.GitPage }))
+);
+const PromptsPage = lazy(() =>
+	import("./pages/PromptsPage").then((m) => ({ default: m.PromptsPage }))
+);
+
+if (window.location.origin !== getServerOrigin()) {
+	const originalFetch = window.fetch.bind(window);
+	window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+		if (typeof input === "string" && input.startsWith("/")) {
+			return originalFetch(resolveServerUrl(input), init);
+		}
+		if (input instanceof URL && input.pathname.startsWith("/")) {
+			return originalFetch(
+				resolveServerUrl(`${input.pathname}${input.search}`),
+				init
+			);
+		}
+		if (input instanceof Request) {
+			const url = new URL(input.url, window.location.origin);
+			if (url.pathname.startsWith("/")) {
+				return originalFetch(
+					new Request(resolveServerUrl(`${url.pathname}${url.search}`), input),
+					init
+				);
+			}
+		}
+		return originalFetch(input, init);
+	};
 }
 
 applyAppTheme(loadAppThemeId());
 
-const root = createRoot(document.getElementById("root")!);
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+	throw new Error("Missing root element.");
+}
+
+const root = createRoot(rootElement);
 root.render(
 	<ErrorBoundary>
-		<BrowserRouter>
-			<div className="flex h-screen bg-surgent-bg">
-				<Sidebar />
-				<main className="min-w-0 flex-1 overflow-hidden">
-					<Routes>
-						<Route path="/" element={<Navigate to="/terminal" replace />} />
-						<Route path="/terminal" element={<TerminalPage />} />
-						<Route path="/git" element={<GitPage />} />
-						<Route path="/prompts" element={<PromptsPage />} />
-					</Routes>
-				</main>
+		<HashRouter>
+			<div className="flex h-screen flex-col bg-surgent-bg">
+				<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-surgent-bg" />
+				<div className="flex min-h-0 flex-1">
+					<Sidebar />
+					<main className="min-w-0 flex-1 overflow-hidden">
+						<Suspense fallback={null}>
+							<Routes>
+								<Route path="/" element={<Navigate to="/terminal" replace />} />
+								<Route path="/terminal" element={<TerminalPage />} />
+								<Route path="/experimental" element={<ExperimentalPage />} />
+								<Route path="/git" element={<GitPage />} />
+								<Route path="/prompts" element={<PromptsPage />} />
+							</Routes>
+						</Suspense>
+					</main>
+				</div>
 			</div>
-		</BrowserRouter>
+		</HashRouter>
 	</ErrorBoundary>
 );

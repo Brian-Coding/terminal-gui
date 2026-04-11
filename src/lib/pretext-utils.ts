@@ -1,4 +1,4 @@
-import { prepare, layout } from "@chenglou/pretext";
+import { layout, prepare } from "@chenglou/pretext";
 
 // Font strings matching the CSS declarations
 const UI_FONT =
@@ -15,11 +15,15 @@ const HEADING_LINE_HEIGHT = 16;
 // Cache prepared texts to avoid re-measuring
 const cache = new Map<string, ReturnType<typeof prepare>>();
 
-function getPrepared(text: string, font: string): ReturnType<typeof prepare> {
-	const key = `${font}::${text}`;
+function getPrepared(
+	text: string,
+	font: string,
+	whiteSpace: "normal" | "pre-wrap" = "normal"
+): ReturnType<typeof prepare> {
+	const key = `${whiteSpace}::${font}::${text}`;
 	let p = cache.get(key);
 	if (!p) {
-		p = prepare(text, font);
+		p = prepare(text, font, { whiteSpace });
 		cache.set(key, p);
 		// Keep cache bounded
 		if (cache.size > 2000) {
@@ -84,7 +88,7 @@ export function measureMessageHeight(
 		}
 
 		if (inCodeBlock) {
-			codeContent += line + "\n";
+			codeContent += `${line}\n`;
 			continue;
 		}
 
@@ -131,6 +135,22 @@ export function measureMessageHeight(
 	}
 
 	return Math.max(height, UI_LINE_HEIGHT);
+}
+
+/**
+ * Measure textarea content height (preserves newlines, spaces, tabs).
+ * Uses pre-wrap mode like CSS white-space: pre-wrap.
+ */
+export function measureTextareaHeight(
+	text: string,
+	maxWidth: number,
+	font: string = UI_FONT,
+	lineHeight: number = UI_LINE_HEIGHT
+): number {
+	if (!text) return lineHeight;
+	const p = getPrepared(text, font, "pre-wrap");
+	const result = layout(p, maxWidth, lineHeight);
+	return result.height;
 }
 
 /**

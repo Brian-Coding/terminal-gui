@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="public/app-icon.png" width="128" height="128" alt="Terminal GUI" />
+  <img src="public/icon.iconset/icon_128x128.png" width="128" height="128" alt="inferay" />
 </p>
 
-<h1 align="center">Terminal GUI</h1>
+<h1 align="center">inferay</h1>
 
 <p align="center">
-  <strong>A multi-pane terminal manager built with Bun + React.</strong><br/>
-  Split, stack, and theme your terminals. Chat with AI agents inline. Ship faster.
+  <strong>Run Claude and Codex side by side in a multi-pane terminal.</strong><br/>
+  Compare responses. Switch instantly. No lock-in.
 </p>
 
 <p align="center">
@@ -14,123 +14,78 @@
   <img src="https://img.shields.io/badge/frontend-React_19-61dafb?style=flat-square" />
   <img src="https://img.shields.io/badge/terminal-xterm.js-22c55e?style=flat-square" />
   <img src="https://img.shields.io/badge/styling-Tailwind_4-38bdf8?style=flat-square" />
-  <img src="https://img.shields.io/badge/PWA-installable-8b5cf6?style=flat-square" />
+  <img src="https://img.shields.io/badge/desktop-Electrobun-8b5cf6?style=flat-square" />
 </p>
 
 ---
 
 ## What is this?
 
-Terminal GUI is a browser-based terminal multiplexer with first-class AI agent support. Think tmux meets a modern web app — with Claude and Codex living right next to your shell sessions.
+inferay is a multi-pane terminal with Claude and Codex built in. Run AI agents side by side, compare responses, and switch between them instantly.
 
-Every pane is a real PTY. Every agent chat is a real conversation. Everything runs on a single Bun server at `localhost:4000`.
+Every pane is a real PTY. Every agent chat is a real conversation.
 
 ## Features
 
-**Multi-pane terminals**
+**Multi-agent panes**
 
-- Grid or row layouts with drag-to-reorder
-- Groups (tabs) for organizing workspaces
-- Per-pane directory picker — start anywhere on your filesystem
-- Real shell sessions via Bun's native PTY
+- Claude and Codex in split panes
+- Compare responses side by side
+- Use the right agent for the job
 
-**AI agents inline**
+**Your keys**
 
-- Claude and Codex chat panes alongside your terminals
+- Connect with your own API keys
+- No middleman. No subscriptions. Direct access.
+
+**Terminal native**
+
+- Real PTY sessions alongside AI chat
 - Slash commands (`/review`, `/refactor`, `/debug`, `/test`, etc.)
-- Custom prompt library — create, edit, and manage your own `/commands`
-- Usage tracking across prompts
+- 12 built-in themes
+- Keyboard-first workflow
 
-**Theming**
+**Fast**
 
-- 12 built-in themes (Nord, Dracula, Solarized, Monokai, GitHub, Ocean, Rose Pine, and more)
-- Unified theme system — one pick changes both the app UI and terminal colors
-- Custom theme builder with live preview
-- Font family and size controls
-- Pane opacity slider
+- Built on Bun
+- Streaming responses
+- Native macOS app via Electrobun
+- No Electron bloat
 
-**Installable PWA**
+## Download
 
-- Add to Dock on macOS
-- Works offline-capable with service worker
-- Native app feel in standalone mode
+Download the latest release from [inferay.com](https://inferay.com) and drag to Applications.
 
-**Developer sidebar**
-
-- Running ports monitor (auto-detects 3000-4000 range)
-- Claude process manager — view, kill, bulk kill
-- Real-time WebSocket state sync
-
-## Quick start
+## Building from Source
 
 ```bash
-# Clone and install
-git clone <repo-url> terminal-gui
-cd terminal-gui
+# Install dependencies
 bun install
 
-# Build CSS and start
-bun run build
-bun run dev
+# Build the app and create DMG installer
+bash scripts/build-dmg.sh
 ```
 
-Open [http://localhost:4000](http://localhost:4000) in Safari.
+After the build completes, you'll find the installer at `artifacts/inferay-installer.dmg`.
 
-### Install as a desktop app
+### Installing
 
-1. Open `localhost:4000` in **Safari**
-2. Click the **Share** button (top right)
-3. Select **Add to Dock**
-4. Terminal GUI now lives in your Dock as a standalone app
-
-## Scripts
-
-| Command          | Description                   |
-| ---------------- | ----------------------------- |
-| `bun run dev`    | Start the dev server with HMR |
-| `bun run build`  | Build Tailwind CSS            |
-| `bun run start`  | Start production server       |
-| `bun run format` | Format source with Biome      |
-| `bun run check`  | Lint and check with Biome     |
-
-## Project structure
-
-```
-terminal-gui/
-  index.ts              Bun server entry — routes, WebSocket, static files
-  index.html            App shell with theme preloader
-  src/
-    main.tsx            React entry point
-    app.tsx             Router — Terminal + Prompts pages
-    components/         Shared UI (icons, buttons, chat view, sidebar)
-    pages/
-      Terminal/         Multi-pane terminal — grid, settings, agent sidebar
-      PromptsPage/      Slash command library (CRUD)
-    hooks/              usePrompts, usePollingResource, usePorts, etc.
-    lib/                Theme engine, WebSocket client, terminal utils, agents
-    server/
-      routes/           API routes (terminal, prompts, config, files, etc.)
-      services/         PTY management, chat service, checkpoint service
-      agents/           Claude/Codex adapter registry
-      lib/              Path utils, route helpers
-    data/
-      prompts.json      Slash command library (local JSON)
-  public/               PWA icons, manifest, service worker
-```
+1. Download the `.dmg` file
+2. Double-click to mount it
+3. Drag **inferay** to your **Applications** folder
+4. First launch: Right-click the app → **Open** (to bypass unsigned app warning)
+   - Or run: `xattr -cr /Applications/inferay.app`
 
 ## Tech stack
 
-- **Runtime**: [Bun](https://bun.sh) — server, bundler, and package manager
+- **Runtime**: [Bun](https://bun.sh)
 - **Frontend**: React 19, React Router, TanStack Query
-- **Terminal**: xterm.js with fit and web-links addons
+- **Terminal**: xterm.js
 - **Styling**: Tailwind CSS v4
-- **Linting**: Biome
-- **Transport**: Native WebSocket (Bun.serve)
+- **Desktop**: Electrobun
 
 ## License
 
 This project is source-available for reference and educational purposes. All rights are reserved by the author.
-
-You may **not** use, copy, modify, distribute, or deploy this software without explicit written permission from the author. If you'd like to use Terminal GUI in your own project or organization, please reach out to request a license.
 
 See [LICENSE](LICENSE) for the full terms.
