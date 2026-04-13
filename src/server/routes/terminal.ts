@@ -353,30 +353,25 @@ async function findQuickPicks(): Promise<
 		return false;
 	}
 
+	async function scanDir(dirPath: string, depth: number): Promise<void> {
+		if (depth <= 0) return;
+		try {
+			const entries = await readdir(dirPath, { withFileTypes: true });
+			for (const entry of entries) {
+				if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+				const fullPath = resolve(dirPath, entry.name);
+				if (!(await checkGitRepo(fullPath, entry.name))) {
+					await scanDir(fullPath, depth - 1);
+				}
+			}
+		} catch {}
+	}
+
 	for (const basePath of commonPaths) {
 		try {
 			const stats = await stat(basePath);
 			if (!stats.isDirectory()) continue;
-
-			const dirs = await readdir(basePath, { withFileTypes: true });
-			for (const entry of dirs) {
-				if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-
-				const fullPath = resolve(basePath, entry.name);
-				if (!(await checkGitRepo(fullPath, entry.name))) {
-					try {
-						const subDirs = await readdir(fullPath, { withFileTypes: true });
-						for (const subEntry of subDirs) {
-							if (!subEntry.isDirectory() || subEntry.name.startsWith("."))
-								continue;
-							await checkGitRepo(
-								resolve(fullPath, subEntry.name),
-								subEntry.name
-							);
-						}
-					} catch {}
-				}
-			}
+			await scanDir(basePath, 3);
 		} catch {}
 	}
 
