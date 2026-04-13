@@ -50,6 +50,7 @@ import {
 	DEFAULT_OPACITY,
 	DEFAULT_ROWS,
 	DEFAULT_THEME_ID,
+	cacheTerminalState,
 	getInitialGroups,
 	getPaneTitle,
 	getThemeById,
@@ -442,6 +443,7 @@ export function TerminalPage({
 			fontFamily,
 			opacity,
 		};
+		cacheTerminalState(latestStateRef.current);
 	}, [groups, selectedGroupId, themeId, fontSize, fontFamily, opacity]);
 	useEffect(() => {
 		pendingSaveRef.current = true;
