@@ -70,7 +70,7 @@ interface TerminalPageProps {
 
 function wasPopoutRestored(): boolean {
 	try {
-		return sessionStorage.getItem("surgent-popout-restored") === "true";
+		return sessionStorage.getItem("inferay-popout-restored") === "true";
 	} catch {
 		return false;
 	}
@@ -78,7 +78,7 @@ function wasPopoutRestored(): boolean {
 
 function markPopoutRestored() {
 	try {
-		sessionStorage.setItem("surgent-popout-restored", "true");
+		sessionStorage.setItem("inferay-popout-restored", "true");
 	} catch {}
 }
 
@@ -86,7 +86,7 @@ const logoUrl = resolveServerUrl("/logo.png");
 
 function TerminalEmptyStateBrand() {
 	return (
-		<div className="rounded-2xl border border-surgent-border bg-surgent-surface p-4 shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
+		<div className="rounded-2xl border border-inferay-border bg-inferay-surface p-4 shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
 			<img src={logoUrl} alt="inferay logo" className="h-14 w-14 rounded-xl" />
 		</div>
 	);
@@ -96,10 +96,10 @@ function GraphEmptyState({ message }: { message: string }) {
 	return (
 		<div className="flex h-full items-center justify-center p-6">
 			<div className="max-w-sm text-center">
-				<div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-surgent-border bg-surgent-surface text-surgent-text-3">
+				<div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-inferay-border bg-inferay-surface text-inferay-text-3">
 					<IconGitBranch size={18} />
 				</div>
-				<p className="text-sm text-surgent-text">{message}</p>
+				<p className="text-sm text-inferay-text">{message}</p>
 			</div>
 		</div>
 	);
@@ -637,7 +637,7 @@ export function TerminalPage({
 	);
 	if (isPopout || (isStandalone && compactMode)) {
 		return (
-			<div className="flex h-screen flex-col bg-surgent-bg">
+			<div className="flex h-screen flex-col bg-inferay-bg">
 				<PopoutHeader
 					groups={groups}
 					currentGroup={currentGroup}
@@ -663,7 +663,7 @@ export function TerminalPage({
 							<div className="flex w-full max-w-sm flex-col items-center gap-4 px-6 text-center">
 								<TerminalEmptyStateBrand />
 								<div>
-									<p className="text-sm text-surgent-text-2">
+									<p className="text-sm text-inferay-text-2">
 										Start a new terminal or agent session
 									</p>
 								</div>
@@ -699,19 +699,19 @@ export function TerminalPage({
 	}
 	if (isPoppedOut) {
 		return (
-			<div className="flex h-full flex-col bg-surgent-bg">
-				<div className="relative h-12 shrink-0 border-b border-surgent-border bg-surgent-bg"></div>
+			<div className="flex h-full flex-col bg-inferay-bg">
+				<div className="relative h-12 shrink-0 border-b border-inferay-border bg-inferay-bg"></div>
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-center">
 						<div className="mb-4 flex items-center justify-center">
-							<div className="rounded-full bg-surgent-surface p-4">
-								<IconExternalLink size={32} className="text-surgent-accent" />
+							<div className="rounded-full bg-inferay-surface p-4">
+								<IconExternalLink size={32} className="text-inferay-accent" />
 							</div>
 						</div>
-						<h2 className="text-lg font-medium text-surgent-text mb-2">
+						<h2 className="text-lg font-medium text-inferay-text mb-2">
 							Terminal in Separate Window
 						</h2>
-						<p className="text-sm text-surgent-text-3 mb-4">
+						<p className="text-sm text-inferay-text-3 mb-4">
 							The terminal is currently open in a pop-out window.
 						</p>
 						<Button variant="primary" onClick={handleRestore}>
@@ -725,7 +725,7 @@ export function TerminalPage({
 	}
 	return (
 		<div
-			className={`flex flex-col bg-surgent-bg ${isStandalone ? "h-screen" : "h-full"}`}
+			className={`flex flex-col bg-inferay-bg ${isStandalone ? "h-screen" : "h-full"}`}
 		>
 			<div className="relative flex flex-1 flex-col overflow-hidden">
 				<div className="flex flex-1 flex-col overflow-hidden">
@@ -762,12 +762,12 @@ export function TerminalPage({
 							) : mainView === "editor" ? (
 								<ExperimentalPage key={editorViewKey} />
 							) : mainView === "chat" ? (
-								currentGroup.panes.length === 0 ? (
+								!currentGroup || currentGroup.panes.length === 0 ? (
 									<EmptyState
 										icon={
 											<IconMessageCircle
 												size={18}
-												className="text-surgent-text-3"
+												className="text-inferay-text-3"
 											/>
 										}
 										title="No Panes"
@@ -856,7 +856,7 @@ export function TerminalPage({
 							sidebarOpen &&
 							currentGroup &&
 							currentGroup.panes.length > 0 && (
-								<div className="flex flex-col shrink-0 border-l border-surgent-border bg-surgent-bg order-last">
+								<div className="flex flex-col shrink-0 border-l border-inferay-border bg-inferay-bg order-last">
 									<AgentSidebar
 										panes={currentGroup.panes}
 										selectedPaneId={currentGroup.selectedPaneId}
@@ -869,7 +869,7 @@ export function TerminalPage({
 										icon={<IconGlobe size={12} />}
 										label="Ports"
 										count={runningPorts.length}
-										countColor="text-surgent-accent"
+										countColor="text-inferay-accent"
 										expanded={sidebarSections.ports}
 										onToggle={() => toggleSection("ports")}
 										emptyMessage="No ports running"
@@ -877,23 +877,23 @@ export function TerminalPage({
 										{runningPorts.map((p) => (
 											<div
 												key={`${p.port}-${p.pid}`}
-												className="group mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surgent-surface"
+												className="group mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-inferay-surface"
 											>
 												<div className="shrink-0">
 													<IconCircle
 														size={8}
-														className="fill-surgent-accent text-surgent-accent"
+														className="fill-inferay-accent text-inferay-accent"
 													/>
 												</div>
 												<div className="min-w-0 flex-1">
 													<p
-														className="truncate text-[11px] font-medium text-surgent-text"
+														className="truncate text-[11px] font-medium text-inferay-text"
 														title={p.command}
 													>
 														:{p.port}
 													</p>
 													<p
-														className="truncate text-[9px] text-surgent-text-3"
+														className="truncate text-[9px] text-inferay-text-3"
 														title={p.command}
 													>
 														{p.name}
