@@ -162,3 +162,14 @@ textarea::placeholder {
 	height: 1px;
 	background: var(--color-surgent-border);
 }
+
+/* Hide XTerm.js scrollbar */
+.xterm .xterm-viewport {
+	overflow-y: hidden !important;
+}
+.xterm-viewport::-webkit-scrollbar {
+	display: none !important;
+}
+.xterm-screen {
+	overflow: hidden !important;
+}

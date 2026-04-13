@@ -28,6 +28,8 @@ import {
 	IconLayoutRows,
 	IconMessageCircle,
 	IconPlus,
+	IconTrash,
+	IconX,
 } from "../ui/Icons.tsx";
 
 type MainViewMode = "editor" | "chat" | "graph";
@@ -77,7 +79,9 @@ export function TerminalShellHeader() {
 	const navigate = useNavigate();
 	const [shellState, setShellState] = useState(loadShellState);
 	const [showNewMenu, setShowNewMenu] = useState(false);
+	const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
 	const newMenuRef = useRef<HTMLDivElement>(null);
+	const workspaceMenuRef = useRef<HTMLDivElement>(null);
 	const [layoutMode, setLayoutMode] = useState<"grid" | "rows">(() =>
 		readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows"
 	);
@@ -116,6 +120,20 @@ export function TerminalShellHeader() {
 		document.addEventListener("mousedown", handleClick);
 		return () => document.removeEventListener("mousedown", handleClick);
 	}, [showNewMenu]);
+
+	useEffect(() => {
+		if (!showWorkspaceMenu) return;
+		const handleClick = (event: MouseEvent) => {
+			if (
+				workspaceMenuRef.current &&
+				!workspaceMenuRef.current.contains(event.target as Node)
+			) {
+				setShowWorkspaceMenu(false);
+			}
+		};
+		document.addEventListener("mousedown", handleClick);
+		return () => document.removeEventListener("mousedown", handleClick);
+	}, [showWorkspaceMenu]);
 
 	const updateSelectedGroup = useCallback((groupId: string) => {
 		const terminalState = loadTerminalState();
@@ -156,6 +174,23 @@ export function TerminalShellHeader() {
 		},
 		[navigate]
 	);
+
+	const removeGroup = useCallback((groupId: string) => {
+		const terminalState = loadTerminalState();
+		if (!terminalState) return;
+		if (terminalState.groups.length <= 1) return; // Keep at least one group
+		const filteredGroups = terminalState.groups.filter((g) => g.id !== groupId);
+		const newSelectedGroupId =
+			terminalState.selectedGroupId === groupId
+				? (filteredGroups[0]?.id ?? null)
+				: terminalState.selectedGroupId;
+		saveTerminalState({
+			...terminalState,
+			groups: filteredGroups,
+			selectedGroupId: newSelectedGroupId,
+		});
+		window.dispatchEvent(new Event("terminal-shell-change"));
+	}, []);
 
 	const addPaneToSelectedGroup = useCallback(
 		(agentKind: (typeof NEW_PANE_AGENT_KINDS)[number]) => {
@@ -223,42 +258,6 @@ export function TerminalShellHeader() {
 
 	return (
 		<div className="flex h-12 shrink-0 items-center gap-3 border-b border-surgent-border bg-surgent-bg px-3">
-			<div className="flex min-w-0 items-center gap-1 overflow-x-auto">
-				{shellState.groups.map((group) => {
-					const active = group.id === shellState.selectedGroupId;
-					return (
-						<button
-							type="button"
-							key={group.id}
-							onClick={() => updateSelectedGroup(group.id)}
-							className={`flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors ${
-								active
-									? "border-surgent-border bg-surgent-surface-2 text-surgent-text"
-									: "border-transparent text-surgent-text-3 hover:bg-surgent-surface hover:text-surgent-text-2"
-							}`}
-						>
-							<span>{group.name}</span>
-							<span
-								className={`rounded px-1 py-0.5 text-[9px] ${
-									active
-										? "bg-surgent-surface text-surgent-text"
-										: "bg-surgent-surface/80 text-surgent-text-3"
-								}`}
-							>
-								{group.panes.length}
-							</span>
-						</button>
-					);
-				})}
-				<button
-					type="button"
-					onClick={() => addGroup("Workspace")}
-					className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-surgent-border bg-surgent-surface text-surgent-text-3 transition-colors hover:bg-surgent-surface-2 hover:text-surgent-text-2"
-					title="New workspace"
-				>
-					<IconPlus size={10} />
-				</button>
-			</div>
 			<div className="flex items-center gap-1 shrink-0">
 				<ViewTab
 					active={shellState.mainView === "editor"}
@@ -282,6 +281,82 @@ export function TerminalShellHeader() {
 			{location.pathname === "/terminal" && (
 				<>
 					<div className="flex-1 min-w-0" />
+					<div className="relative shrink-0" ref={workspaceMenuRef}>
+						<button
+							type="button"
+							onClick={() => setShowWorkspaceMenu((v) => !v)}
+							className="flex h-7 items-center gap-1.5 rounded-lg border border-surgent-border bg-surgent-surface px-2.5 text-xs font-medium text-surgent-text-2 transition-colors hover:bg-surgent-surface-2"
+						>
+							<span>{selectedGroup?.name ?? "Workspace"}</span>
+							<span className="text-[9px] text-surgent-text-3">
+								{selectedGroup?.panes.length ?? 0}
+							</span>
+							<IconChevronDown
+								size={10}
+								className={`transition-transform ${showWorkspaceMenu ? "rotate-180" : ""}`}
+							/>
+						</button>
+						{showWorkspaceMenu && (
+							<div className="absolute right-0 top-full z-50 mt-1 min-w-[200px] overflow-hidden rounded-lg border border-surgent-border bg-surgent-surface shadow-lg">
+								<div className="max-h-[300px] overflow-y-auto">
+									{shellState.groups.map((group) => {
+										const active = group.id === shellState.selectedGroupId;
+										const canDelete = shellState.groups.length > 1;
+										return (
+											<div
+												key={group.id}
+												className={`group flex items-center justify-between px-3 py-2 text-xs transition-colors ${
+													active
+														? "bg-surgent-surface-2 text-surgent-text"
+														: "text-surgent-text-2 hover:bg-surgent-surface-2"
+												}`}
+											>
+												<button
+													type="button"
+													onClick={() => {
+														updateSelectedGroup(group.id);
+														setShowWorkspaceMenu(false);
+													}}
+													className="flex items-center gap-2 flex-1 min-w-0"
+												>
+													<span className="truncate">{group.name}</span>
+													<span className="text-[9px] text-surgent-text-3">
+														{group.panes.length}
+													</span>
+												</button>
+												{canDelete && (
+													<button
+														type="button"
+														onClick={(e) => {
+															e.stopPropagation();
+															removeGroup(group.id);
+														}}
+														className="ml-2 rounded p-1 text-surgent-text-3 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+														title="Delete workspace"
+													>
+														<IconTrash size={10} />
+													</button>
+												)}
+											</div>
+										);
+									})}
+								</div>
+								<div className="border-t border-surgent-border">
+									<button
+										type="button"
+										onClick={() => {
+											addGroup("Workspace");
+											setShowWorkspaceMenu(false);
+										}}
+										className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-surgent-text-2 transition-colors hover:bg-surgent-surface-2"
+									>
+										<IconPlus size={10} />
+										<span>New Workspace</span>
+									</button>
+								</div>
+							</div>
+						)}
+					</div>
 					{shellState.mainView === "chat" && (
 						<>
 							<div className="flex items-center shrink-0 rounded-lg border border-surgent-border bg-surgent-surface overflow-hidden h-7">

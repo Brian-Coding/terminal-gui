@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { ClaudeChatHandle } from "../../components/chat/ClaudeChatView.tsx";
 import { clearChatMessages } from "../../components/chat/ClaudeChatView.tsx";
-import { CommitGraph } from "../../components/git/CommitGraph.tsx";
+import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { EmptyState } from "../../components/ui/EmptyState.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
@@ -16,7 +16,6 @@ import {
 	IconArrowLeft,
 	IconCircle,
 	IconExternalLink,
-	IconFolder,
 	IconGitBranch,
 	IconGlobe,
 	IconMessageCircle,
@@ -24,7 +23,6 @@ import {
 } from "../../components/ui/Icons.tsx";
 import { useAgentSessions } from "../../hooks/useAgentSessions.ts";
 import { useClaudeProcesses } from "../../hooks/useClaudeProcesses.ts";
-import { useCommitDetails, useGitGraph } from "../../hooks/useGitGraph.ts";
 import { useGitStatus } from "../../hooks/useGitStatus.ts";
 import { useRunningPorts } from "../../hooks/useRunningPorts.ts";
 import { isChatAgentKind } from "../../lib/agents.ts";
@@ -85,12 +83,6 @@ function markPopoutRestored() {
 }
 
 const logoUrl = resolveServerUrl("/logo.png");
-
-function _cwdLabel(cwd: string): string {
-	if (!cwd) return "unknown";
-	const parts = cwd.split("/");
-	return parts[parts.length - 1] || cwd;
-}
 
 function TerminalEmptyStateBrand() {
 	return (
@@ -337,26 +329,6 @@ export function TerminalPage({
 	const activeGraphProject = activeGraphCwd
 		? (projectMap.get(activeGraphCwd) ?? null)
 		: null;
-	const { commits: graphCommits, loading: graphLoading } = useGitGraph(
-		activeGraphCwd ?? undefined,
-		100
-	);
-	const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(
-		null
-	);
-	useEffect(() => {
-		setSelectedCommitHash((current) => {
-			if (current && graphCommits.some((commit) => commit.hash === current)) {
-				return current;
-			}
-			return graphCommits[0]?.hash ?? null;
-		});
-	}, [graphCommits]);
-	const { details: selectedCommitDetails, loading: commitDetailsLoading } =
-		useCommitDetails(
-			activeGraphCwd ?? undefined,
-			selectedCommitHash ?? undefined
-		);
 	const restoreSavedState = useCallback(
 		(s: ReturnType<typeof loadTerminalState>) => {
 			setIsPoppedOut(false);
@@ -460,6 +432,7 @@ export function TerminalPage({
 		fontFamily,
 		opacity,
 	});
+	const pendingSaveRef = useRef(false);
 	useEffect(() => {
 		latestStateRef.current = {
 			groups,
@@ -471,8 +444,10 @@ export function TerminalPage({
 		};
 	}, [groups, selectedGroupId, themeId, fontSize, fontFamily, opacity]);
 	useEffect(() => {
+		pendingSaveRef.current = true;
 		const id = setTimeout(() => {
 			saveTerminalState(latestStateRef.current);
+			pendingSaveRef.current = false;
 			window.dispatchEvent(new Event("terminal-shell-change"));
 		}, 100);
 		return () => clearTimeout(id);
@@ -485,6 +460,10 @@ export function TerminalPage({
 	);
 	useEffect(() => {
 		const handleShellChange = () => {
+			// Skip restore check if we have a pending save - this prevents undoing local changes
+			if (pendingSaveRef.current) {
+				return;
+			}
 			const savedState = loadTerminalState();
 			if (savedState) {
 				const savedShellKey = JSON.stringify({
@@ -783,7 +762,7 @@ export function TerminalPage({
 							) : mainView === "editor" ? (
 								<ExperimentalPage key={editorViewKey} />
 							) : mainView === "chat" ? (
-								chatPanes.length === 0 ? (
+								currentGroup.panes.length === 0 ? (
 									<EmptyState
 										icon={
 											<IconMessageCircle
@@ -791,31 +770,20 @@ export function TerminalPage({
 												className="text-surgent-text-3"
 											/>
 										}
-										title="No Chat Panes"
-										description="Add a Claude or Codex pane to use the shared chat view"
+										title="No Panes"
+										description="Add a terminal or agent session to get started"
 										action={
-											<div className="flex items-center gap-2">
-												<Button
-													size="sm"
-													variant="secondary"
-													onClick={() => handleAddPane("claude")}
-												>
-													New Claude
-												</Button>
-												<Button
-													size="sm"
-													variant="secondary"
-													onClick={() => handleAddPane("codex")}
-												>
-													New Codex
-												</Button>
-											</div>
+											<NewSessionButtons
+												labelPrefix="New"
+												layout="row"
+												onAddPane={handleAddPane}
+											/>
 										}
 									/>
 								) : (
 									<TerminalGrid
-										panes={chatPanes}
-										selectedPaneId={selectedChatPane?.id ?? null}
+										panes={currentGroup.panes}
+										selectedPaneId={currentGroup.selectedPaneId}
 										columns={currentGroup.columns}
 										rows={currentGroup.rows ?? DEFAULT_ROWS}
 										layoutMode={layoutMode}
@@ -833,144 +801,14 @@ export function TerminalPage({
 								)
 							) : mainView === "graph" ? (
 								graphCwds.length === 0 ? (
-									<GraphEmptyState message="Open a project directory in one of this group's panes to populate the commit graph." />
+									<GraphEmptyState message="Open a project directory in one of this group's panes to populate the file graph." />
 								) : (
-									<div className="flex h-full overflow-hidden">
-										<div className="min-w-0 flex-1 border-r border-surgent-border">
-											<div className="flex items-center gap-2 border-b border-surgent-border px-3 py-2">
-												<div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
-													{graphCwds.map((cwd) => {
-														const project = projectMap.get(cwd);
-														const active = cwd === activeGraphCwd;
-														return (
-															<button
-																type="button"
-																key={cwd}
-																onClick={() => setActiveGraphCwd(cwd)}
-																className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-colors ${
-																	active
-																		? "border-surgent-border bg-surgent-surface-2 text-surgent-text"
-																		: "border-transparent text-surgent-text-3 hover:bg-surgent-surface hover:text-surgent-text-2"
-																}`}
-															>
-																<IconFolder size={11} />
-																<span>{project?.name ?? _cwdLabel(cwd)}</span>
-															</button>
-														);
-													})}
-												</div>
-												{activeGraphProject && (
-													<div className="flex items-center gap-1 rounded-md border border-surgent-border bg-surgent-surface px-2 py-1 text-[10px] text-surgent-text-2">
-														<IconGitBranch size={10} />
-														<span className="font-mono">
-															{activeGraphProject.branch}
-														</span>
-													</div>
-												)}
-											</div>
-											<div className="h-full overflow-y-auto">
-												{graphLoading && graphCommits.length === 0 ? (
-													<GraphEmptyState message="Loading commit graph..." />
-												) : graphCommits.length === 0 ? (
-													<GraphEmptyState message="No commits available for this repository yet." />
-												) : (
-													<CommitGraph
-														commits={graphCommits}
-														selectedHash={selectedCommitHash ?? undefined}
-														onSelect={setSelectedCommitHash}
-														wipFiles={activeGraphProject?.files ?? []}
-														branch={activeGraphProject?.branch}
-													/>
-												)}
-											</div>
-										</div>
-										<div className="w-80 shrink-0 bg-surgent-surface/20">
-											<div className="border-b border-surgent-border px-4 py-3">
-												<p className="text-[11px] font-medium text-surgent-text">
-													Commit Details
-												</p>
-												<p className="text-[10px] text-surgent-text-3">
-													{activeGraphProject?.name ?? "Repository"}
-												</p>
-											</div>
-											<div className="overflow-y-auto p-4">
-												{commitDetailsLoading ? (
-													<p className="text-[11px] text-surgent-text-3">
-														Loading commit details...
-													</p>
-												) : selectedCommitDetails ? (
-													<div className="space-y-4">
-														<div>
-															<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-surgent-text-3">
-																Commit
-															</p>
-															<p className="font-mono text-[11px] text-surgent-accent">
-																{selectedCommitDetails.hash}
-															</p>
-														</div>
-														<div>
-															<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-surgent-text-3">
-																Message
-															</p>
-															<p className="text-[12px] text-surgent-text">
-																{selectedCommitDetails.message}
-															</p>
-														</div>
-														<div className="grid grid-cols-2 gap-3 text-[11px]">
-															<div>
-																<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-surgent-text-3">
-																	Author
-																</p>
-																<p className="text-surgent-text-2">
-																	{selectedCommitDetails.author}
-																</p>
-															</div>
-															<div>
-																<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-surgent-text-3">
-																	Date
-																</p>
-																<p className="text-surgent-text-2">
-																	{selectedCommitDetails.date}
-																</p>
-															</div>
-														</div>
-														<div>
-															<p className="mb-2 text-[10px] uppercase tracking-[0.12em] text-surgent-text-3">
-																Changed Files
-															</p>
-															<div className="space-y-1.5">
-																{selectedCommitDetails.files.map((file) => (
-																	<div
-																		key={`${selectedCommitDetails.hash}-${file.path}`}
-																		className="rounded-lg border border-surgent-border bg-surgent-surface px-3 py-2"
-																	>
-																		<div className="flex items-center justify-between gap-2">
-																			<p
-																				className="truncate text-[11px] text-surgent-text"
-																				title={file.path}
-																			>
-																				{file.path}
-																			</p>
-																			<span className="shrink-0 text-[10px] text-surgent-text-3">
-																				{file.status}
-																			</span>
-																		</div>
-																		<p className="mt-1 text-[10px] text-surgent-text-3">
-																			+{file.additions} / -{file.deletions}
-																		</p>
-																	</div>
-																))}
-															</div>
-														</div>
-													</div>
-												) : (
-													<p className="text-[11px] text-surgent-text-3">
-														Select a commit to inspect its files.
-													</p>
-												)}
-											</div>
-										</div>
-									</div>
+									<ProjectFileGraphView
+										cwds={graphCwds}
+										activeCwd={activeGraphCwd}
+										onSelectCwd={setActiveGraphCwd}
+										project={activeGraphProject}
+									/>
 								)
 							) : (
 								<TerminalGrid

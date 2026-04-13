@@ -68,6 +68,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				cursor: theme.cursor,
 			},
 			allowProposedApi: true,
+			scrollback: 0,
 		});
 		const fitAddon = new FitAddon();
 		term.loadAddon(fitAddon);
@@ -84,8 +85,8 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				reconnectCleanup = wsClient.subscribe(pane.id, (msg: any) => {
 					if (msg.type === "terminal:reconnected") {
 						if (msg.ok) {
-							if (msg.buffer && termRef.current)
-								termRef.current.write(msg.buffer);
+							// Don't restore old buffer - start fresh
+							termRef.current?.clear();
 						} else {
 							wsClient.send({
 								type: "terminal:create",
@@ -118,8 +119,10 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				term.write(
 					`\r\n\x1b[90m[Process exited with code ${msg.exitCode ?? "unknown"}]\x1b[0m\r\n`
 				);
-			else if (msg.type === "terminal:reconnected" && msg.ok && msg.buffer)
-				term.write(msg.buffer);
+			else if (msg.type === "terminal:reconnected" && msg.ok) {
+				// Don't restore old buffer - start fresh
+				term.clear();
+			}
 		});
 		const cleanupReconnect = wsClient.onReconnect(() => {
 			wsClient.send({ type: "terminal:reconnect", paneId: pane.id });
@@ -205,7 +208,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 							<IconTerminal size={10} />
 						)}
 					</span>
-					<span className="text-[10px] font-medium text-surgent-text-2">
+					<span className="text-[9px] font-medium text-surgent-text-2">
 						{isAgentChatPane ? `${paneLabel} ›` : ""} New{" "}
 						{isAgentChatPane ? "Session" : paneLabel}
 					</span>
@@ -284,15 +287,15 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					)}
 				</span>
 				<span
-					className={`font-medium ${isSelected ? "text-surgent-text-2" : "text-surgent-text-3"} text-[10px]`}
+					className={`font-medium ${isSelected ? "text-surgent-text-2" : "text-surgent-text-3"} text-[9px]`}
 				>
 					{getAgentDefinition(pane.agentKind).label}
 				</span>
 				{pane.cwd && (
 					<>
-						<span className="text-[10px] text-surgent-text-3">›</span>
+						<span className="text-[9px] text-surgent-text-3">›</span>
 						<span
-							className={`font-medium ${isSelected ? "text-surgent-text" : "text-surgent-text-3"} text-[10px] truncate`}
+							className={`font-medium ${isSelected ? "text-surgent-text" : "text-surgent-text-3"} text-[9px] truncate`}
 							title={pane.cwd}
 						>
 							{pane.cwd.split("/").pop() || pane.cwd}
