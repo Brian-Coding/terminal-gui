@@ -1,0 +1,16 @@
+{
+	"name": "inferay",
+	"version": "0.0.1",
+	"description": "Placeholder package for the Inferay name.",
+	"type": "module",
+	"main": "./index.js",
+	"exports": "./index.js",
+	"files": [
+		"index.js",
+		"README.md"
+	],
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	}
+}
