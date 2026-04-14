@@ -20,7 +20,6 @@ import {
 	IconGitBranch,
 	IconLayoutGrid,
 	IconLayoutRows,
-	IconPanelRight,
 } from "../../components/ui/Icons.tsx";
 import { ActivityIndicator } from "../../features/activity-feed/ActivityFeed.tsx";
 import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
@@ -50,6 +49,11 @@ import {
 import { wsClient } from "../../lib/websocket.ts";
 import { type DiffViewMode, GitDiffView } from "../Terminal/GitDiffView.tsx";
 import { InlineDirectoryPicker } from "../Terminal/InlineDirectoryPicker.tsx";
+import {
+	EditorSidebar,
+	FileStatusIcon,
+	type SelectedFile,
+} from "./EditorSidebar.tsx";
 
 interface Session {
 	groupId: string;
@@ -60,11 +64,6 @@ interface Session {
 	cwd?: string;
 	pendingCwd?: boolean;
 	messageCount: number;
-}
-
-interface SelectedFile {
-	path: string;
-	staged: boolean;
 }
 
 let cachedKey = "";
@@ -118,7 +117,9 @@ function loadZenMode() {
 
 export function ExperimentalPage() {
 	const [, setTick] = useState(0);
-	const [selectedPaneId, setSelectedPaneId] = useState<string | null>(null);
+	const [selectedPaneId, setSelectedPaneId] = useState<string | null>(
+		() => readStoredValue("editor-selected-pane") ?? null
+	);
 	const [selectedFiles, setSelectedFiles] = useState<
 		Record<string, SelectedFile | null>
 	>({});
@@ -129,14 +130,14 @@ export function ExperimentalPage() {
 	const [closedPaneIds, setClosedPaneIds] = useState<Set<string>>(new Set());
 	const [commitMessage, setCommitMessage] = useState("");
 	const [isCommitting, setIsCommitting] = useState(false);
+	const [amendMode, setAmendMode] = useState(false);
 	const [scrollToChange, setScrollToChange] = useState(0);
 	const [zenMode, setZenMode] = useState(loadZenMode);
-	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 	const [sidebarWidth, setSidebarWidth] = useState(224); // Default w-56 = 224px
 	const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(
 		null
 	);
-	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("path");
+	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("tree");
 	const [mainViewMode, setMainViewMode] = useState<"diff" | "graph">("diff");
 	const chatRef = useRef<AgentChatHandle>(null);
 	const sidebarDragRef = useRef<{
@@ -213,6 +214,12 @@ export function ExperimentalPage() {
 				: (sessions[0]?.paneId ?? null)
 		);
 	}, [sessions]);
+
+	useEffect(() => {
+		if (selectedPaneId) {
+			writeStoredValue("editor-selected-pane", selectedPaneId);
+		}
+	}, [selectedPaneId]);
 
 	const sessionIdx = useMemo(
 		() => sessions.findIndex((s) => s.paneId === selectedPaneId),
@@ -608,86 +615,48 @@ export function ExperimentalPage() {
 						)}
 					</div>
 
-					{!sidebarCollapsed && (
+					<div
+						className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
+						style={{ width: sidebarWidth }}
+					>
 						<div
-							className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
-							style={{ width: sidebarWidth }}
-						>
-							<div
-								className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
-								onMouseDown={handleSidebarDragStart}
-							/>
-							<div className="flex flex-1 flex-col min-w-0">
-								<EditorSidebarHeader
-									branch={project?.branch}
-									mainViewMode={mainViewMode}
-									diffViewMode={diffViewMode}
-									fileViewMode={fileViewMode}
-									onMainViewModeChange={setMainViewMode}
-									onDiffViewModeChange={setDiffViewMode}
-									onFileViewModeChange={setFileViewMode}
-									onCollapse={() => setSidebarCollapsed(true)}
-								/>
-
-								<div className="flex-1 min-h-0 overflow-y-auto">
-									<FileGroup
-										title="Unstaged"
-										files={[...modified, ...untracked]}
-										color="text-inferay-text-2"
-										selected={selectedFile}
-										onSelect={(f) =>
-											session.cwd &&
-											selectFile(session.paneId, {
-												cwd: session.cwd,
-												file: f.path,
-												staged: f.staged,
-											})
-										}
-										actionLabel="Stage"
-										onAction={stageFile}
-										onActionAll={stageAll}
-										viewMode={fileViewMode}
-									/>
-									<FileGroup
-										title="Staged"
-										files={staged}
-										color="text-git-added"
-										selected={selectedFile}
-										onSelect={(f) =>
-											session.cwd &&
-											selectFile(session.paneId, {
-												cwd: session.cwd,
-												file: f.path,
-												staged: f.staged,
-											})
-										}
-										actionLabel="Unstage"
-										onAction={unstageFile}
-										onActionAll={unstageAll}
-										viewMode={fileViewMode}
-									/>
-									{project && !project.files.length && (
-										<div className="flex items-center justify-center py-6">
-											<p className="text-[10px] text-inferay-text-3/50">
-												Clean
-											</p>
-										</div>
-									)}
-								</div>
-							</div>
-						</div>
-					)}
-
-					{sidebarCollapsed && (
-						<button
-							type="button"
-							onClick={() => setSidebarCollapsed(false)}
-							title="Show file sidebar"
-							className="shrink-0 flex items-center justify-center w-6 border-l border-inferay-border bg-inferay-bg text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-text/5 transition-all"
-						>
-							<IconPanelRight size={12} />
-						</button>
-					)}
+							className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
+							onMouseDown={handleSidebarDragStart}
+						/>
+						<EditorSidebar
+							fileViewMode={fileViewMode}
+							onFileViewModeChange={setFileViewMode}
+							mainViewMode="diff"
+							modified={modified}
+							untracked={untracked}
+							staged={staged}
+							selectedFile={selectedFile}
+							onSelectFile={(f) =>
+								session.cwd &&
+								selectFile(session.paneId, {
+									cwd: session.cwd,
+									file: f.path,
+									staged: f.staged,
+								})
+							}
+							onStageFile={stageFile}
+							onUnstageFile={unstageFile}
+							onStageAll={stageAll}
+							onUnstageAll={unstageAll}
+							hasProject={!!project}
+							selectedCommitHash={null}
+							commitDetailsLoading={false}
+							commitDetails={null}
+							files={files}
+							branch={project?.branch}
+							commitMessage={commitMessage}
+							onCommitMessageChange={setCommitMessage}
+							onCommit={handleCommit}
+							isCommitting={isCommitting}
+							amendMode={amendMode}
+							onAmendModeChange={setAmendMode}
+						/>
+					</div>
 
 					<ZenModeInput
 						chatRef={chatRef}
@@ -699,62 +668,13 @@ export function ExperimentalPage() {
 				/* ===== NORMAL MODE LAYOUT ===== */
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[400px_minmax(0,1fr)]">
 					<section className="flex min-h-0 min-w-0 flex-col border-r border-inferay-border">
-						<div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-inferay-border bg-inferay-text/[0.02]">
-							<span className="text-inferay-accent">
-								{getAgentIcon(session.agentKind, 10)}
-							</span>
-							<span className="text-[10px] font-medium text-inferay-text-2">
-								{getAgentDefinition(session.agentKind).label}
-							</span>
-							{session.cwd && (
-								<>
-									<span className="text-[10px] text-inferay-text-3">›</span>
-									{sessions.length > 1 ? (
-										<DropdownButton
-											value={session.paneId}
-											options={sessions.map((item) => ({
-												id: item.paneId,
-												label: basename(item.cwd),
-												detail: getAgentDefinition(item.agentKind).label,
-												icon: getAgentIcon(item.agentKind, 12),
-											}))}
-											onChange={setSelectedPaneId}
-											minWidth={220}
-											buttonClassName="h-6 rounded-md border-transparent bg-inferay-surface-2 px-2 text-[10px] font-medium hover:bg-inferay-surface"
-											labelClassName="max-w-[120px] truncate text-[10px]"
-										/>
-									) : (
-										<span
-											className="text-[10px] font-medium text-inferay-text truncate"
-											title={session.cwd}
-										>
-											{session.cwd.split("/").pop() || session.cwd}
-										</span>
-									)}
-								</>
-							)}
-							<span className="flex-1" />
-							<ActivityIndicator events={activityEvents} />
-							<button
-								type="button"
-								onClick={() => closePane(session.paneId)}
-								className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
-								title="Close session"
-							>
-								<svg
-									aria-hidden
-									width="8"
-									height="8"
-									viewBox="0 0 8 8"
-									fill="none"
-									stroke="currentColor"
-									strokeWidth="1.5"
-									strokeLinecap="round"
-								>
-									<path d="M1 1l6 6M7 1l-6 6" />
-								</svg>
-							</button>
-						</div>
+						<AgentTopBar
+							session={session}
+							sessions={sessions}
+							activityEvents={activityEvents}
+							onSelectPane={setSelectedPaneId}
+							onClose={closePane}
+						/>
 						<div className="flex-1 min-h-0">
 							<AgentChatView
 								key={session.paneId}
@@ -773,10 +693,17 @@ export function ExperimentalPage() {
 						</div>
 					</section>
 
-					<aside className="min-h-0 min-w-0 bg-inferay-bg">
-						<div className="flex h-full min-h-0 flex-col">
-							<div className="flex min-h-0 flex-1 overflow-hidden">
-								<div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+					<aside className="min-h-0 min-w-0 bg-inferay-bg flex flex-col">
+						<div className="flex min-h-0 flex-1 overflow-hidden">
+							<div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-hidden">
+								<DiffViewerTopBar
+									mainViewMode={mainViewMode}
+									diffViewMode={diffViewMode}
+									filePath={request?.file}
+									onMainViewModeChange={setMainViewMode}
+									onDiffViewModeChange={setDiffViewMode}
+								/>
+								<div className="min-h-0 flex-1 overflow-hidden">
 									{mainViewMode === "diff" ? (
 										diffLoading ? (
 											<Placeholder label="Loading diff..." />
@@ -820,253 +747,49 @@ export function ExperimentalPage() {
 										/>
 									)}
 								</div>
+							</div>
 
-								{sidebarCollapsed ? (
-									<button
-										type="button"
-										onClick={() => setSidebarCollapsed(false)}
-										title="Show file sidebar"
-										className="shrink-0 flex items-center justify-center w-6 border-l border-inferay-border bg-inferay-bg text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-text/5 transition-all"
-									>
-										<IconPanelRight size={12} />
-									</button>
-								) : (
-									<div
-										className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
-										style={{ width: sidebarWidth }}
-									>
-										<div
-											className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
-											onMouseDown={handleSidebarDragStart}
-										/>
-										<div className="flex flex-1 flex-col min-w-0">
-											<EditorSidebarHeader
-												branch={project?.branch}
-												mainViewMode={mainViewMode}
-												diffViewMode={diffViewMode}
-												fileViewMode={fileViewMode}
-												onMainViewModeChange={setMainViewMode}
-												onDiffViewModeChange={setDiffViewMode}
-												onFileViewModeChange={setFileViewMode}
-												onCollapse={() => setSidebarCollapsed(true)}
-											/>
-
-											{mainViewMode !== "graph" && (
-												<div className="flex-1 min-h-0 overflow-y-auto">
-													<FileGroup
-														title="Unstaged"
-														files={[...modified, ...untracked]}
-														color="text-inferay-text-2"
-														selected={selectedFile}
-														onSelect={(f) =>
-															session.cwd &&
-															selectFile(session.paneId, {
-																cwd: session.cwd,
-																file: f.path,
-																staged: f.staged,
-															})
-														}
-														actionLabel="Stage"
-														onAction={stageFile}
-														onActionAll={stageAll}
-														viewMode={fileViewMode}
-													/>
-													<FileGroup
-														title="Staged"
-														files={staged}
-														color="text-git-added"
-														selected={selectedFile}
-														onSelect={(f) =>
-															session.cwd &&
-															selectFile(session.paneId, {
-																cwd: session.cwd,
-																file: f.path,
-																staged: f.staged,
-															})
-														}
-														actionLabel="Unstage"
-														onAction={unstageFile}
-														onActionAll={unstageAll}
-														viewMode={fileViewMode}
-													/>
-
-													{project && !project.files.length && (
-														<div className="flex items-center justify-center py-6">
-															<p className="text-[10px] text-inferay-text-3/50">
-																Clean
-															</p>
-														</div>
-													)}
-													{!project && (
-														<div className="flex items-center justify-center py-6">
-															<p className="px-3 text-center text-[10px] text-inferay-text-3/50">
-																No repository
-															</p>
-														</div>
-													)}
-												</div>
-											)}
-
-											{mainViewMode === "graph" && (
-												<div className="flex-1 min-h-0 overflow-y-auto">
-													{selectedCommitHash === "wip" ? (
-														<>
-															<div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2 border-b border-inferay-border bg-inferay-bg">
-																<div className="w-3 h-3 rounded-full border-2 border-dashed border-inferay-accent" />
-																<span className="text-[11px] font-medium text-inferay-text">
-																	WIP on {project?.branch ?? "branch"}
-																</span>
-																<span className="ml-auto text-[9px] text-inferay-text-3">
-																	{files.length} files
-																</span>
-															</div>
-															<div className="py-1">
-																{files.map((f, i) => (
-																	<div
-																		key={i}
-																		className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-inferay-text/5"
-																	>
-																		<FileStatusIcon status={f.status} />
-																		<span className="flex-1 truncate text-[10px] font-mono text-inferay-text-2">
-																			{f.path}
-																		</span>
-																	</div>
-																))}
-																{files.length === 0 && (
-																	<div className="flex items-center justify-center py-6">
-																		<p className="text-[10px] text-inferay-text-3/50">
-																			No changes
-																		</p>
-																	</div>
-																)}
-															</div>
-														</>
-													) : selectedCommitHash ? (
-														commitDetailsLoading ? (
-															<div className="flex items-center justify-center py-8">
-																<p className="text-[10px] text-inferay-text-3">
-																	Loading...
-																</p>
-															</div>
-														) : commitDetails ? (
-															<CommitDetailsPanel details={commitDetails} />
-														) : (
-															<div className="flex items-center justify-center py-8">
-																<p className="text-[10px] text-inferay-text-3">
-																	No details
-																</p>
-															</div>
-														)
-													) : (
-														<div className="flex items-center justify-center py-8">
-															<p className="text-[10px] text-inferay-text-3 px-4 text-center">
-																Select a commit to view details
-															</p>
-														</div>
-													)}
-												</div>
-											)}
-
-											{project && mainViewMode !== "graph" && (
-												<div className="shrink-0 border-t border-inferay-border">
-													<div className="flex items-center justify-between px-2.5 py-1.5 border-b border-inferay-border/50">
-														<div className="flex items-center gap-1.5">
-															<svg
-																className="w-3 h-3 text-inferay-text-3"
-																viewBox="0 0 24 24"
-																fill="none"
-																stroke="currentColor"
-																strokeWidth="2"
-															>
-																<circle cx="12" cy="12" r="4" />
-																<line x1="1.05" y1="12" x2="7" y2="12" />
-																<line x1="17.01" y1="12" x2="22.96" y2="12" />
-															</svg>
-															<span className="text-[9px] font-medium text-inferay-text-2">
-																Commit
-															</span>
-														</div>
-														{commitMessage.length > 0 && (
-															<span
-																className={`text-[9px] tabular-nums ${commitMessage.length > 72 ? "text-amber-400" : "text-inferay-text-3"}`}
-															>
-																{commitMessage.length}
-															</span>
-														)}
-													</div>
-													<div className="p-2 space-y-2">
-														<input
-															type="text"
-															value={commitMessage.split("\n")[0] || ""}
-															onChange={(e) => {
-																const lines = commitMessage.split("\n");
-																lines[0] = e.target.value;
-																setCommitMessage(lines.join("\n"));
-															}}
-															placeholder="Summary (required)"
-															className="w-full rounded border border-inferay-border bg-inferay-surface px-2 py-1.5 text-[11px] text-inferay-text placeholder:text-inferay-text-3/50 focus:border-inferay-accent focus:outline-none"
-															onKeyDown={(e) => {
-																if (
-																	e.key === "Enter" &&
-																	(e.metaKey || e.ctrlKey)
-																) {
-																	e.preventDefault();
-																	handleCommit();
-																}
-															}}
-														/>
-
-														<textarea
-															value={commitMessage
-																.split("\n")
-																.slice(1)
-																.join("\n")}
-															onChange={(e) => {
-																const summary =
-																	commitMessage.split("\n")[0] || "";
-																setCommitMessage(
-																	summary +
-																		(e.target.value
-																			? "\n" + e.target.value
-																			: "")
-																);
-															}}
-															placeholder="Description (optional)"
-															className="w-full resize-none rounded border border-inferay-border bg-inferay-surface px-2 py-1.5 text-[10px] text-inferay-text placeholder:text-inferay-text-3/50 focus:border-inferay-accent focus:outline-none"
-															rows={2}
-														/>
-
-														<button
-															type="button"
-															onClick={handleCommit}
-															disabled={
-																!commitMessage.trim() ||
-																!staged.length ||
-																isCommitting
-															}
-															className="w-full flex items-center justify-center gap-1.5 rounded bg-inferay-accent hover:bg-inferay-accent/90 px-3 py-1.5 text-[10px] font-medium text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-														>
-															<svg
-																className="w-3 h-3"
-																viewBox="0 0 24 24"
-																fill="none"
-																stroke="currentColor"
-																strokeWidth="2"
-															>
-																<circle cx="12" cy="12" r="4" />
-																<line x1="1.05" y1="12" x2="7" y2="12" />
-																<line x1="17.01" y1="12" x2="22.96" y2="12" />
-															</svg>
-															{isCommitting
-																? "Committing..."
-																: `Commit Changes to ${staged.length} File${staged.length !== 1 ? "s" : ""}`}
-														</button>
-													</div>
-												</div>
-											)}
-										</div>
-									</div>
-								)}
+							<div
+								className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
+								style={{ width: sidebarWidth }}
+							>
+								<div
+									className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
+									onMouseDown={handleSidebarDragStart}
+								/>
+								<EditorSidebar
+									fileViewMode={fileViewMode}
+									onFileViewModeChange={setFileViewMode}
+									mainViewMode={mainViewMode}
+									modified={modified}
+									untracked={untracked}
+									staged={staged}
+									selectedFile={selectedFile}
+									onSelectFile={(f) =>
+										session.cwd &&
+										selectFile(session.paneId, {
+											cwd: session.cwd,
+											file: f.path,
+											staged: f.staged,
+										})
+									}
+									onStageFile={stageFile}
+									onUnstageFile={unstageFile}
+									onStageAll={stageAll}
+									onUnstageAll={unstageAll}
+									hasProject={!!project}
+									selectedCommitHash={selectedCommitHash}
+									commitDetailsLoading={commitDetailsLoading}
+									commitDetails={commitDetails}
+									files={files}
+									branch={project?.branch}
+									commitMessage={commitMessage}
+									onCommitMessageChange={setCommitMessage}
+									onCommit={handleCommit}
+									isCommitting={isCommitting}
+									amendMode={amendMode}
+									onAmendModeChange={setAmendMode}
+								/>
 							</div>
 						</div>
 					</aside>
@@ -1102,196 +825,6 @@ function Placeholder({ label }: { label: string }) {
 	);
 }
 
-function EditorSidebarHeader({
-	branch,
-	mainViewMode,
-	diffViewMode,
-	fileViewMode,
-	onMainViewModeChange,
-	onDiffViewModeChange,
-	onFileViewModeChange,
-	onCollapse,
-}: {
-	branch?: string;
-	mainViewMode: "diff" | "graph";
-	diffViewMode: DiffViewMode;
-	fileViewMode: "path" | "tree";
-	onMainViewModeChange: (mode: "diff" | "graph") => void;
-	onDiffViewModeChange: (mode: DiffViewMode) => void;
-	onFileViewModeChange: (mode: "path" | "tree") => void;
-	onCollapse: () => void;
-}) {
-	return (
-		<>
-			<div className="sticky top-0 z-20 flex items-center gap-2 border-b border-inferay-border bg-inferay-bg px-2.5 py-2">
-				<div className="flex items-center gap-1 rounded-md border border-inferay-border bg-inferay-surface px-1.5 py-1 text-[8px] font-medium uppercase tracking-wide text-inferay-text-3">
-					<IconGitBranch size={10} className="text-inferay-text-3" />
-					<span>Git</span>
-				</div>
-				<span className="flex-1 truncate text-[11px] font-medium text-inferay-text">
-					{branch ?? "No repo"}
-				</span>
-				<button
-					type="button"
-					onClick={onCollapse}
-					title="Hide sidebar"
-					className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-inferay-text-3 transition-all hover:bg-inferay-text/10 hover:text-inferay-text-2"
-				>
-					<IconPanelRight size={12} />
-				</button>
-			</div>
-			<div className="sticky top-[38px] z-20 flex flex-wrap items-center gap-2 border-b border-inferay-border/50 bg-inferay-bg px-2.5 py-1.5">
-				<div className="flex h-7 items-center overflow-hidden rounded-lg border border-inferay-border bg-inferay-surface">
-					<button
-						type="button"
-						onClick={() => onMainViewModeChange("diff")}
-						className={`px-2.5 text-[10px] font-medium transition-colors ${
-							mainViewMode === "diff"
-								? "bg-inferay-text/10 text-inferay-text"
-								: "text-inferay-text-3 hover:text-inferay-text-2"
-						}`}
-					>
-						Diff
-					</button>
-					<button
-						type="button"
-						onClick={() => onMainViewModeChange("graph")}
-						className={`px-2.5 text-[10px] font-medium transition-colors ${
-							mainViewMode === "graph"
-								? "bg-inferay-text/10 text-inferay-text"
-								: "text-inferay-text-3 hover:text-inferay-text-2"
-						}`}
-					>
-						Graph
-					</button>
-				</div>
-				<div className="flex h-7 items-center overflow-hidden rounded-lg border border-inferay-border bg-inferay-surface">
-					<ToolbarButton
-						active={diffViewMode === "split"}
-						title="Split diff"
-						onClick={() => onDiffViewModeChange("split")}
-						icon={<IconLayoutGrid size={13} />}
-					/>
-					<ToolbarButton
-						active={diffViewMode === "stacked"}
-						title="Vertical diff"
-						onClick={() => onDiffViewModeChange("stacked")}
-						icon={<IconLayoutRows size={13} />}
-					/>
-					<ToolbarButton
-						active={diffViewMode === "hunks"}
-						title="Hunk view"
-						onClick={() => onDiffViewModeChange("hunks")}
-						icon={<IconGitBranch size={13} />}
-					/>
-				</div>
-				{mainViewMode === "diff" ? (
-					<div className="ml-auto flex h-7 items-center overflow-hidden rounded-lg border border-inferay-border bg-inferay-surface">
-						<button
-							type="button"
-							onClick={() => onFileViewModeChange("path")}
-							title="Path view"
-							className={`px-2 text-[9px] font-medium transition-colors ${
-								fileViewMode === "path"
-									? "bg-inferay-text/10 text-inferay-text"
-									: "text-inferay-text-3 hover:text-inferay-text-2"
-							}`}
-						>
-							Path
-						</button>
-						<button
-							type="button"
-							onClick={() => onFileViewModeChange("tree")}
-							title="Tree view"
-							className={`px-2 text-[9px] font-medium transition-colors ${
-								fileViewMode === "tree"
-									? "bg-inferay-text/10 text-inferay-text"
-									: "text-inferay-text-3 hover:text-inferay-text-2"
-							}`}
-						>
-							Tree
-						</button>
-					</div>
-				) : null}
-			</div>
-		</>
-	);
-}
-function CommitDetailsPanel({
-	details,
-}: {
-	details: {
-		hash: string;
-		message: string;
-		author: string;
-		date: string;
-		files: Array<{
-			path: string;
-			status: string;
-			additions: number;
-			deletions: number;
-		}>;
-	};
-}) {
-	return (
-		<div className="flex flex-col h-full">
-			<div className="shrink-0 border-b border-inferay-border p-3 space-y-2">
-				<div className="flex items-center gap-2">
-					<span className="font-mono text-[11px] text-inferay-accent font-medium">
-						{details.hash.slice(0, 7)}
-					</span>
-					<span className="text-[10px] text-inferay-text-3">
-						{details.date}
-					</span>
-				</div>
-				<p className="text-[11px] text-inferay-text leading-relaxed">
-					{details.message}
-				</p>
-				<p className="text-[10px] text-inferay-text-2">{details.author}</p>
-			</div>
-
-			<div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-inferay-border/50 bg-inferay-text/[0.02]">
-				<span className="text-[9px] font-medium text-inferay-text-2">
-					Files Changed
-				</span>
-				<span className="text-[9px] text-inferay-text-3">
-					{details.files.length}
-				</span>
-			</div>
-
-			<div className="flex-1 min-h-0 overflow-y-auto">
-				{details.files.map((file, i) => (
-					<div
-						key={i}
-						className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-inferay-text/5 cursor-pointer"
-					>
-						<FileStatusIcon status={file.status} />
-						<span className="flex-1 truncate text-[10px] font-mono text-inferay-text-2">
-							{file.path.split("/").pop()}
-						</span>
-						<div className="shrink-0 flex items-center gap-1 text-[9px] tabular-nums">
-							{file.additions > 0 && (
-								<span className="text-git-added">+{file.additions}</span>
-							)}
-							{file.deletions > 0 && (
-								<span className="text-git-deleted">-{file.deletions}</span>
-							)}
-						</div>
-					</div>
-				))}
-			</div>
-
-			<div className="shrink-0 flex items-center justify-center gap-3 px-3 py-2 border-t border-inferay-border text-[10px]">
-				<span className="text-git-added">
-					+{details.files.reduce((sum, f) => sum + f.additions, 0)}
-				</span>
-				<span className="text-git-deleted">
-					-{details.files.reduce((sum, f) => sum + f.deletions, 0)}
-				</span>
-			</div>
-		</div>
-	);
-}
 function getZenToolIcon(toolName: string, isAnimated = false): React.ReactNode {
 	const baseClass = "w-3 h-3 shrink-0";
 	const animateClass = isAnimated ? "animate-pulse" : "";
@@ -1780,396 +1313,6 @@ function ZenModeInput({
 		</div>
 	);
 }
-function FileStatusIcon({ status }: { status: string }) {
-	switch (status) {
-		case "M":
-			return (
-				<span
-					className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-amber-400 bg-amber-400/15"
-					title="Modified"
-				>
-					<svg
-						className="w-2.5 h-2.5"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="2.5"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-					>
-						<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-						<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-					</svg>
-				</span>
-			);
-		case "A":
-			return (
-				<span
-					className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-git-added bg-git-added/15 text-[8px] font-bold"
-					title="Added"
-				>
-					+
-				</span>
-			);
-		case "D":
-			return (
-				<span
-					className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-git-deleted bg-git-deleted/15 text-[8px] font-bold"
-					title="Deleted"
-				>
-					−
-				</span>
-			);
-		case "R":
-			return (
-				<span
-					className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-blue-400 bg-blue-400/15 text-[8px] font-bold"
-					title="Renamed"
-				>
-					R
-				</span>
-			);
-		case "?":
-			return (
-				<span
-					className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-inferay-text-3 bg-inferay-text/10 text-[8px] font-bold"
-					title="Untracked"
-				>
-					?
-				</span>
-			);
-		default:
-			return (
-				<span
-					className="shrink-0 flex items-center justify-center w-4 h-4 rounded text-inferay-text-3 bg-inferay-text/10 text-[8px] font-bold"
-					title={status}
-				>
-					•
-				</span>
-			);
-	}
-}
-interface TreeNode {
-	name: string;
-	path: string;
-	children: Map<string, TreeNode>;
-	file?: GitFileEntry;
-}
-
-function buildFileTree(files: GitFileEntry[]): TreeNode {
-	const root: TreeNode = { name: "", path: "", children: new Map() };
-
-	for (const file of files) {
-		const parts = file.path.split("/");
-		let current = root;
-		let currentPath = "";
-
-		for (let i = 0; i < parts.length; i++) {
-			const part = parts[i]!;
-			currentPath = currentPath ? `${currentPath}/${part}` : part;
-
-			if (!current.children.has(part)) {
-				current.children.set(part, {
-					name: part,
-					path: currentPath,
-					children: new Map(),
-				});
-			}
-			current = current.children.get(part)!;
-			if (i === parts.length - 1) {
-				current.file = file;
-			}
-		}
-	}
-
-	return root;
-}
-
-function TreeNodeRow({
-	node,
-	depth,
-	selected,
-	onSelect,
-	onAction,
-	actionLabel,
-	expandedDirs,
-	toggleDir,
-}: {
-	node: TreeNode;
-	depth: number;
-	selected: SelectedFile | null;
-	onSelect: (f: GitFileEntry) => void;
-	onAction?: (path: string) => void;
-	actionLabel?: string;
-	expandedDirs: Set<string>;
-	toggleDir: (path: string) => void;
-}) {
-	const isDir = node.children.size > 0 && !node.file;
-	const isExpanded = expandedDirs.has(node.path);
-	const file = node.file;
-	const active =
-		file && selected?.path === file.path && selected?.staged === file.staged;
-
-	const sortedChildren = [...node.children.values()].sort((a, b) => {
-		const aIsDir = a.children.size > 0 && !a.file;
-		const bIsDir = b.children.size > 0 && !b.file;
-		if (aIsDir && !bIsDir) return -1;
-		if (!aIsDir && bIsDir) return 1;
-		return a.name.localeCompare(b.name);
-	});
-
-	return (
-		<>
-			<div
-				className={`group flex h-[26px] items-center gap-1 cursor-pointer transition-colors ${
-					active ? "bg-inferay-accent/10" : "hover:bg-inferay-text/5"
-				}`}
-				style={{ paddingLeft: `${8 + depth * 12}px` }}
-				onClick={() => {
-					if (isDir) {
-						toggleDir(node.path);
-					} else if (file) {
-						onSelect(file);
-					}
-				}}
-			>
-				{isDir ? (
-					<>
-						<svg
-							className={`w-2.5 h-2.5 text-inferay-text-3 transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2"
-						>
-							<polyline points="9 18 15 12 9 6" />
-						</svg>
-						<svg
-							className="w-3 h-3 text-inferay-text-3 shrink-0"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-						>
-							<path d="M2 6a2 2 0 012-2h5l2 2h9a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-						</svg>
-						<span className="truncate text-[10px] text-inferay-text-2">
-							{node.name}
-						</span>
-					</>
-				) : file ? (
-					<>
-						<FileStatusIcon status={file.status} />
-						<span
-							className={`truncate text-[10px] font-mono transition-colors ${
-								active
-									? "text-inferay-text"
-									: "text-inferay-text-2 group-hover:text-inferay-text"
-							}`}
-						>
-							{node.name}
-						</span>
-						{onAction && (
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									onAction(file.path);
-								}}
-								className="ml-auto shrink-0 opacity-0 group-hover:opacity-100 rounded px-1 py-0.5 text-[8px] text-inferay-text-3 hover:bg-inferay-text/10 hover:text-inferay-text transition-all"
-							>
-								{actionLabel}
-							</button>
-						)}
-					</>
-				) : null}
-			</div>
-			{isDir &&
-				isExpanded &&
-				sortedChildren.map((child) => (
-					<TreeNodeRow
-						key={child.path}
-						node={child}
-						depth={depth + 1}
-						selected={selected}
-						onSelect={onSelect}
-						onAction={onAction}
-						actionLabel={actionLabel}
-						expandedDirs={expandedDirs}
-						toggleDir={toggleDir}
-					/>
-				))}
-		</>
-	);
-}
-
-function FileGroup({
-	title,
-	files,
-	color,
-	selected,
-	onSelect,
-	actionLabel,
-	onAction,
-	onActionAll,
-	isCollapsible = true,
-	viewMode = "path",
-}: {
-	title: string;
-	files: GitFileEntry[];
-	color: string;
-	selected: SelectedFile | null;
-	onSelect: (f: GitFileEntry) => void;
-	actionLabel?: string;
-	onAction?: (path: string) => void;
-	onActionAll?: () => void;
-	isCollapsible?: boolean;
-	viewMode?: "path" | "tree";
-}) {
-	const [isCollapsed, setIsCollapsed] = useState(false);
-	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
-		const dirs = new Set<string>();
-		for (const f of files) {
-			const parts = f.path.split("/");
-			let path = "";
-			for (let i = 0; i < parts.length - 1; i++) {
-				path = path ? `${path}/${parts[i]}` : parts[i]!;
-				dirs.add(path);
-			}
-		}
-		return dirs;
-	});
-
-	const toggleDir = useCallback((path: string) => {
-		setExpandedDirs((prev) => {
-			const next = new Set(prev);
-			if (next.has(path)) {
-				next.delete(path);
-			} else {
-				next.add(path);
-			}
-			return next;
-		});
-	}, []);
-
-	const tree = useMemo(() => buildFileTree(files), [files]);
-
-	if (!files.length) return null;
-	return (
-		<div>
-			<div className="sticky top-0 z-10 flex h-7 items-center justify-between border-b border-inferay-border/30 bg-inferay-bg px-2">
-				<button
-					type="button"
-					onClick={() => isCollapsible && setIsCollapsed(!isCollapsed)}
-					className={`flex items-center gap-1.5 ${isCollapsible ? "cursor-pointer" : "cursor-default"}`}
-				>
-					{isCollapsible && (
-						<svg
-							className={`w-2.5 h-2.5 text-inferay-text-3 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2"
-						>
-							<polyline points="9 18 15 12 9 6" />
-						</svg>
-					)}
-					<span
-						className={`text-[9px] font-medium uppercase tracking-wide ${color}`}
-					>
-						{title}
-					</span>
-					<span className="text-[9px] text-inferay-text-3">
-						({files.length})
-					</span>
-				</button>
-				{onActionAll && !isCollapsed && (
-					<button
-						type="button"
-						onClick={onActionAll}
-						className="rounded px-1.5 py-0.5 text-[8px] text-inferay-accent hover:bg-inferay-accent/10 transition-colors"
-					>
-						{actionLabel} All
-					</button>
-				)}
-			</div>
-			{!isCollapsed &&
-				viewMode === "path" &&
-				files.map((f) => {
-					const active =
-						selected?.path === f.path && selected?.staged === f.staged;
-					const name = f.path.split("/").pop() || f.path;
-					const dir = f.path.includes("/")
-						? f.path.slice(0, f.path.lastIndexOf("/"))
-						: "";
-					return (
-						<div
-							key={`${f.staged ? "s" : "u"}-${f.path}`}
-							className={`group flex h-[28px] items-center gap-1.5 px-2 ${
-								active ? "bg-inferay-accent/10" : "hover:bg-inferay-text/5"
-							}`}
-						>
-							<FileStatusIcon status={f.status} />
-							<button
-								type="button"
-								onClick={() => onSelect(f)}
-								className="flex-1 min-w-0 h-full flex items-center gap-1 text-left"
-								title={f.path}
-							>
-								<span
-									className={`truncate text-[10px] font-mono transition-colors ${active ? "text-inferay-text" : "text-inferay-text-2 group-hover:text-inferay-text"}`}
-								>
-									{name}
-								</span>
-								{dir && (
-									<span className="truncate text-[9px] text-inferay-text-3/60">
-										{dir}
-									</span>
-								)}
-							</button>
-							{onAction && (
-								<button
-									type="button"
-									onClick={(e) => {
-										e.stopPropagation();
-										onAction(f.path);
-									}}
-									className="shrink-0 opacity-0 group-hover:opacity-100 rounded px-1.5 py-0.5 text-[8px] text-inferay-text-3 hover:bg-inferay-text/10 hover:text-inferay-text transition-all"
-									title={`${actionLabel} ${f.path}`}
-								>
-									{actionLabel}
-								</button>
-							)}
-						</div>
-					);
-				})}
-			{!isCollapsed && viewMode === "tree" && (
-				<div>
-					{[...tree.children.values()]
-						.sort((a, b) => {
-							const aIsDir = a.children.size > 0 && !a.file;
-							const bIsDir = b.children.size > 0 && !b.file;
-							if (aIsDir && !bIsDir) return -1;
-							if (!aIsDir && bIsDir) return 1;
-							return a.name.localeCompare(b.name);
-						})
-						.map((child) => (
-							<TreeNodeRow
-								key={child.path}
-								node={child}
-								depth={0}
-								selected={selected}
-								onSelect={onSelect}
-								onAction={onAction}
-								actionLabel={actionLabel}
-								expandedDirs={expandedDirs}
-								toggleDir={toggleDir}
-							/>
-						))}
-				</div>
-			)}
-		</div>
-	);
-}
-
 function ToolbarButton({
 	active,
 	title,
@@ -2186,7 +1329,7 @@ function ToolbarButton({
 			type="button"
 			onClick={onClick}
 			title={title}
-			className={`flex h-full w-7 items-center justify-center transition-all ${
+			className={`flex h-full w-6 items-center justify-center transition-all ${
 				active
 					? "bg-inferay-text/10 text-inferay-text"
 					: "text-inferay-text-3 hover:text-inferay-text-2"
@@ -2194,5 +1337,158 @@ function ToolbarButton({
 		>
 			{icon}
 		</button>
+	);
+}
+
+/* ── Top-bar components ─────────────────────────────────── */
+
+const TOPBAR_CLASS =
+	"shrink-0 flex items-center gap-2 px-3 h-8 border-b border-inferay-border";
+
+function AgentTopBar({
+	session,
+	sessions,
+	activityEvents,
+	onSelectPane,
+	onClose,
+}: {
+	session: { paneId: string; cwd: string; agentKind: string };
+	sessions: Array<{ paneId: string; cwd: string; agentKind: string }>;
+	activityEvents: ToolActivity[];
+	onSelectPane: (id: string) => void;
+	onClose: (id: string) => void;
+}) {
+	return (
+		<div className={TOPBAR_CLASS}>
+			<span className="text-inferay-accent">
+				{getAgentIcon(session.agentKind, 10)}
+			</span>
+			<span className="text-[10px] font-medium text-inferay-text-2">
+				{getAgentDefinition(session.agentKind).label}
+			</span>
+			{session.cwd && (
+				<>
+					<span className="text-[10px] text-inferay-text-3">›</span>
+					{sessions.length > 1 ? (
+						<DropdownButton
+							value={session.paneId}
+							options={sessions.map((item) => ({
+								id: item.paneId,
+								label: basename(item.cwd),
+								detail: getAgentDefinition(item.agentKind).label,
+								icon: getAgentIcon(item.agentKind, 12),
+							}))}
+							onChange={onSelectPane}
+							minWidth={220}
+							buttonClassName="h-5 rounded-md border-transparent px-1.5 text-[10px] font-medium hover:bg-inferay-text/[0.06]"
+							labelClassName="max-w-[120px] truncate text-[10px]"
+						/>
+					) : (
+						<span
+							className="text-[10px] font-medium text-inferay-text truncate"
+							title={session.cwd}
+						>
+							{session.cwd.split("/").pop() || session.cwd}
+						</span>
+					)}
+				</>
+			)}
+			<span className="flex-1" />
+			<ActivityIndicator events={activityEvents} />
+			<button
+				type="button"
+				onClick={() => onClose(session.paneId)}
+				className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+				title="Close session"
+			>
+				<svg
+					aria-hidden
+					width="8"
+					height="8"
+					viewBox="0 0 8 8"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="1.5"
+					strokeLinecap="round"
+				>
+					<path d="M1 1l6 6M7 1l-6 6" />
+				</svg>
+			</button>
+		</div>
+	);
+}
+
+function DiffViewerTopBar({
+	mainViewMode,
+	diffViewMode,
+	filePath,
+	onMainViewModeChange,
+	onDiffViewModeChange,
+}: {
+	mainViewMode: "diff" | "graph";
+	diffViewMode: DiffViewMode;
+	filePath?: string;
+	onMainViewModeChange: (mode: "diff" | "graph") => void;
+	onDiffViewModeChange: (mode: DiffViewMode) => void;
+}) {
+	return (
+		<div className={TOPBAR_CLASS}>
+			{/* Left: Diff / Graph toggle */}
+			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-border bg-inferay-surface">
+				<button
+					type="button"
+					onClick={() => onMainViewModeChange("diff")}
+					className={`h-full px-2 text-[8px] font-medium transition-colors ${
+						mainViewMode === "diff"
+							? "bg-inferay-text/10 text-inferay-text"
+							: "text-inferay-text-3 hover:text-inferay-text-2"
+					}`}
+				>
+					Diff
+				</button>
+				<button
+					type="button"
+					onClick={() => onMainViewModeChange("graph")}
+					className={`h-full px-2 text-[8px] font-medium transition-colors ${
+						mainViewMode === "graph"
+							? "bg-inferay-text/10 text-inferay-text"
+							: "text-inferay-text-3 hover:text-inferay-text-2"
+					}`}
+				>
+					Graph
+				</button>
+			</div>
+
+			{/* Center: file path */}
+			{filePath && (
+				<span className="text-[9px] font-mono text-inferay-text-3 truncate min-w-0">
+					{filePath}
+				</span>
+			)}
+
+			<span className="flex-1" />
+
+			{/* Right: view mode icons */}
+			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-border bg-inferay-surface">
+				<ToolbarButton
+					active={diffViewMode === "split"}
+					title="Split diff"
+					onClick={() => onDiffViewModeChange("split")}
+					icon={<IconLayoutGrid size={11} />}
+				/>
+				<ToolbarButton
+					active={diffViewMode === "stacked"}
+					title="Vertical diff"
+					onClick={() => onDiffViewModeChange("stacked")}
+					icon={<IconLayoutRows size={11} />}
+				/>
+				<ToolbarButton
+					active={diffViewMode === "hunks"}
+					title="Hunk view"
+					onClick={() => onDiffViewModeChange("hunks")}
+					icon={<IconGitBranch size={11} />}
+				/>
+			</div>
+		</div>
 	);
 }

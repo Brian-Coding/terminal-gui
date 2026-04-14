@@ -70,7 +70,7 @@ export function DropdownButton({
 	minWidth = 220,
 	fullWidth = false,
 	renderOption,
-	buttonClassName = "",
+	buttonClassName,
 	labelClassName = "",
 }: DropdownButtonProps) {
 	const [open, setOpen] = useState(false);
@@ -137,13 +137,17 @@ export function DropdownButton({
 				type="button"
 				ref={btnRef}
 				onClick={toggle}
-				className={`flex h-7 items-center gap-2 rounded-lg border px-3 text-xs transition-colors ${
+				className={`flex items-center gap-2 text-xs transition-colors ${
 					fullWidth ? "w-full" : ""
 				} ${
-					open
-						? "border-inferay-accent/40 bg-inferay-text/[0.08] text-inferay-text"
-						: "border-inferay-border bg-inferay-surface hover:border-inferay-border text-inferay-text-2"
-				} ${buttonClassName}`}
+					buttonClassName
+						? buttonClassName
+						: `h-7 rounded-lg border px-3 ${
+								open
+									? "border-inferay-accent/40 bg-inferay-text/[0.08] text-inferay-text"
+									: "border-inferay-border bg-inferay-surface hover:border-inferay-border text-inferay-text-2"
+							}`
+				}`}
 			>
 				{icon}
 				<span
