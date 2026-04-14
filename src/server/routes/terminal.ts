@@ -281,6 +281,9 @@ async function searchDirectories(
 		resolve(home, "Code"),
 		resolve(home, "Work"),
 		resolve(home, "Sites"),
+		resolve(home, "repos"),
+		resolve(home, "src"),
+		resolve(home, "dev"),
 		resolve(PROJECT_ROOT, "apps"),
 	];
 
@@ -293,19 +296,27 @@ async function searchDirectories(
 		else if (lowerName.includes(lowerQuery)) containsMatches.push(dir);
 	};
 
-	for (const searchPath of searchPaths) {
+	async function scanForMatches(
+		basePath: string,
+		depth: number
+	): Promise<void> {
+		if (depth <= 0) return;
 		try {
-			const dirs = await listDirectories(searchPath);
+			const dirs = await listDirectories(basePath);
 			for (const dir of dirs) {
 				categorizeMatch(dir);
-				try {
-					const subDirs = await listDirectories(dir.path);
-					for (const subDir of subDirs) {
-						if (subDir.name === dir.name) continue;
-						categorizeMatch(subDir);
-					}
-				} catch {}
+				await scanForMatches(dir.path, depth - 1);
 			}
+		} catch {}
+	}
+
+	for (const searchPath of searchPaths) {
+		try {
+			await stat(searchPath);
+			// Home dir gets 1 level (its children are the common paths already listed)
+			// Common paths get 3 levels deep to match quickPicks scan depth
+			const depth = searchPath === home ? 1 : 3;
+			await scanForMatches(searchPath, depth);
 		} catch {}
 	}
 

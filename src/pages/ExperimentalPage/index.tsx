@@ -38,11 +38,14 @@ import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
 	getThemeById,
+	getPaneTitle,
 	loadTerminalState,
+	saveTerminalState,
 	type TerminalGroupModel,
 } from "../../lib/terminal-utils.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { type DiffViewMode, GitDiffView } from "../Terminal/GitDiffView.tsx";
+import { InlineDirectoryPicker } from "../Terminal/InlineDirectoryPicker.tsx";
 
 interface Session {
 	groupId: string;
@@ -51,6 +54,7 @@ interface Session {
 	paneTitle: string;
 	agentKind: "claude" | "codex";
 	cwd?: string;
+	pendingCwd?: boolean;
 	messageCount: number;
 }
 
@@ -74,6 +78,7 @@ function flattenSessions(groups: TerminalGroupModel[]): Session[] {
 							paneTitle: p.title,
 							agentKind: p.agentKind,
 							cwd: p.cwd,
+							pendingCwd: p.pendingCwd,
 							messageCount: 0,
 						},
 					]
@@ -135,7 +140,8 @@ export function ExperimentalPage() {
 		startWidth: number;
 	} | null>(null);
 
-	const terminalState = useMemo(() => loadTerminalState(), []);
+	const [sessionVersion, setSessionVersion] = useState(0);
+	const terminalState = useMemo(() => loadTerminalState(), [sessionVersion]);
 	const allSessions = useMemo(
 		() => stableSessions(flattenSessions(terminalState?.groups ?? [])),
 		[terminalState]
@@ -401,6 +407,47 @@ export function ExperimentalPage() {
 		[selectedPaneId, sessions]
 	);
 
+	const handleDirectorySelect = useCallback((paneId: string, path: string) => {
+		const state = loadTerminalState();
+		if (!state) return;
+		saveTerminalState({
+			...state,
+			groups: state.groups.map((g) => ({
+				...g,
+				panes: g.panes.map((p) =>
+					p.id === paneId
+						? {
+								...p,
+								cwd: path,
+								pendingCwd: false,
+								title: getPaneTitle(p.agentKind, path),
+							}
+						: p
+				),
+			})),
+		});
+		setSessionVersion((v) => v + 1);
+		window.dispatchEvent(new Event("terminal-shell-change"));
+	}, []);
+
+	const handleDirectoryCancel = useCallback(
+		(paneId: string) => {
+			closePane(paneId);
+			const state = loadTerminalState();
+			if (!state) return;
+			saveTerminalState({
+				...state,
+				groups: state.groups.map((g) => ({
+					...g,
+					panes: g.panes.filter((p) => p.id !== paneId),
+				})),
+			});
+			setSessionVersion((v) => v + 1);
+			window.dispatchEvent(new Event("terminal-shell-change"));
+		},
+		[closePane]
+	);
+
 	const gitAction = useCallback(
 		async (endpoint: string, body: object) => {
 			await fetch(`/api/git/${endpoint}`, {
@@ -485,6 +532,13 @@ export function ExperimentalPage() {
 		<div className="flex h-full min-h-0 flex-col bg-inferay-bg">
 			{!session ? (
 				<EmptyState />
+			) : session.pendingCwd ? (
+				<div className="flex h-full items-center justify-center">
+					<InlineDirectoryPicker
+						onSelect={(path) => handleDirectorySelect(session.paneId, path)}
+						onCancel={() => handleDirectoryCancel(session.paneId)}
+					/>
+				</div>
 			) : zenMode ? (
 				/* ===== ZEN MODE LAYOUT ===== */
 				<div className="relative flex min-h-0 flex-1">
