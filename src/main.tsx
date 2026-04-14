@@ -1,7 +1,7 @@
 import { lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
-import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
+import { ErrorBoundary } from "./components/ui/ErrorBoundary.tsx";
 import { Sidebar } from "./components/layout/Sidebar.tsx";
 import { TerminalShellHeader } from "./components/layout/TerminalShellHeader.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";

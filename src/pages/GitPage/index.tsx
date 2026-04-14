@@ -7,40 +7,17 @@ import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
 import { GitDiffView } from "../Terminal/GitDiffView.tsx";
 import { InlineDirectoryPicker } from "../Terminal/InlineDirectoryPicker.tsx";
 
-// ── Helpers ──────────────────────────────────────────────
-
-const DOT_COLORS: Record<string, string> = {
-	M: "bg-git-modified",
-	A: "bg-git-added",
-	D: "bg-git-deleted",
-	"?": "bg-inferay-text-3/40",
-	R: "bg-git-renamed",
-	U: "bg-git-unmerged",
-};
-
-function _StatusDot({ status }: { status: string }) {
-	const c = DOT_COLORS[status] || "bg-inferay-text-3/40";
-	return (
-		<span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${c}`} />
-	);
-}
-
 function persist(dirs: string[]) {
 	writeStoredJson("git-watched-dirs", dirs);
 }
 
-// ── Main component ───────────────────────────────────────
-
 export function GitPage() {
-	// Persisted repo list
 	const [dirs, setDirs] = useState<string[]>(() =>
 		readStoredJson<string[]>("git-watched-dirs", [])
 	);
 	const [activeCwd, setActiveCwd] = useState<string | null>(null);
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const [pickerError, setPickerError] = useState<string | null>(null);
-
-	// Git data
 	const { projects } = useGitStatus(dirs);
 	const {
 		diff,
@@ -49,8 +26,6 @@ export function GitPage() {
 		loadDiff,
 		clear: clearDiff,
 	} = useGitDiff();
-
-	// Active project — find by cwd, fallback to first
 	const project = useMemo(() => {
 		if (activeCwd) {
 			const found = projects.find((p) => p.cwd === activeCwd);
@@ -58,14 +33,10 @@ export function GitPage() {
 		}
 		return projects[0] || null;
 	}, [projects, activeCwd]);
-
-	// Selected file in the right panel
 	const [selFile, setSelFile] = useState<{
 		path: string;
 		staged: boolean;
 	} | null>(null);
-
-	// ── Auto-select first file on project switch or initial load ──
 	const prevCwd = useRef<string | null>(null);
 	const hasAutoSelected = useRef(false);
 	useEffect(() => {
@@ -80,19 +51,13 @@ export function GitPage() {
 		const f = project.files[0]!;
 		setSelFile({ path: f.path, staged: f.staged });
 		loadDiff({ cwd: project.cwd, file: f.path, staged: f.staged });
-		// Only depend on cwd and files length — NOT on selFile or loadDiff
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [project?.cwd, project?.files.length, loadDiff, project]);
-
-	// ── All files flat list for keyboard nav ──
 	const allFiles = useMemo(() => {
 		if (!project) return [];
 		const unstaged = project.files.filter((f) => !f.staged);
 		const staged = project.files.filter((f) => f.staged);
 		return [...unstaged, ...staged];
 	}, [project]);
-
-	// ── Actions ──
 
 	const selectFile = useCallback(
 		(path: string, staged: boolean) => {
@@ -102,8 +67,6 @@ export function GitPage() {
 		},
 		[project?.cwd, loadDiff, project]
 	);
-
-	// Arrow up/down to navigate files
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			const tag = (e.target as HTMLElement)?.tagName;
@@ -187,8 +150,6 @@ export function GitPage() {
 		setPickerError(null);
 	}, []);
 
-	// ── Derived data ──
-
 	const tabs = useMemo(
 		() =>
 			projects.map((p) => ({
@@ -203,8 +164,6 @@ export function GitPage() {
 	const modified =
 		project?.files.filter((f) => !f.staged && f.status !== "?") || [];
 	const untracked = project?.files.filter((f) => f.status === "?") || [];
-
-	// ── Empty: no repos ──
 
 	if (dirs.length === 0 && !pickerOpen) {
 		return (
@@ -263,11 +222,8 @@ export function GitPage() {
 		);
 	}
 
-	// ── Main layout ──
-
 	return (
 		<div className="flex h-full flex-col bg-inferay-bg">
-			{/* Toolbar */}
 			<div className="shrink-0 flex items-center gap-2 px-2 sm:gap-3 sm:px-3 h-12 border-b border-inferay-border bg-inferay-bg">
 				<GroupTabs
 					items={tabs}
@@ -340,9 +296,7 @@ export function GitPage() {
 				)}
 			</div>
 
-			{/* Content */}
 			<div className="flex flex-1 min-h-0 overflow-hidden">
-				{/* Center */}
 				<div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 					{pickerOpen ? (
 						<div className="flex h-full items-center justify-center">
@@ -387,7 +341,6 @@ export function GitPage() {
 					)}
 				</div>
 
-				{/* Right: file list */}
 				{project && (
 					<div className="w-52 shrink-0 border-l border-inferay-border flex flex-col bg-inferay-bg">
 						<div className="flex-1 overflow-y-auto">
@@ -439,8 +392,6 @@ export function GitPage() {
 		</div>
 	);
 }
-
-// ── File group ───────────────────────────────────────────
 
 function FileGroup({
 	title,

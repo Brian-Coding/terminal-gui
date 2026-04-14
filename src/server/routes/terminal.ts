@@ -6,14 +6,14 @@ import type { AgentKind } from "../../lib/agents.ts";
 import {
 	createClaudeEnv,
 	resolveInteractiveAgentCommand,
-} from "../agents/terminal-command.ts";
-import { PROJECT_ROOT } from "../lib/path-utils.ts";
+} from "../../lib/terminal-command.ts";
+import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import {
 	badRequest,
 	readJson,
 	tryRoute,
 	writeJson,
-} from "../lib/route-helpers.ts";
+} from "../../lib/route-helpers.ts";
 import { ChatService } from "../services/claude-chat.ts";
 
 const isWin = process.platform === "win32";

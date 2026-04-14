@@ -87,7 +87,6 @@ export function PromptDetailPanel({
 
 	return (
 		<div className="flex h-full flex-col bg-inferay-bg overflow-hidden">
-			{/* Header */}
 			<div className="flex items-center justify-between border-b border-inferay-border px-4 h-10">
 				<div className="flex items-center gap-2">
 					{isEditMode ? (
@@ -191,7 +190,6 @@ export function PromptDetailPanel({
 				</div>
 			</div>
 
-			{/* Body */}
 			<div className="flex-1 overflow-y-auto p-4 space-y-3">
 				<div className="flex gap-3">
 					<div className="flex-1">

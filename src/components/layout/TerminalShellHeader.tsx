@@ -29,7 +29,6 @@ import {
 	IconMessageCircle,
 	IconPlus,
 	IconTrash,
-	IconX,
 } from "../ui/Icons.tsx";
 
 type MainViewMode = "editor" | "chat" | "graph";

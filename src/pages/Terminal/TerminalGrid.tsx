@@ -1,6 +1,6 @@
 import type React from "react";
 import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
-import type { ClaudeChatHandle } from "../../components/chat/ClaudeChatView.tsx";
+import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
 import type {
 	TerminalPaneModel,
 	TerminalTheme,
@@ -20,7 +20,7 @@ interface TerminalGridProps {
 	onClosePane: (paneId: string, force?: boolean) => void;
 	onDirectorySelect: (paneId: string, path: string | null) => void;
 	onDirectoryCancel: (paneId: string) => void;
-	onChatRef: (paneId: string, handle: ClaudeChatHandle | null) => void;
+	onChatRef: (paneId: string, handle: AgentChatHandle | null) => void;
 	onAgentStatusChange?: (paneId: string, status: string) => void;
 	onReorderPanes?: (fromIndex: number, toIndex: number) => void;
 }

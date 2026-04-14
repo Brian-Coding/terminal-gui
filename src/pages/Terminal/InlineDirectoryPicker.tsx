@@ -188,7 +188,7 @@ export function InlineDirectoryPicker({
 					className="w-full bg-inferay-bg rounded px-2 py-1.5 text-xs text-inferay-text placeholder:text-inferay-text-3 outline-none border border-inferay-border"
 				/>
 			</div>
-			{/* List - fixed height for 4 items to prevent layout shift */}
+
 			<div className="h-[164px] overflow-y-auto">
 				{displayList.length === 0 ? (
 					<div className="flex items-center justify-center h-full text-xs text-inferay-text-3">

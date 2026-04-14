@@ -1,8 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
-import type { AgentKind, ChatAgentKind } from "../../lib/agents.ts";
-
-// ── Binary resolution helpers ──
+import type { AgentKind, ChatAgentKind } from "./agents.ts";
 
 const isWin = process.platform === "win32";
 
@@ -13,14 +11,12 @@ function withExecutableExtension(pathname: string): string {
 	return `${pathname}.cmd`;
 }
 
-// Scan nvm node version directories for a binary (handles GUI launch without NVM_BIN)
 function findInNvmVersions(binaryName: string): string | null {
 	const home = process.env.HOME;
 	if (!home) return null;
 	const versionsDir = join(home, ".nvm", "versions", "node");
 	try {
 		const versions = readdirSync(versionsDir);
-		// Check newest versions first (reverse sort)
 		for (const v of versions.sort().reverse()) {
 			const candidate = join(versionsDir, v, "bin", binaryName);
 			if (existsSync(candidate)) return candidate;
@@ -28,8 +24,6 @@ function findInNvmVersions(binaryName: string): string | null {
 	} catch {}
 	return null;
 }
-
-// ── Claude binary resolution ──
 
 function getClaudePathCandidates(): string[] {
 	const home = process.env.HOME;
@@ -76,8 +70,6 @@ export function createClaudeEnv(): Record<string, string> {
 	return env;
 }
 
-// ── Codex binary resolution ──
-
 function getCodexPathCandidates(): string[] {
 	const home = process.env.HOME;
 	const candidates = [
@@ -104,7 +96,6 @@ export function resolveCodexBinary(): string {
 
 export function createCodexEnv(): Record<string, string> {
 	const env = { ...process.env } as Record<string, string>;
-
 	const pathEntries = (env.PATH || "").split(delimiter).filter(Boolean);
 	for (const candidate of getCodexPathCandidates()) {
 		const candidateDir = dirname(candidate);
@@ -119,15 +110,12 @@ export function createCodexEnv(): Record<string, string> {
 	return env;
 }
 
-// ── Interactive agent command resolution ──
-
 const availabilityCache: Partial<Record<ChatAgentKind, boolean>> = {};
 
 async function hasCli(kind: ChatAgentKind): Promise<boolean> {
 	const cached = availabilityCache[kind];
 	if (cached != null) return cached;
 
-	// First check our known candidate paths (handles nvm/bun installs not on Bun's PATH)
 	if (kind === "claude") {
 		for (const candidate of getClaudePathCandidates()) {
 			if (existsSync(candidate)) {
@@ -164,7 +152,6 @@ export async function resolveInteractiveAgentCommand(
 		: process.env.SHELL || "/bin/zsh";
 
 	if (kind === "terminal") {
-		// Use interactive shell without loading rc files to avoid startup garbage
 		return { ok: true, cmd: isWin ? [userShell] : [userShell, "-i"] };
 	}
 

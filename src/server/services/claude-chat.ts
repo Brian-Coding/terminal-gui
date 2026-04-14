@@ -4,7 +4,7 @@ import { getAgentAdapter } from "../agents/registry.ts";
 import {
 	createClaudeEnv,
 	resolveClaudeBinary,
-} from "../agents/terminal-command.ts";
+} from "../../lib/terminal-command.ts";
 import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
 import { CheckpointService } from "./checkpoint.ts";
 

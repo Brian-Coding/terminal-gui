@@ -6,8 +6,8 @@ import {
 	useRef,
 	useState,
 } from "react";
-import type { ClaudeChatHandle } from "../../components/chat/ClaudeChatView.tsx";
-import { clearChatMessages } from "../../components/chat/ClaudeChatView.tsx";
+import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
+import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
 import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { EmptyState } from "../../components/ui/EmptyState.tsx";
@@ -269,7 +269,7 @@ export function TerminalPage({
 	);
 	const popoutWindowRef = useRef<Window | null>(null);
 	const broadcastChannel = useRef<BroadcastChannel | null>(null);
-	const chatRefs = useRef<Map<string, ClaudeChatHandle>>(new Map());
+	const chatRefs = useRef<Map<string, AgentChatHandle>>(new Map());
 	const [agentStatuses, setAgentStatuses] = useState<Map<string, string>>(
 		new Map()
 	);
@@ -291,16 +291,6 @@ export function TerminalPage({
 			[],
 		[currentGroup]
 	);
-	const selectedChatPane = useMemo(() => {
-		if (!currentGroup) return null;
-		const selectedPane = currentGroup.panes.find(
-			(pane) => pane.id === currentGroup.selectedPaneId
-		);
-		if (selectedPane && isChatAgentKind(selectedPane.agentKind)) {
-			return selectedPane;
-		}
-		return chatPanes[0] ?? null;
-	}, [chatPanes, currentGroup]);
 	const graphCwds = useMemo(
 		() =>
 			Array.from(
@@ -351,7 +341,7 @@ export function TerminalPage({
 	const cleanupPane = useCallback((paneId: string) => {
 		wsClient.send({ type: "terminal:destroy", paneId });
 		chatRefs.current.delete(paneId);
-		clearChatMessages(paneId);
+		clearAgentChatMessages(paneId);
 	}, []);
 	const withSelectedGroup = useCallback(
 		(fn: (groupId: string) => void) => {
@@ -619,7 +609,7 @@ export function TerminalPage({
 		groupsDispatch({ type: "renameGroup", groupId, name });
 	}, []);
 	const handleChatRef = useCallback(
-		(paneId: string, handle: ClaudeChatHandle | null) => {
+		(paneId: string, handle: AgentChatHandle | null) => {
 			if (handle) chatRefs.current.set(paneId, handle);
 			else chatRefs.current.delete(paneId);
 		},

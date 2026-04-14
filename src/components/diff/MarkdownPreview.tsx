@@ -5,9 +5,7 @@ import {
 	type MdListItem,
 	parseBlocks,
 	parseInline,
-} from "../lib/markdown.ts";
-
-// ── Mermaid (CDN, loaded on demand) ──
+} from "../../lib/markdown.ts";
 
 let mermaidPromise: Promise<unknown> | null = null;
 function loadMermaid(): Promise<unknown> {
@@ -86,8 +84,6 @@ function MermaidBlock({ code }: { code: string }) {
 		/>
 	);
 }
-
-// ── Inline renderer ──
 
 function InlineTokens({ tokens }: { tokens: MdInlineToken[] }) {
 	return (
@@ -190,8 +186,6 @@ function Inline({ text }: { text: string }) {
 	const tokens = parseInline(text);
 	return <InlineTokens tokens={tokens} />;
 }
-
-// ── Block renderers ──
 
 const HEADING_CLASSES: Record<number, string> = {
 	1: "text-[18px] font-bold text-inferay-text pb-2 mt-6 first:mt-0 border-b border-inferay-border",
@@ -340,8 +334,6 @@ function BlockRenderer({ block }: { block: MdBlock }) {
 			);
 	}
 }
-
-// ── Main component ──
 
 export const MarkdownPreview = memo(function MarkdownPreview({
 	content,

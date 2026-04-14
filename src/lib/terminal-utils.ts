@@ -165,12 +165,7 @@ function isValidTerminalState(value: unknown): value is TerminalSavedState {
 		typeof obj.opacity === "number"
 	);
 }
-
-/** In-memory cache so readers see the latest state immediately,
- *  even before the debounced localStorage write fires. */
 let _cachedTerminalState: TerminalSavedState | null = null;
-
-/** Update only the in-memory cache (safe to call during render). */
 export function cacheTerminalState(state: TerminalSavedState): void {
 	_cachedTerminalState = state;
 }

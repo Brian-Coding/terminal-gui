@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MarkdownPreview } from "../../components/MarkdownPreview.tsx";
+import { MarkdownPreview } from "../../components/diff/MarkdownPreview.tsx";
 import type { DiffLine, HunkDiff } from "../../hooks/useGitDiff.ts";
 import { useShikiHighlighter } from "../../hooks/useShikiHighlighter.ts";
 import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
@@ -29,39 +29,24 @@ const TOKEN_CLASSES: Record<string, string> = {
 	attr: "text-syntax-attr",
 	default: "",
 };
-
-// ============================================================
-// DIFF VIEW CONFIG - All measurements in one place
-// ============================================================
 const DIFF_CONFIG = {
-	// Line dimensions
 	lineHeight: 15, // Height of each line in pixels
-
-	// Font sizes
 	lineNumFontSize: 9, // Line number font size
 	signFontSize: 9, // +/- sign font size
 	contentFontSize: 10, // Code content font size
-
-	// Column widths
 	lineNumWidth: 36, // Line number column width
 	signWidth: 12, // +/- sign column width
-
-	// Colors
 	lineNumColor: "#6b7280", // Gray for line numbers
 	addLineNumColor: "rgba(60,180,110,0.7)",
 	removeLineNumColor: "rgba(210,80,80,0.7)",
 	addSignColor: "rgba(46,160,67,0.9)",
 	removeSignColor: "rgba(248,81,73,0.9)",
-
-	// Backgrounds
 	addBg: "rgba(60,180,110,0.13)",
 	addBgHover: "rgba(60,180,110,0.2)",
 	addBgHighlight: "rgba(60,180,110,0.25)",
 	removeBg: "rgba(210,80,80,0.13)",
 	removeBgHover: "rgba(210,80,80,0.2)",
 	removeBgHighlight: "rgba(210,80,80,0.25)",
-
-	// Virtual scroll
 	overscan: 15, // Extra rows to render above/below viewport
 };
 
@@ -115,8 +100,6 @@ const DiffRow = memo(function DiffRow({
 
 	const isAdd = line.type === "add";
 	const isRemove = line.type === "remove";
-
-	// Calculate base background color (hover handled via CSS)
 	const getBgColor = () => {
 		if (isHighlighted) {
 			return isAdd
@@ -131,8 +114,6 @@ const DiffRow = memo(function DiffRow({
 				? DIFF_CONFIG.removeBg
 				: "transparent";
 	};
-
-	// CSS variable for hover color
 	const hoverBg = isAdd
 		? DIFF_CONFIG.addBgHover
 		: isRemove
@@ -145,8 +126,6 @@ const DiffRow = memo(function DiffRow({
 			onCopy(line.content);
 		}
 	};
-
-	// Render content with Shiki or fallback to basic tokens
 	const renderContent = () => {
 		if (highlightedHtml) {
 			return (
@@ -174,11 +153,9 @@ const DiffRow = memo(function DiffRow({
 				lineHeight: `${LINE_H}px`,
 				backgroundColor: getBgColor(),
 				minWidth: minWidth || "100%",
-				// @ts-expect-error CSS custom property for hover
 				"--hover-bg": hoverBg,
 			}}
 		>
-			{/* Line number */}
 			<span
 				className="shrink-0 text-right font-mono select-none"
 				style={{
@@ -194,7 +171,7 @@ const DiffRow = memo(function DiffRow({
 			>
 				{line.number ?? ""}
 			</span>
-			{/* +/- sign */}
+
 			<span
 				className="shrink-0 text-center font-mono select-none"
 				style={{
@@ -209,7 +186,7 @@ const DiffRow = memo(function DiffRow({
 			>
 				{isAdd ? "+" : isRemove ? "-" : ""}
 			</span>
-			{/* Content */}
+
 			<span
 				className="flex-1 min-w-max font-mono whitespace-pre"
 				style={{
@@ -221,7 +198,7 @@ const DiffRow = memo(function DiffRow({
 			>
 				{renderContent()}
 			</span>
-			{/* Copy button on hover */}
+
 			{line.content && onCopy && (
 				<button
 					type="button"
@@ -332,8 +309,6 @@ function VirtualPanel({
 	useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 
 	const total = lines.length * LINE_H;
-
-	// Calculate approximate max content width based on longest line
 	const maxLineLength = useMemo(() => {
 		let max = 0;
 		for (const line of lines) {
@@ -343,8 +318,6 @@ function VirtualPanel({
 		}
 		return max;
 	}, [lines]);
-
-	// Approximate width: line num + sign + content (char width ~7px at 10px font)
 	const minContentWidth =
 		DIFF_CONFIG.lineNumWidth + DIFF_CONFIG.signWidth + maxLineLength * 7 + 20;
 
@@ -353,11 +326,7 @@ function VirtualPanel({
 		lines.length,
 		Math.ceil((scrollTop + viewH) / LINE_H) + OVERSCAN
 	);
-
-	// Extract line contents for Shiki
 	const lineContents = useMemo(() => lines.map((l) => l.content), [lines]);
-
-	// Use Shiki highlighter for visible lines
 	const { getHighlightedLine, isReady: shikiReady } = useShikiHighlighter({
 		filePath: filePath ?? `file.${ext}`,
 		lines: lineContents,
@@ -389,8 +358,6 @@ function VirtualPanel({
 			const isHighlighted =
 				highlightedChangeIdx !== undefined &&
 				changeIdx === highlightedChangeIdx;
-
-			// Use Shiki if ready, otherwise fall back to basic tokens
 			const useShiki = shikiReady && !disableTokenize && filePath;
 			const highlightedHtml = useShiki ? getHighlightedLine(i) : undefined;
 
@@ -581,8 +548,6 @@ const DiffMinimap = memo(function DiffMinimap({
 		</div>
 	);
 });
-
-// Copy feedback component
 const CopyFeedback = memo(function CopyFeedback({ show }: { show: boolean }) {
 	if (!show) return null;
 	return (
@@ -623,8 +588,6 @@ export const GitDiffView = memo(function GitDiffView({
 	const [highlightedChangeIdx, setHighlightedChangeIdx] = useState<
 		number | undefined
 	>();
-
-	// Calculate diff stats
 	const stats = useMemo(() => {
 		let added = 0;
 		let removed = 0;
@@ -636,8 +599,6 @@ export const GitDiffView = memo(function GitDiffView({
 		}
 		return { added, removed };
 	}, [diff.newLines, diff.oldLines]);
-
-	// Build change position map for navigation
 	const { changePositions, changeLineMap } = useMemo(() => {
 		const positions: number[] = [];
 		const lineMap = new Map<number, number>();
@@ -663,8 +624,6 @@ export const GitDiffView = memo(function GitDiffView({
 	}, [diff.newLines]);
 
 	const totalChanges = changePositions.length;
-
-	// Navigate to a specific change
 	const scrollToChangeIdx = useCallback(
 		(changeIdx: number) => {
 			if (changeIdx < 0 || changeIdx >= changePositions.length) return;
@@ -681,8 +640,6 @@ export const GitDiffView = memo(function GitDiffView({
 		},
 		[changePositions]
 	);
-
-	// Navigate to next/previous change
 	const goToNextChange = useCallback(() => {
 		const currentScroll =
 			rightRef.current?.scrollTop ?? leftRef.current?.scrollTop ?? 0;
@@ -713,23 +670,16 @@ export const GitDiffView = memo(function GitDiffView({
 			scrollToChangeIdx(changePositions.length - 1);
 		}
 	}, [changePositions, scrollToChangeIdx]);
-
-	// Copy line handler
 	const handleCopyLine = useCallback((content: string) => {
 		navigator.clipboard.writeText(content).then(() => {
 			setShowCopyFeedback(true);
 			setTimeout(() => setShowCopyFeedback(false), 1000);
 		});
 	}, []);
-
-	// Keyboard navigation
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
-			// Check if we're in an input
 			const target = e.target as HTMLElement;
 			if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
-
-			// Only handle if this viewer is focused/hovered
 			if (!containerRef.current?.matches(":hover")) return;
 
 			if (e.key === "n" && !e.metaKey && !e.ctrlKey) {
@@ -1158,7 +1108,6 @@ function DiffHeader({
 				</span>
 			)}
 
-			{/* Stats */}
 			{stats && (stats.added > 0 || stats.removed > 0) && (
 				<div className="flex items-center gap-1.5 text-[9px] ml-2">
 					{stats.added > 0 && (
@@ -1172,7 +1121,6 @@ function DiffHeader({
 
 			<span className="flex-1" />
 
-			{/* Change navigation */}
 			{totalChanges !== undefined &&
 				totalChanges > 0 &&
 				onPrevChange &&

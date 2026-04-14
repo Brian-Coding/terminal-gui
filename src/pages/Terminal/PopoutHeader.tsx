@@ -217,7 +217,6 @@ export const PopoutHeader = memo(function PopoutHeader(
 			</IconButton>
 			<div className="relative z-10 h-3 w-px bg-inferay-border" />
 
-			{/* Group selector */}
 			<div className="relative z-10" ref={refs.groupMenu}>
 				<MenuTrigger
 					onClick={() => toggleMenu("groupMenu")}
@@ -314,7 +313,6 @@ export const PopoutHeader = memo(function PopoutHeader(
 			</div>
 			<div className="relative z-10 h-3 w-px bg-inferay-border" />
 
-			{/* Pane tabs */}
 			<div className="relative z-10 flex items-center gap-1 overflow-x-auto flex-1 min-w-0 scrollbar-none">
 				{currentGroup?.panes.map((pane) => {
 					const si = getStatusInfo(agentStatuses.get(pane.id) ?? "idle");
@@ -358,9 +356,7 @@ export const PopoutHeader = memo(function PopoutHeader(
 				})}
 			</div>
 
-			{/* Right-side menus */}
 			<div className="relative z-10 flex items-center gap-1.5 shrink-0">
-				{/* Services */}
 				<div className="relative" ref={refs.servicesMenu}>
 					<MenuTrigger
 						onClick={() => toggleMenu("servicesMenu")}
@@ -421,7 +417,6 @@ export const PopoutHeader = memo(function PopoutHeader(
 					)}
 				</div>
 
-				{/* Layout */}
 				<div className="relative" ref={refs.layoutMenu}>
 					<MenuTrigger
 						onClick={() => toggleMenu("layoutMenu")}
@@ -450,7 +445,6 @@ export const PopoutHeader = memo(function PopoutHeader(
 					)}
 				</div>
 
-				{/* New pane */}
 				<div className="relative" ref={refs.newMenu}>
 					<MenuTrigger
 						onClick={() => toggleMenu("newMenu")}

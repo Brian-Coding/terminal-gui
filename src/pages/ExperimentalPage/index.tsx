@@ -8,12 +8,12 @@ import {
 } from "react";
 import {
 	type AttachedImageInfo,
-	type ClaudeChatHandle,
-	ClaudeChatView,
-	clearChatMessages,
+	type AgentChatHandle,
+	AgentChatView,
 	type QueuedMessageInfo,
 	type ToolActivity,
-} from "../../components/chat/ClaudeChatView.tsx";
+} from "../../components/chat/AgentChatView.tsx";
+import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
 import { CommitGraph } from "../../components/git/CommitGraph.tsx";
 import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
 import {
@@ -22,10 +22,8 @@ import {
 	IconLayoutRows,
 	IconPanelRight,
 } from "../../components/ui/Icons.tsx";
-import {
-	ActivityIndicator,
-	useActivityFeed,
-} from "../../features/activity-feed/index.ts";
+import { ActivityIndicator } from "../../features/activity-feed/ActivityFeed.tsx";
+import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
 import { useAgentSessions } from "../../hooks/useAgentSessions.ts";
 import { type DiffRequest, useGitDiff } from "../../hooks/useGitDiff.ts";
@@ -131,7 +129,7 @@ export function ExperimentalPage() {
 	);
 	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("path");
 	const [mainViewMode, setMainViewMode] = useState<"diff" | "graph">("diff");
-	const chatRef = useRef<ClaudeChatHandle>(null);
+	const chatRef = useRef<AgentChatHandle>(null);
 	const sidebarDragRef = useRef<{
 		startX: number;
 		startWidth: number;
@@ -169,8 +167,6 @@ export function ExperimentalPage() {
 	} = useGitDiff();
 
 	const refresh = useCallback(() => setTick((v) => v + 1), []);
-
-	// Ensure WebSocket is connected
 	useEffect(() => {
 		wsClient.connect();
 	}, []);
@@ -218,14 +214,10 @@ export function ExperimentalPage() {
 		project?.files.filter((f) => !f.staged && f.status !== "?") ?? [];
 	const untracked = project?.files.filter((f) => f.status === "?") ?? [];
 	const selectedFile = session ? (selectedFiles[session.paneId] ?? null) : null;
-
-	// Fetch commit graph when in graph view
 	const { commits: graphCommits, loading: graphLoading } = useGitGraph(
 		mainViewMode === "graph" ? session?.cwd : undefined,
 		100
 	);
-
-	// Fetch commit details when a commit is selected
 	const { details: commitDetails, loading: commitDetailsLoading } =
 		useCommitDetails(
 			mainViewMode === "graph" ? session?.cwd : undefined,
@@ -374,7 +366,6 @@ export function ExperimentalPage() {
 
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			// Skip if user is in an input field or textarea
 			const target = e.target as HTMLElement;
 			const isEditable =
 				target.tagName === "INPUT" ||
@@ -400,7 +391,7 @@ export function ExperimentalPage() {
 
 	const closePane = useCallback(
 		(paneId: string) => {
-			clearChatMessages(paneId);
+			clearAgentChatMessages(paneId);
 			setClosedPaneIds((prev) => new Set(prev).add(paneId));
 			if (selectedPaneId === paneId) {
 				const rest = sessions.filter((s) => s.paneId !== paneId);
@@ -497,9 +488,8 @@ export function ExperimentalPage() {
 			) : zenMode ? (
 				/* ===== ZEN MODE LAYOUT ===== */
 				<div className="relative flex min-h-0 flex-1">
-					{/* Hidden ClaudeChatView - keeps state alive but not visible */}
 					<div className="hidden">
-						<ClaudeChatView
+						<AgentChatView
 							key={session.paneId}
 							ref={chatRef}
 							paneId={session.paneId}
@@ -515,7 +505,6 @@ export function ExperimentalPage() {
 						/>
 					</div>
 
-					{/* Main content - Diff/Graph takes most space */}
 					<div className="flex-1 min-h-0 min-w-0 overflow-hidden">
 						{mainViewMode === "diff" ? (
 							diffLoading ? (
@@ -558,7 +547,6 @@ export function ExperimentalPage() {
 						)}
 					</div>
 
-					{/* Right sidebar - file tree */}
 					{!sidebarCollapsed && (
 						<div
 							className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
@@ -580,7 +568,6 @@ export function ExperimentalPage() {
 									onCollapse={() => setSidebarCollapsed(true)}
 								/>
 
-								{/* Files View */}
 								<div className="flex-1 min-h-0 overflow-y-auto">
 									<FileGroup
 										title="Unstaged"
@@ -641,7 +628,6 @@ export function ExperimentalPage() {
 						</button>
 					)}
 
-					{/* Floating input at bottom center */}
 					<ZenModeInput
 						chatRef={chatRef}
 						agentKind={session.agentKind}
@@ -709,7 +695,7 @@ export function ExperimentalPage() {
 							</button>
 						</div>
 						<div className="flex-1 min-h-0">
-							<ClaudeChatView
+							<AgentChatView
 								key={session.paneId}
 								ref={chatRef}
 								paneId={session.paneId}
@@ -731,7 +717,6 @@ export function ExperimentalPage() {
 							<div className="flex min-h-0 flex-1 overflow-hidden">
 								<div className="min-h-0 min-w-0 flex-1 overflow-hidden">
 									{mainViewMode === "diff" ? (
-										// Diff View
 										diffLoading ? (
 											<Placeholder label="Loading diff..." />
 										) : diff && request ? (
@@ -789,7 +774,6 @@ export function ExperimentalPage() {
 										className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
 										style={{ width: sidebarWidth }}
 									>
-										{/* Drag handle for resizing sidebar */}
 										<div
 											className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
 											onMouseDown={handleSidebarDragStart}
@@ -806,7 +790,6 @@ export function ExperimentalPage() {
 												onCollapse={() => setSidebarCollapsed(true)}
 											/>
 
-											{/* Files View */}
 											{mainViewMode !== "graph" && (
 												<div className="flex-1 min-h-0 overflow-y-auto">
 													<FileGroup
@@ -863,11 +846,9 @@ export function ExperimentalPage() {
 												</div>
 											)}
 
-											{/* Graph View - show commit details or WIP files in sidebar */}
 											{mainViewMode === "graph" && (
 												<div className="flex-1 min-h-0 overflow-y-auto">
 													{selectedCommitHash === "wip" ? (
-														// WIP selected - show current changes
 														<>
 															<div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2 border-b border-inferay-border bg-inferay-bg">
 																<div className="w-3 h-3 rounded-full border-2 border-dashed border-inferay-accent" />
@@ -900,7 +881,6 @@ export function ExperimentalPage() {
 															</div>
 														</>
 													) : selectedCommitHash ? (
-														// Commit selected - show commit details
 														commitDetailsLoading ? (
 															<div className="flex items-center justify-center py-8">
 																<p className="text-[10px] text-inferay-text-3">
@@ -917,7 +897,6 @@ export function ExperimentalPage() {
 															</div>
 														)
 													) : (
-														// Nothing selected
 														<div className="flex items-center justify-center py-8">
 															<p className="text-[10px] text-inferay-text-3 px-4 text-center">
 																Select a commit to view details
@@ -927,10 +906,8 @@ export function ExperimentalPage() {
 												</div>
 											)}
 
-											{/* Commit Section - only show when not in graph view */}
 											{project && mainViewMode !== "graph" && (
 												<div className="shrink-0 border-t border-inferay-border">
-													{/* Commit header */}
 													<div className="flex items-center justify-between px-2.5 py-1.5 border-b border-inferay-border/50">
 														<div className="flex items-center gap-1.5">
 															<svg
@@ -957,7 +934,6 @@ export function ExperimentalPage() {
 														)}
 													</div>
 													<div className="p-2 space-y-2">
-														{/* Summary line */}
 														<input
 															type="text"
 															value={commitMessage.split("\n")[0] || ""}
@@ -978,7 +954,7 @@ export function ExperimentalPage() {
 																}
 															}}
 														/>
-														{/* Description */}
+
 														<textarea
 															value={commitMessage
 																.split("\n")
@@ -998,7 +974,7 @@ export function ExperimentalPage() {
 															className="w-full resize-none rounded border border-inferay-border bg-inferay-surface px-2 py-1.5 text-[10px] text-inferay-text placeholder:text-inferay-text-3/50 focus:border-inferay-accent focus:outline-none"
 															rows={2}
 														/>
-														{/* Commit button */}
+
 														<button
 															type="button"
 															onClick={handleCommit}
@@ -1180,8 +1156,6 @@ function EditorSidebarHeader({
 		</>
 	);
 }
-
-// Commit details panel for graph view
 function CommitDetailsPanel({
 	details,
 }: {
@@ -1200,7 +1174,6 @@ function CommitDetailsPanel({
 }) {
 	return (
 		<div className="flex flex-col h-full">
-			{/* Commit info header */}
 			<div className="shrink-0 border-b border-inferay-border p-3 space-y-2">
 				<div className="flex items-center gap-2">
 					<span className="font-mono text-[11px] text-inferay-accent font-medium">
@@ -1216,7 +1189,6 @@ function CommitDetailsPanel({
 				<p className="text-[10px] text-inferay-text-2">{details.author}</p>
 			</div>
 
-			{/* Files changed */}
 			<div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-inferay-border/50 bg-inferay-text/[0.02]">
 				<span className="text-[9px] font-medium text-inferay-text-2">
 					Files Changed
@@ -1226,7 +1198,6 @@ function CommitDetailsPanel({
 				</span>
 			</div>
 
-			{/* File list */}
 			<div className="flex-1 min-h-0 overflow-y-auto">
 				{details.files.map((file, i) => (
 					<div
@@ -1249,7 +1220,6 @@ function CommitDetailsPanel({
 				))}
 			</div>
 
-			{/* Stats summary */}
 			<div className="shrink-0 flex items-center justify-center gap-3 px-3 py-2 border-t border-inferay-border text-[10px]">
 				<span className="text-git-added">
 					+{details.files.reduce((sum, f) => sum + f.additions, 0)}
@@ -1261,8 +1231,6 @@ function CommitDetailsPanel({
 		</div>
 	);
 }
-
-// Get tool icon for zen mode display
 function getZenToolIcon(toolName: string, isAnimated = false): React.ReactNode {
 	const baseClass = "w-3 h-3 shrink-0";
 	const animateClass = isAnimated ? "animate-pulse" : "";
@@ -1356,7 +1324,6 @@ function getZenToolIcon(toolName: string, isAnimated = false): React.ReactNode {
 			</svg>
 		);
 	}
-	// Default tool icon
 	return (
 		<svg
 			className={`${baseClass} ${animateClass}`}
@@ -1369,14 +1336,12 @@ function getZenToolIcon(toolName: string, isAnimated = false): React.ReactNode {
 		</svg>
 	);
 }
-
-// Floating input for Zen mode
 function ZenModeInput({
 	chatRef,
 	agentKind,
 	onExitZen,
 }: {
-	chatRef: React.RefObject<ClaudeChatHandle | null>;
+	chatRef: React.RefObject<AgentChatHandle | null>;
 	agentKind: "claude" | "codex";
 	onExitZen: () => void;
 }) {
@@ -1390,8 +1355,6 @@ function ZenModeInput({
 	const [editingQueueText, setEditingQueueText] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
-
-	// Poll all shared state from chatRef (activities, queue, loading, images)
 	useEffect(() => {
 		const interval = setInterval(() => {
 			if (chatRef.current) {
@@ -1430,27 +1393,21 @@ function ZenModeInput({
 		},
 		[handleSubmit, onExitZen]
 	);
-
-	// Focus input on mount
 	useEffect(() => {
 		inputRef.current?.focus();
 	}, []);
-
-	// Get latest tool activity for display
 	const latestActivity = toolActivities[toolActivities.length - 1];
 	const activityCount = toolActivities.length;
 
 	return (
 		<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl px-4">
 			<div className="relative flex flex-col rounded-xl border border-inferay-border bg-inferay-surface/95 backdrop-blur-sm shadow-2xl overflow-visible">
-				{/* Main status bar - shows when loading */}
 				{isLoading && (
 					<div
 						className="relative flex items-center justify-between gap-3 px-3 py-2 border-b border-inferay-border/50 rounded-t-xl"
 						onMouseEnter={() => setIsActivityHovered(true)}
 						onMouseLeave={() => setIsActivityHovered(false)}
 					>
-						{/* Activity dropdown - appears on hover above status bar */}
 						{isActivityHovered && activityCount > 0 && (
 							<div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg overflow-hidden bg-inferay-surface shadow-lg border border-inferay-border z-50">
 								<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-inferay-border text-inferay-text-3">
@@ -1482,7 +1439,6 @@ function ZenModeInput({
 							</div>
 						)}
 
-						{/* Left side: Activity indicator */}
 						{latestActivity ? (
 							<div className="flex items-center gap-2 min-w-0 flex-1">
 								<span className="shrink-0 text-inferay-accent">
@@ -1509,7 +1465,6 @@ function ZenModeInput({
 							</div>
 						)}
 
-						{/* Right side: Stop button */}
 						<button
 							type="button"
 							onClick={handleStop}
@@ -1523,7 +1478,6 @@ function ZenModeInput({
 					</div>
 				)}
 
-				{/* Queued messages panel */}
 				{queuedMessages.length > 0 && (
 					<div
 						className="border-b border-inferay-border/50 overflow-y-auto"
@@ -1659,7 +1613,6 @@ function ZenModeInput({
 					</div>
 				)}
 
-				{/* Attached images preview - shared with ClaudeChatView */}
 				{attachedImages.length > 0 && (
 					<div className="flex items-center gap-2 px-3 py-2 border-b border-inferay-border/50">
 						{attachedImages.map((img) => (
@@ -1681,7 +1634,6 @@ function ZenModeInput({
 					</div>
 				)}
 
-				{/* Hidden file input - uploads through ClaudeChatView */}
 				<input
 					type="file"
 					ref={fileInputRef}
@@ -1698,9 +1650,7 @@ function ZenModeInput({
 					}}
 				/>
 
-				{/* Input row */}
 				<div className="flex items-center gap-2 px-3 py-2">
-					{/* Add image button */}
 					<button
 						type="button"
 						onClick={() => fileInputRef.current?.click()}
@@ -1721,12 +1671,10 @@ function ZenModeInput({
 						</svg>
 					</button>
 
-					{/* Agent icon */}
 					<span className="shrink-0 text-inferay-accent">
 						{getAgentIcon(agentKind, 14)}
 					</span>
 
-					{/* Input */}
 					<input
 						ref={inputRef}
 						type="text"
@@ -1741,14 +1689,12 @@ function ZenModeInput({
 						className="flex-1 bg-transparent text-[13px] text-inferay-text outline-none placeholder:text-inferay-text-3"
 					/>
 
-					{/* Queued count badge */}
 					{queuedMessages.length > 0 && (
 						<span className="shrink-0 text-[10px] text-inferay-accent bg-inferay-accent/10 px-1.5 py-0.5 rounded tabular-nums">
 							+{queuedMessages.length}
 						</span>
 					)}
 
-					{/* Send button */}
 					<button
 						type="button"
 						onClick={handleSubmit}
@@ -1773,10 +1719,7 @@ function ZenModeInput({
 		</div>
 	);
 }
-
-// File status icon component
 function FileStatusIcon({ status }: { status: string }) {
-	// M = modified, A = added, D = deleted, R = renamed, ? = untracked
 	switch (status) {
 		case "M":
 			return (
@@ -1845,8 +1788,6 @@ function FileStatusIcon({ status }: { status: string }) {
 			);
 	}
 }
-
-// Build tree structure from flat file list
 interface TreeNode {
 	name: string;
 	path: string;
@@ -1874,8 +1815,6 @@ function buildFileTree(files: GitFileEntry[]): TreeNode {
 				});
 			}
 			current = current.children.get(part)!;
-
-			// If this is the last part, attach the file
 			if (i === parts.length - 1) {
 				current.file = file;
 			}
@@ -1911,7 +1850,6 @@ function TreeNodeRow({
 		file && selected?.path === file.path && selected?.staged === file.staged;
 
 	const sortedChildren = [...node.children.values()].sort((a, b) => {
-		// Directories first
 		const aIsDir = a.children.size > 0 && !a.file;
 		const bIsDir = b.children.size > 0 && !b.file;
 		if (aIsDir && !bIsDir) return -1;
@@ -2027,7 +1965,6 @@ function FileGroup({
 }) {
 	const [isCollapsed, setIsCollapsed] = useState(false);
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
-		// Start with all directories expanded
 		const dirs = new Set<string>();
 		for (const f of files) {
 			const parts = f.path.split("/");

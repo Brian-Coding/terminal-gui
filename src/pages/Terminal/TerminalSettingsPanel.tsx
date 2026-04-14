@@ -129,7 +129,6 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 					</button>
 				</div>
 				<div className="space-y-5 p-4 pb-6">
-					{/* Unified theme picker */}
 					<div>
 						<div className="grid grid-cols-3 gap-1.5">
 							{APP_THEMES.map((t) => {
@@ -179,7 +178,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 									</button>
 								);
 							})}
-							{/* Custom theme card */}
+
 							<button
 								type="button"
 								onClick={() => handleThemeChange("custom")}
@@ -252,7 +251,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 						</>
 					)}
 					<div className="h-px bg-inferay-border" />
-					{/* Font settings */}
+
 					<div>
 						<h4 className="mb-2 text-[10px] font-semibold text-inferay-text-2">
 							FONT
@@ -286,7 +285,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 						</div>
 					</div>
 					<div className="h-px bg-inferay-border" />
-					{/* Opacity */}
+
 					<div>
 						<h4 className="mb-2 text-[10px] font-semibold text-inferay-text-2">
 							OPACITY

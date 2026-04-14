@@ -183,7 +183,6 @@ export function PromptsPage() {
 
 	return (
 		<div className="flex h-full flex-col bg-inferay-bg">
-			{/* Toolbar — matches Terminal/Git page style */}
 			<div className="shrink-0 flex items-center gap-2 px-3 h-12 border-b border-inferay-border bg-inferay-bg">
 				<FilterDropdown filter={filter} onFilterChange={setFilter} />
 
@@ -239,9 +238,7 @@ export function PromptsPage() {
 				</button>
 			</div>
 
-			{/* Content */}
 			<div className="flex flex-1 min-h-0 overflow-hidden">
-				{/* Prompt list */}
 				<div className="flex-1 overflow-y-auto">
 					{filtered.length === 0 ? (
 						<div className="flex items-center justify-center h-full">
@@ -301,7 +298,6 @@ export function PromptsPage() {
 					)}
 				</div>
 
-				{/* Detail panel */}
 				{(selectedPrompt || form.isCreating) && (
 					<div className="w-[420px] shrink-0 border-l border-inferay-border overflow-y-auto bg-inferay-bg">
 						<PromptDetailPanel

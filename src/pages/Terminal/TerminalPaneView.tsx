@@ -3,8 +3,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import type React from "react";
 import { memo, useEffect, useRef } from "react";
-import type { ClaudeChatHandle } from "../../components/chat/ClaudeChatView.tsx";
-import { ClaudeChatView } from "../../components/chat/ClaudeChatView.tsx";
+import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
+import { AgentChatView } from "../../components/chat/AgentChatView.tsx";
 import { IconTerminal } from "../../components/ui/Icons.tsx";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
@@ -25,7 +25,7 @@ interface TerminalPaneViewProps {
 	onClose: (paneId: string, force?: boolean) => void;
 	onDirectorySelect?: (paneId: string, path: string | null) => void;
 	onDirectoryCancel?: (paneId: string) => void;
-	chatRef: (paneId: string, handle: ClaudeChatHandle | null) => void;
+	chatRef: (paneId: string, handle: AgentChatHandle | null) => void;
 	onAgentStatusChange?: (paneId: string, status: string) => void;
 	paneIndex?: number;
 	onHeaderDragStart?: (e: React.DragEvent, index: number) => void;
@@ -52,7 +52,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	const termRef = useRef<Terminal | null>(null);
 	const fitAddonRef = useRef<FitAddon | null>(null);
 	const initializedRef = useRef(false);
-	const chatHandleRef = useRef<ClaudeChatHandle | null>(null);
+	const chatHandleRef = useRef<AgentChatHandle | null>(null);
 	const isAgentChatPane = isChatAgentKind(pane.agentKind);
 	const paneLabel = getAgentDefinition(pane.agentKind).label;
 
@@ -364,7 +364,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					className="min-h-0 flex-1 flex flex-col overflow-hidden"
 					style={{ pointerEvents: isSelected ? "auto" : "none" }}
 				>
-					<ClaudeChatView
+					<AgentChatView
 						paneId={pane.id}
 						cwd={pane.cwd}
 						theme={theme}

@@ -1,7 +1,10 @@
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { createCodexEnv, resolveCodexBinary } from "../terminal-command.ts";
+import {
+	createCodexEnv,
+	resolveCodexBinary,
+} from "../../../lib/terminal-command.ts";
 import type { AgentAdapter, AgentHandle, AgentRunContext } from "../types.ts";
 
 interface CodexRunState {
