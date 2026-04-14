@@ -4,6 +4,7 @@ import {
 	type AppThemeId,
 	applyAppTheme,
 	loadAppThemeId,
+	mapAppThemeToTerminalTheme,
 	saveAppThemeId,
 } from "../../lib/app-theme.ts";
 import {
@@ -53,21 +54,6 @@ function ColorInput({
 	);
 }
 
-const APP_TO_TERMINAL: Record<string, ThemeId> = {
-	default: "default",
-	nord: "nord",
-	dracula: "dracula",
-	solarized: "solarized",
-	monokai: "monokai",
-	github: "github",
-	ocean: "ocean",
-	rose: "rose",
-	light: "light",
-	githubLight: "githubLight",
-	solarizedLight: "solarizedLight",
-	custom: "custom",
-};
-
 export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 	themeId,
 	fontSize,
@@ -86,7 +72,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 			setAppThemeId(id);
 			saveAppThemeId(id);
 			applyAppTheme(id);
-			onThemeChange(APP_TO_TERMINAL[id] ?? "midnight");
+			onThemeChange(mapAppThemeToTerminalTheme(id));
 		},
 		[onThemeChange]
 	);
@@ -133,7 +119,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 						<div className="grid grid-cols-3 gap-1.5">
 							{APP_THEMES.map((t) => {
 								const termTheme = TERMINAL_THEMES.find(
-									(tt) => tt.id === (APP_TO_TERMINAL[t.id] ?? "midnight")
+									(tt) => tt.id === mapAppThemeToTerminalTheme(t.id)
 								);
 								return (
 									<button

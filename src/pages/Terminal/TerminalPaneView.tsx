@@ -212,8 +212,11 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				style={{ backgroundColor: theme.bg }}
 			>
 				<div
-					className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b bg-inferay-text/[0.02]"
-					style={{ borderColor: theme.separator }}
+					className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b"
+					style={{
+						borderColor: theme.separator,
+						backgroundColor: theme.bg,
+					}}
 				>
 					<span className="text-inferay-text-3">
 						{isAgentChatPane ? (
@@ -276,8 +279,11 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 			style={{ backgroundColor: theme.bg }}
 		>
 			<div
-				className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b bg-inferay-text/[0.02] cursor-grab active:cursor-grabbing select-none"
-				style={{ borderColor: theme.separator }}
+				className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b cursor-grab active:cursor-grabbing select-none"
+				style={{
+					borderColor: theme.separator,
+					backgroundColor: theme.bg,
+				}}
 				draggable={paneIndex != null && !!onHeaderDragStart}
 				onDragStart={(e) => {
 					if (paneIndex != null && onHeaderDragStart) {

@@ -12,8 +12,13 @@ import {
 	type AppThemeId,
 	applyAppTheme,
 	loadAppThemeId,
+	mapAppThemeToTerminalTheme,
 	saveAppThemeId,
 } from "../../lib/app-theme.ts";
+import {
+	loadTerminalState,
+	saveTerminalState,
+} from "../../lib/terminal-utils.ts";
 
 type ProfileTab = "profile" | "keys" | "preferences";
 
@@ -145,6 +150,13 @@ export function ProfilePage() {
 		setSelectedTheme(id);
 		saveAppThemeId(id);
 		applyAppTheme(id);
+		const terminalState = loadTerminalState();
+		if (terminalState) {
+			saveTerminalState({
+				...terminalState,
+				themeId: mapAppThemeToTerminalTheme(id),
+			});
+		}
 	};
 
 	const tabs: {

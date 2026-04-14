@@ -41,6 +41,10 @@ import "@xterm/xterm/css/xterm.css";
 
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
+	loadAppThemeId,
+	mapAppThemeToTerminalTheme,
+} from "../../lib/app-theme.ts";
+import {
 	type AgentKind,
 	createGroupId,
 	createTerminalPane,
@@ -49,7 +53,6 @@ import {
 	DEFAULT_FONT_SIZE,
 	DEFAULT_OPACITY,
 	DEFAULT_ROWS,
-	DEFAULT_THEME_ID,
 	cacheTerminalState,
 	getInitialGroups,
 	getPaneTitle,
@@ -249,7 +252,8 @@ export function TerminalPage({
 	const [isPoppedOut, setIsPoppedOut] = useState(false);
 	const [showSettings, setShowSettings] = useState(false);
 	const [appearance, setAppearance] = useState(() => ({
-		themeId: (initialState?.themeId ?? DEFAULT_THEME_ID) as ThemeId,
+		themeId: (initialState?.themeId ??
+			mapAppThemeToTerminalTheme(loadAppThemeId())) as ThemeId,
 		fontSize: initialState?.fontSize ?? DEFAULT_FONT_SIZE,
 		fontFamily: initialState?.fontFamily ?? DEFAULT_FONT_FAMILY,
 		opacity: initialState?.opacity ?? DEFAULT_OPACITY,

@@ -35,6 +35,10 @@ import {
 } from "../../hooks/useGitStatus.ts";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
+import {
+	loadAppThemeId,
+	mapAppThemeToTerminalTheme,
+} from "../../lib/app-theme.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
 	getThemeById,
@@ -155,7 +159,10 @@ export function ExperimentalPage() {
 	);
 	const { projectMap } = useGitStatus(trackedDirs);
 	const theme = useMemo(
-		() => getThemeById(terminalState?.themeId ?? "default"),
+		() =>
+			getThemeById(
+				terminalState?.themeId ?? mapAppThemeToTerminalTheme(loadAppThemeId())
+			),
 		[terminalState?.themeId]
 	);
 	const {

@@ -3,6 +3,7 @@ import {
 	readStoredValue,
 	writeStoredValue,
 } from "./stored-json.ts";
+import type { ThemeId } from "./terminal-utils.ts";
 
 export interface AppThemeColors {
 	readonly bg: string;
@@ -320,6 +321,21 @@ const APP_THEME_STORAGE_KEY = "inferay-app-theme-id" as const;
 
 const APP_CUSTOM_THEME_KEY = "inferay-app-custom-theme" as const;
 
+const APP_TO_TERMINAL_THEME: Record<AppThemeId, ThemeId> = {
+	default: "default",
+	nord: "nord",
+	dracula: "dracula",
+	solarized: "solarized",
+	monokai: "monokai",
+	github: "github",
+	ocean: "ocean",
+	rose: "rose",
+	light: "light",
+	githubLight: "githubLight",
+	solarizedLight: "solarizedLight",
+	custom: "custom",
+};
+
 export function loadAppThemeId(): AppThemeId {
 	try {
 		const saved = readStoredValue(APP_THEME_STORAGE_KEY);
@@ -330,6 +346,10 @@ export function loadAppThemeId(): AppThemeId {
 
 export function saveAppThemeId(id: AppThemeId): void {
 	writeStoredValue(APP_THEME_STORAGE_KEY, id);
+}
+
+export function mapAppThemeToTerminalTheme(id: AppThemeId): ThemeId {
+	return APP_TO_TERMINAL_THEME[id];
 }
 
 function loadAppCustomTheme(): AppThemeColors {

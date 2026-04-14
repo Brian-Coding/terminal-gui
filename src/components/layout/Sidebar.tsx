@@ -71,6 +71,21 @@ const navItems: NavItem[] = [
 ];
 
 const logoUrl = resolveServerUrl("/logo.png");
+const logoImageStyle = {
+	filter: "saturate(0.94) contrast(1.04) brightness(0.99)",
+};
+const logoOverlayStyle = {
+	backgroundColor: "var(--color-inferay-accent)",
+	opacity: 0.06,
+	maskImage: `url(${logoUrl})`,
+	maskPosition: "center",
+	maskRepeat: "no-repeat",
+	maskSize: "cover",
+	WebkitMaskImage: `url(${logoUrl})`,
+	WebkitMaskPosition: "center",
+	WebkitMaskRepeat: "no-repeat",
+	WebkitMaskSize: "cover",
+};
 
 export function Sidebar() {
 	const [collapsed, setCollapsed] = useState(() => {
@@ -91,9 +106,20 @@ export function Sidebar() {
 				<button
 					type="button"
 					onClick={() => setCollapsed(!collapsed)}
-					className="electrobun-webkit-app-region-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-inferay-text/[0.05] transition-colors"
+					className="electrobun-webkit-app-region-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
 				>
-					<img src={logoUrl} alt="" className="h-7 w-7 rounded" />
+					<span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-md">
+						<img
+							src={logoUrl}
+							alt=""
+							className="h-7 w-7 rounded-md"
+							style={logoImageStyle}
+						/>
+						<span
+							className="absolute inset-0 pointer-events-none rounded-md"
+							style={logoOverlayStyle}
+						/>
+					</span>
 				</button>
 			</div>
 			<nav className="flex-1 overflow-y-auto py-1.5 scrollbar-none">
