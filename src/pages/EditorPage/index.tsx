@@ -310,6 +310,16 @@ export function EditorPage() {
 	}, []);
 
 	useEffect(() => {
+		const handleSettingsOpen = () => setShowSettings(true);
+		window.addEventListener("terminal-open-theme-panel", handleSettingsOpen);
+		return () =>
+			window.removeEventListener(
+				"terminal-open-theme-panel",
+				handleSettingsOpen
+			);
+	}, []);
+
+	useEffect(() => {
 		if (diff && !diffLoading) checkPendingScroll();
 	}, [diff, diffLoading, checkPendingScroll]);
 
