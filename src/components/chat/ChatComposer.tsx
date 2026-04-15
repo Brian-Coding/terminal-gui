@@ -327,35 +327,7 @@ export function ChatComposer({
 			)}
 
 			{showInput && (
-				<div
-					className="shrink-0 px-3 py-2"
-					style={{
-						borderTop: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
-					}}
-				>
-					{attachedImages.length > 0 && (
-						<div className="flex items-center gap-2 pb-2">
-							{attachedImages.map((img) => (
-								<div key={img.path} className="relative group">
-									<img
-										src={img.previewUrl}
-										alt={img.name}
-										className="h-12 w-12 rounded-md object-cover"
-										style={{
-											border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
-										}}
-									/>
-									<button
-										type="button"
-										onClick={() => removeAttachedImage(img.path)}
-										className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
-									>
-										x
-									</button>
-								</div>
-							))}
-						</div>
-					)}
+				<div className="shrink-0 px-3 py-2">
 					<input
 						type="file"
 						ref={fileInputRef}
@@ -370,176 +342,201 @@ export function ChatComposer({
 						}}
 					/>
 					<div
-						className="relative flex items-end gap-1.5"
+						className="relative flex flex-col rounded-xl overflow-visible"
 						ref={inputContainerRef}
+						style={{
+							border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
+							backgroundColor: theme
+								? surfaceColor
+								: "var(--color-inferay-surface)",
+						}}
 					>
-						<button
-							type="button"
-							onClick={() => fileInputRef.current?.click()}
-							className="mb-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
-							style={{
-								color: theme ? fgDim : "var(--color-inferay-text-3)",
-								backgroundColor: "transparent",
-							}}
-							title="Attach image"
-						>
-							<svg
-								aria-hidden="true"
-								width="16"
-								height="16"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2"
-								strokeLinecap="round"
-								strokeLinejoin="round"
+						{attachedImages.length > 0 && (
+							<div
+								className="flex items-center gap-2 px-3 py-2"
+								style={{
+									borderBottom: `1px solid ${theme ? `${borderColor}80` : "var(--color-inferay-border)"}`,
+								}}
 							>
-								<line x1="12" y1="5" x2="12" y2="19" />
-								<line x1="5" y1="12" x2="19" y2="12" />
-							</svg>
-						</button>
-						<div className="relative flex-1">
-							{fileMenu.show && fileResults.length > 0 && (
-								<div
-									className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg overflow-y-auto z-[9999]"
-									style={{
-										maxHeight: 300,
-										backgroundColor: theme
-											? surfaceColor
-											: "var(--color-inferay-surface)",
-										borderColor: theme
-											? borderColor
-											: "var(--color-inferay-border)",
-									}}
-								>
-									<div
-										className="px-3 py-1.5 text-[9px] font-semibold tracking-wide"
-										style={{
-											color: theme ? fgDim : "var(--color-inferay-text-3)",
-											borderBottom: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
-										}}
-									>
-										FILES
-										{fileMenu.query ? ` matching "${fileMenu.query}"` : ""}
-									</div>
-									{fileResults.map((file, idx) => (
+								{attachedImages.map((img) => (
+									<div key={img.path} className="relative group">
+										<img
+											src={img.previewUrl}
+											alt={img.name}
+											className="h-10 w-10 rounded-md object-cover"
+											style={{
+												border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
+											}}
+										/>
 										<button
 											type="button"
-											key={file.path}
-											onClick={() => selectFile(idx)}
-											onMouseEnter={() =>
-												setFileMenu((prev) => ({ ...prev, selectedIdx: idx }))
-											}
-											className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
-											style={{
-												backgroundColor:
-													idx === fileMenu.selectedIdx
-														? theme
-															? `${cursorColor}20`
-															: "rgba(0,122,255,0.15)"
-														: "transparent",
-											}}
+											onClick={() => removeAttachedImage(img.path)}
+											className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
 										>
-											<span
-												className="shrink-0 text-[11px]"
-												style={{
-													color: theme ? fgDim : "var(--color-inferay-text-3)",
-												}}
-											>
-												{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
-											</span>
-											<span
-												className="truncate font-mono text-[11px] font-medium"
-												style={{
-													color: theme
-														? cursorColor
-														: "var(--color-inferay-accent)",
-												}}
-											>
-												{file.name}
-											</span>
-											<span
-												className="flex-1 truncate text-right text-[9px]"
-												style={{
-													color: theme ? fgDim : "var(--color-inferay-text-3)",
-												}}
-											>
-												{file.path}
-											</span>
+											x
 										</button>
-									))}
-								</div>
-							)}
-							{showCommands && filteredCommands.length > 0 && (
-								<div
-									className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border shadow-2xl overflow-hidden z-[9999]"
-									style={{
-										maxHeight: 320,
-										backgroundColor: "#1a1a1a",
-										borderColor: "#333",
-									}}
-								>
-									<div
-										className="px-3 py-2 text-[10px] font-medium tracking-wide uppercase"
-										style={{ color: "#888" }}
-									>
-										Skills
 									</div>
-									<div className="overflow-y-auto" style={{ maxHeight: 280 }}>
-										{filteredCommands.map((cmd, idx) => {
-											const isSelected = idx === slashMenu.selectedIdx;
-											return (
-												<button
-													type="button"
-													key={cmd.id || cmd.name}
-													onClick={() => selectCommand(idx)}
-													onMouseEnter={() =>
-														setSlashMenu((prev) => ({
-															...prev,
-															selectedIdx: idx,
-														}))
-													}
-													className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors"
-													style={{
-														backgroundColor: isSelected
-															? "#2a2a2a"
-															: "transparent",
-													}}
-												>
-													<span
-														className="font-mono text-[12px] font-medium"
-														style={{
-															color: isSelected ? "#f5a623" : "#e5e5e5",
-														}}
-													>
-														/{cmd.name}
-													</span>
-													<span
-														className="text-[11px]"
-														style={{ color: "#888" }}
-													>
-														{cmd.description}
-													</span>
-												</button>
-											);
-										})}
-									</div>
-								</div>
-							)}
+								))}
+							</div>
+						)}
+
+						{fileMenu.show && fileResults.length > 0 && (
 							<div
-								className="relative flex-1 rounded-lg overflow-hidden"
+								className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg overflow-y-auto z-[9999]"
 								style={{
+									maxHeight: 300,
 									backgroundColor: theme
 										? surfaceColor
 										: "var(--color-inferay-surface)",
-									maxHeight: "120px",
+									borderColor: theme
+										? borderColor
+										: "var(--color-inferay-border)",
 								}}
 							>
 								<div
-									ref={highlightOverlayRef}
-									className="absolute top-0 left-0 right-0 px-3 py-2 pr-10 text-[12px] pointer-events-none whitespace-pre-wrap"
+									className="px-3 py-1.5 text-[9px] font-semibold tracking-wide"
 									style={{
-										lineHeight: "18px",
+										color: theme ? fgDim : "var(--color-inferay-text-3)",
+										borderBottom: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
+									}}
+								>
+									FILES
+									{fileMenu.query ? ` matching "${fileMenu.query}"` : ""}
+								</div>
+								{fileResults.map((file, idx) => (
+									<button
+										type="button"
+										key={file.path}
+										onClick={() => selectFile(idx)}
+										onMouseEnter={() =>
+											setFileMenu((prev) => ({ ...prev, selectedIdx: idx }))
+										}
+										className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors"
+										style={{
+											backgroundColor:
+												idx === fileMenu.selectedIdx
+													? theme
+														? `${cursorColor}20`
+														: "rgba(0,122,255,0.15)"
+													: "transparent",
+										}}
+									>
+										<span
+											className="shrink-0 text-[11px]"
+											style={{
+												color: theme ? fgDim : "var(--color-inferay-text-3)",
+											}}
+										>
+											{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
+										</span>
+										<span
+											className="truncate font-mono text-[11px] font-medium"
+											style={{
+												color: theme
+													? cursorColor
+													: "var(--color-inferay-accent)",
+											}}
+										>
+											{file.name}
+										</span>
+										<span
+											className="flex-1 truncate text-right text-[9px]"
+											style={{
+												color: theme ? fgDim : "var(--color-inferay-text-3)",
+											}}
+										>
+											{file.path}
+										</span>
+									</button>
+								))}
+							</div>
+						)}
+						{showCommands && filteredCommands.length > 0 && (
+							<div
+								className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border shadow-2xl overflow-hidden z-[9999]"
+								style={{
+									maxHeight: 320,
+									backgroundColor: "#1a1a1a",
+									borderColor: "#333",
+								}}
+							>
+								<div
+									className="px-3 py-2 text-[10px] font-medium tracking-wide uppercase"
+									style={{ color: "#888" }}
+								>
+									Skills
+								</div>
+								<div className="overflow-y-auto" style={{ maxHeight: 280 }}>
+									{filteredCommands.map((cmd, idx) => {
+										const isSelected = idx === slashMenu.selectedIdx;
+										return (
+											<button
+												type="button"
+												key={cmd.id || cmd.name}
+												onClick={() => selectCommand(idx)}
+												onMouseEnter={() =>
+													setSlashMenu((prev) => ({
+														...prev,
+														selectedIdx: idx,
+													}))
+												}
+												className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors"
+												style={{
+													backgroundColor: isSelected
+														? "#2a2a2a"
+														: "transparent",
+												}}
+											>
+												<span
+													className="font-mono text-[12px] font-medium"
+													style={{
+														color: isSelected ? "#f5a623" : "#e5e5e5",
+													}}
+												>
+													/{cmd.name}
+												</span>
+												<span className="text-[11px]" style={{ color: "#888" }}>
+													{cmd.description}
+												</span>
+											</button>
+										);
+									})}
+								</div>
+							</div>
+						)}
+
+						<div className="flex items-center gap-2 px-3 py-2">
+							<button
+								type="button"
+								onClick={() => fileInputRef.current?.click()}
+								className="shrink-0 flex items-center justify-center w-7 h-7 rounded-md transition-colors"
+								style={{
+									color: theme ? fgDim : "var(--color-inferay-text-3)",
+								}}
+								title="Attach image"
+							>
+								<svg
+									aria-hidden="true"
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="2"
+									strokeLinecap="round"
+									strokeLinejoin="round"
+								>
+									<line x1="12" y1="5" x2="12" y2="19" />
+									<line x1="5" y1="12" x2="19" y2="12" />
+								</svg>
+							</button>
+
+							<div className="relative flex-1" style={{ maxHeight: "120px" }}>
+								<div
+									ref={highlightOverlayRef}
+									className="absolute top-0 left-0 right-0 pr-8 text-[13px] pointer-events-none whitespace-pre-wrap"
+									style={{
+										lineHeight: "20px",
 										wordBreak: "break-word",
 										overflowWrap: "break-word",
 									}}
@@ -577,54 +574,54 @@ export function ChatComposer({
 									spellCheck
 									autoCorrect="on"
 									autoCapitalize="sentences"
-									className="relative block w-full resize-none rounded-lg px-3 py-2 pr-10 text-[12px] outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none bg-transparent overflow-y-auto scrollbar-none"
+									className="relative block w-full resize-none pr-8 text-[13px] outline-none ring-0 border-none shadow-none focus:outline-none focus:ring-0 focus:border-none focus:shadow-none bg-transparent overflow-y-auto scrollbar-none"
 									style={{
-										minHeight: "36px",
+										minHeight: "20px",
 										color: "transparent",
 										caretColor: theme
 											? cursorColor
 											: "var(--color-inferay-text)",
 										WebkitTextFillColor: "transparent",
-										lineHeight: "18px",
+										lineHeight: "20px",
 										wordBreak: "break-word",
 										overflowWrap: "break-word",
 									}}
 								/>
+								{isLoading && (
+									<div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+										<span
+											className="h-1 w-1 rounded-full animate-pulse"
+											style={
+												theme
+													? { backgroundColor: `${cursorColor}b3` }
+													: undefined
+											}
+										/>
+										<span
+											className="h-1 w-1 rounded-full animate-pulse"
+											style={
+												theme
+													? {
+															backgroundColor: `${cursorColor}b3`,
+															animationDelay: "150ms",
+														}
+													: { animationDelay: "150ms" }
+											}
+										/>
+										<span
+											className="h-1 w-1 rounded-full animate-pulse"
+											style={
+												theme
+													? {
+															backgroundColor: `${cursorColor}b3`,
+															animationDelay: "300ms",
+														}
+													: { animationDelay: "300ms" }
+											}
+										/>
+									</div>
+								)}
 							</div>
-							{isLoading && (
-								<div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-									<span
-										className="h-1 w-1 rounded-full animate-pulse"
-										style={
-											theme
-												? { backgroundColor: `${cursorColor}b3` }
-												: undefined
-										}
-									/>
-									<span
-										className="h-1 w-1 rounded-full animate-pulse"
-										style={
-											theme
-												? {
-														backgroundColor: `${cursorColor}b3`,
-														animationDelay: "150ms",
-													}
-												: { animationDelay: "150ms" }
-										}
-									/>
-									<span
-										className="h-1 w-1 rounded-full animate-pulse"
-										style={
-											theme
-												? {
-														backgroundColor: `${cursorColor}b3`,
-														animationDelay: "300ms",
-													}
-												: { animationDelay: "300ms" }
-										}
-									/>
-								</div>
-							)}
 						</div>
 					</div>
 				</div>

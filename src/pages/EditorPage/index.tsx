@@ -22,7 +22,6 @@ import {
 	IconLayoutRows,
 	IconSettings,
 } from "../../components/ui/Icons.tsx";
-import { ActivityIndicator } from "../../features/activity-feed/ActivityFeed.tsx";
 import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
 import { useAgentSessions } from "../../hooks/useAgentSessions.ts";
@@ -695,10 +694,8 @@ export function EditorPage() {
 						<AgentTopBar
 							session={session}
 							sessions={sessions}
-							activityEvents={activityEvents}
 							onSelectPane={setSelectedPaneId}
 							onClose={closePane}
-							onSettingsClick={() => setShowSettings(true)}
 						/>
 						<div className="flex-1 min-h-0">
 							<AgentChatView
@@ -1375,34 +1372,30 @@ function ToolbarButton({
 /* ── Top-bar components ─────────────────────────────────── */
 
 const TOPBAR_CLASS =
-	"shrink-0 flex items-center gap-2 px-3 h-8 border-b border-inferay-border";
+	"shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-inferay-border";
 
 function AgentTopBar({
 	session,
 	sessions,
-	activityEvents,
 	onSelectPane,
 	onClose,
-	onSettingsClick,
 }: {
 	session: { paneId: string; cwd: string; agentKind: string };
 	sessions: Array<{ paneId: string; cwd: string; agentKind: string }>;
-	activityEvents: ToolActivity[];
 	onSelectPane: (id: string) => void;
 	onClose: (id: string) => void;
-	onSettingsClick?: () => void;
 }) {
 	return (
 		<div className={TOPBAR_CLASS}>
 			<span className="text-inferay-accent">
 				{getAgentIcon(session.agentKind, 10)}
 			</span>
-			<span className="text-[10px] font-medium text-inferay-text-2">
+			<span className="text-[9px] font-medium text-inferay-text-2">
 				{getAgentDefinition(session.agentKind).label}
 			</span>
 			{session.cwd && (
 				<>
-					<span className="text-[10px] text-inferay-text-3">›</span>
+					<span className="text-[9px] text-inferay-text-3">›</span>
 					{sessions.length > 1 ? (
 						<DropdownButton
 							value={session.paneId}
@@ -1414,12 +1407,12 @@ function AgentTopBar({
 							}))}
 							onChange={onSelectPane}
 							minWidth={220}
-							buttonClassName="h-5 rounded-md border-transparent px-1.5 text-[10px] font-medium hover:bg-inferay-text/[0.06]"
-							labelClassName="max-w-[120px] truncate text-[10px]"
+							buttonClassName="h-5 rounded-md border-transparent px-1.5 text-[9px] font-medium hover:bg-inferay-text/[0.06]"
+							labelClassName="max-w-[120px] truncate text-[9px]"
 						/>
 					) : (
 						<span
-							className="text-[10px] font-medium text-inferay-text truncate"
+							className="text-[9px] font-medium text-inferay-text truncate"
 							title={session.cwd}
 						>
 							{session.cwd.split("/").pop() || session.cwd}
@@ -1428,17 +1421,6 @@ function AgentTopBar({
 				</>
 			)}
 			<span className="flex-1" />
-			<ActivityIndicator events={activityEvents} />
-			{onSettingsClick && (
-				<button
-					type="button"
-					onClick={onSettingsClick}
-					className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-inferay-text-2"
-					title="Settings"
-				>
-					<IconSettings size={10} />
-				</button>
-			)}
 			<button
 				type="button"
 				onClick={() => onClose(session.paneId)}
