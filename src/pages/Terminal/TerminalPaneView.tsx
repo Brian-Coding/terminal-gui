@@ -278,77 +278,76 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 			className="relative flex h-full min-h-0 flex-col overflow-hidden"
 			style={{ backgroundColor: theme.bg }}
 		>
-			<div
-				className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b cursor-grab active:cursor-grabbing select-none"
-				style={{
-					borderColor: theme.separator,
-					backgroundColor: theme.bg,
-				}}
-				draggable={paneIndex != null && !!onHeaderDragStart}
-				onDragStart={(e) => {
-					if (paneIndex != null && onHeaderDragStart) {
-						// Use a 1x1 transparent drag image — the browser handles the rest
-						const img = new Image();
-						img.src =
-							"data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-						e.dataTransfer.setDragImage(img, 0, 0);
-						onHeaderDragStart(e, paneIndex);
-					}
-				}}
-				onDragEnd={onHeaderDragEnd}
-			>
-				<span
-					className={isSelected ? "text-inferay-accent" : "text-inferay-text-3"}
-				>
-					{isAgentChatPane ? (
-						getAgentIcon(pane.agentKind, 10)
-					) : (
-						<IconTerminal size={10} />
-					)}
-				</span>
-				<span
-					className={`font-medium ${isSelected ? "text-inferay-text-2" : "text-inferay-text-3"} text-[9px]`}
-				>
-					{getAgentDefinition(pane.agentKind).label}
-				</span>
-				{pane.cwd && (
-					<>
-						<span className="text-[9px] text-inferay-text-3">›</span>
-						<span
-							className={`font-medium ${isSelected ? "text-inferay-text" : "text-inferay-text-3"} text-[9px] truncate`}
-							title={pane.cwd}
-						>
-							{pane.cwd.split("/").pop() || pane.cwd}
-						</span>
-					</>
-				)}
-				<span className="flex-1" />
-				{isSelected && (
-					<div className="h-1.5 w-1.5 rounded-full bg-inferay-accent" />
-				)}
-				<button
-					type="button"
-					onClick={(e) => {
-						e.stopPropagation();
-						onClose(pane.id);
+			{!isAgentChatPane && (
+				<div
+					className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b cursor-grab active:cursor-grabbing select-none"
+					style={{
+						borderColor: theme.separator,
+						backgroundColor: theme.bg,
 					}}
-					className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
-					title="Close pane"
+					draggable={paneIndex != null && !!onHeaderDragStart}
+					onDragStart={(e) => {
+						if (paneIndex != null && onHeaderDragStart) {
+							const img = new Image();
+							img.src =
+								"data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+							e.dataTransfer.setDragImage(img, 0, 0);
+							onHeaderDragStart(e, paneIndex);
+						}
+					}}
+					onDragEnd={onHeaderDragEnd}
 				>
-					<svg
-						aria-hidden="true"
-						width="8"
-						height="8"
-						viewBox="0 0 8 8"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth="1.5"
-						strokeLinecap="round"
+					<span
+						className={
+							isSelected ? "text-inferay-accent" : "text-inferay-text-3"
+						}
 					>
-						<path d="M1 1l6 6M7 1l-6 6" />
-					</svg>
-				</button>
-			</div>
+						<IconTerminal size={10} />
+					</span>
+					<span
+						className={`font-medium ${isSelected ? "text-inferay-text-2" : "text-inferay-text-3"} text-[9px]`}
+					>
+						{getAgentDefinition(pane.agentKind).label}
+					</span>
+					{pane.cwd && (
+						<>
+							<span className="text-[9px] text-inferay-text-3">›</span>
+							<span
+								className={`font-medium ${isSelected ? "text-inferay-text" : "text-inferay-text-3"} text-[9px] truncate`}
+								title={pane.cwd}
+							>
+								{pane.cwd.split("/").pop() || pane.cwd}
+							</span>
+						</>
+					)}
+					<span className="flex-1" />
+					{isSelected && (
+						<div className="h-1.5 w-1.5 rounded-full bg-inferay-accent" />
+					)}
+					<button
+						type="button"
+						onClick={(e) => {
+							e.stopPropagation();
+							onClose(pane.id);
+						}}
+						className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+						title="Close pane"
+					>
+						<svg
+							aria-hidden="true"
+							width="8"
+							height="8"
+							viewBox="0 0 8 8"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+						>
+							<path d="M1 1l6 6M7 1l-6 6" />
+						</svg>
+					</button>
+				</div>
+			)}
 			<div
 				ref={containerRef}
 				className="min-h-0 flex-1"
@@ -376,6 +375,19 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 						theme={theme}
 						agentKind={pane.agentKind}
 						onStatusChange={onAgentStatusChange}
+						onClose={onClose}
+						isSelected={isSelected}
+						draggable={paneIndex != null && !!onHeaderDragStart}
+						onDragStart={(e) => {
+							if (paneIndex != null && onHeaderDragStart) {
+								const img = new Image();
+								img.src =
+									"data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+								e.dataTransfer.setDragImage(img, 0, 0);
+								onHeaderDragStart(e, paneIndex);
+							}
+						}}
+						onDragEnd={onHeaderDragEnd}
 						ref={(handle) => {
 							chatHandleRef.current = handle;
 							chatRef(pane.id, handle);

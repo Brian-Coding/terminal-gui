@@ -15,7 +15,6 @@ import {
 } from "../../components/chat/AgentChatView.tsx";
 import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
 import { CommitGraph } from "../../components/git/CommitGraph.tsx";
-import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
 import {
 	IconGitBranch,
 	IconLayoutGrid,
@@ -33,7 +32,7 @@ import {
 	useGitStatus,
 } from "../../hooks/useGitStatus.ts";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
-import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
+import { isChatAgentKind } from "../../lib/agents.ts";
 import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
@@ -102,11 +101,6 @@ function getAllFiles(project: GitProjectStatus | null): GitFileEntry[] {
 		...project.files.filter((f) => !f.staged),
 		...project.files.filter((f) => f.staged),
 	];
-}
-
-function basename(p?: string): string {
-	if (!p) return "No directory";
-	return p.split("/").pop() || p;
 }
 
 function loadZenMode() {
@@ -691,28 +685,23 @@ export function EditorPage() {
 				/* ===== NORMAL MODE LAYOUT ===== */
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[400px_minmax(0,1fr)]">
 					<section className="flex min-h-0 min-w-0 flex-col border-r border-inferay-border">
-						<AgentTopBar
-							session={session}
-							sessions={sessions}
-							onSelectPane={setSelectedPaneId}
+						<AgentChatView
+							key={session.paneId}
+							ref={chatRef}
+							paneId={session.paneId}
+							cwd={session.cwd}
+							agentKind={session.agentKind}
+							theme={theme}
+							onStatusChange={(id, status) => {
+								setAgentStatuses((cur) => {
+									if (cur.get(id) === status) return cur;
+									return new Map(cur).set(id, status);
+								});
+							}}
 							onClose={closePane}
+							sessions={sessions}
+							onSelectSession={setSelectedPaneId}
 						/>
-						<div className="flex-1 min-h-0">
-							<AgentChatView
-								key={session.paneId}
-								ref={chatRef}
-								paneId={session.paneId}
-								cwd={session.cwd}
-								agentKind={session.agentKind}
-								theme={theme}
-								onStatusChange={(id, status) => {
-									setAgentStatuses((cur) => {
-										if (cur.get(id) === status) return cur;
-										return new Map(cur).set(id, status);
-									});
-								}}
-							/>
-						</div>
 					</section>
 
 					<aside className="min-h-0 min-w-0 bg-inferay-bg flex flex-col">
@@ -1373,76 +1362,6 @@ function ToolbarButton({
 
 const TOPBAR_CLASS =
 	"shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-inferay-border";
-
-function AgentTopBar({
-	session,
-	sessions,
-	onSelectPane,
-	onClose,
-}: {
-	session: { paneId: string; cwd: string; agentKind: string };
-	sessions: Array<{ paneId: string; cwd: string; agentKind: string }>;
-	onSelectPane: (id: string) => void;
-	onClose: (id: string) => void;
-}) {
-	return (
-		<div className={TOPBAR_CLASS}>
-			<span className="text-inferay-accent">
-				{getAgentIcon(session.agentKind, 10)}
-			</span>
-			<span className="text-[9px] font-medium text-inferay-text-2">
-				{getAgentDefinition(session.agentKind).label}
-			</span>
-			{session.cwd && (
-				<>
-					<span className="text-[9px] text-inferay-text-3">›</span>
-					{sessions.length > 1 ? (
-						<DropdownButton
-							value={session.paneId}
-							options={sessions.map((item) => ({
-								id: item.paneId,
-								label: basename(item.cwd),
-								detail: getAgentDefinition(item.agentKind).label,
-								icon: getAgentIcon(item.agentKind, 12),
-							}))}
-							onChange={onSelectPane}
-							minWidth={220}
-							buttonClassName="h-5 rounded-md border-transparent px-1.5 text-[9px] font-medium hover:bg-inferay-text/[0.06]"
-							labelClassName="max-w-[120px] truncate text-[9px]"
-						/>
-					) : (
-						<span
-							className="text-[9px] font-medium text-inferay-text truncate"
-							title={session.cwd}
-						>
-							{session.cwd.split("/").pop() || session.cwd}
-						</span>
-					)}
-				</>
-			)}
-			<span className="flex-1" />
-			<button
-				type="button"
-				onClick={() => onClose(session.paneId)}
-				className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
-				title="Close session"
-			>
-				<svg
-					aria-hidden
-					width="8"
-					height="8"
-					viewBox="0 0 8 8"
-					fill="none"
-					stroke="currentColor"
-					strokeWidth="1.5"
-					strokeLinecap="round"
-				>
-					<path d="M1 1l6 6M7 1l-6 6" />
-				</svg>
-			</button>
-		</div>
-	);
-}
 
 function DiffViewerTopBar({
 	mainViewMode,

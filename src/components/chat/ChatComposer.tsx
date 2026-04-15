@@ -505,11 +505,11 @@ export function ChatComposer({
 							</div>
 						)}
 
-						<div className="flex items-center gap-2 px-3 py-2">
+						<div className="flex items-center gap-2 px-3 py-1.5">
 							<button
 								type="button"
 								onClick={() => fileInputRef.current?.click()}
-								className="shrink-0 flex items-center justify-center w-7 h-7 rounded-md transition-colors"
+								className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md transition-colors"
 								style={{
 									color: theme ? fgDim : "var(--color-inferay-text-3)",
 								}}

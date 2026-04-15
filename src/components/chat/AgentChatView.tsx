@@ -51,6 +51,8 @@ import {
 	IconTerminal,
 	IconWrench,
 } from "../ui/Icons.tsx";
+import { getAgentIcon } from "../../lib/agent-ui.tsx";
+import { DropdownButton } from "../ui/DropdownButton.tsx";
 
 interface QueuedMessage {
 	id: string;
@@ -67,6 +69,12 @@ interface TerminalTheme {
 	cursor: string;
 }
 
+export interface AgentChatSession {
+	paneId: string;
+	cwd?: string;
+	agentKind: AgentKind;
+}
+
 interface AgentChatViewProps {
 	paneId: string;
 	cwd?: string;
@@ -74,6 +82,14 @@ interface AgentChatViewProps {
 	theme?: TerminalTheme;
 	agentKind?: AgentKind;
 	onStatusChange?: (paneId: string, status: string) => void;
+	hideHeader?: boolean;
+	onClose?: (paneId: string) => void;
+	isSelected?: boolean;
+	draggable?: boolean;
+	onDragStart?: (e: React.DragEvent) => void;
+	onDragEnd?: () => void;
+	sessions?: AgentChatSession[];
+	onSelectSession?: (paneId: string) => void;
 }
 
 export interface QueuedMessageInfo {
@@ -203,6 +219,14 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			theme,
 			agentKind = "claude",
 			onStatusChange,
+			hideHeader,
+			onClose,
+			isSelected,
+			draggable,
+			onDragStart,
+			onDragEnd,
+			sessions,
+			onSelectSession,
 		},
 		ref
 	) {
@@ -1102,18 +1126,18 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		useEffect(() => {
 			const ta = textareaRef.current;
 			if (!ta) return;
-			const width = ta.clientWidth - 24; // px-3 padding both sides
+			const width = ta.clientWidth - 24;
 			if (width > 0 && input) {
 				const measured = measureTextareaHeight(
 					input,
 					width,
-					"12px Geist, -apple-system, system-ui, sans-serif",
-					18 // Match lineHeight in textarea style
+					"13px Geist, -apple-system, system-ui, sans-serif",
+					20
 				);
-				const target = Math.min(Math.max(measured + 16, 36), 120); // +padding, min 36, max 120
+				const target = Math.min(Math.max(measured, 20), 120);
 				ta.style.height = `${target}px`;
 			} else {
-				ta.style.height = "36px";
+				ta.style.height = "20px";
 			}
 			if (highlightOverlayRef.current && ta) {
 				highlightOverlayRef.current.style.transform = `translateY(-${ta.scrollTop}px)`;
@@ -1292,7 +1316,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			setFileMenu((prev) => ({ ...prev, show: false }));
 			for (const img of attachedImages) URL.revokeObjectURL(img.previewUrl);
 			setAttachedImages([]);
-			if (textareaRef.current) textareaRef.current.style.height = "36px";
+			if (textareaRef.current) textareaRef.current.style.height = "20px";
 
 			if (isLoading) {
 				queueMessage(fullText, displayText, imagePaths);
@@ -1520,6 +1544,96 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				onDragLeave={() => setIsDragOver(false)}
 				onDrop={handleDrop}
 			>
+				{!hideHeader &&
+					(() => {
+						const dimStyle = theme ? { color: fgDim } : undefined;
+						const textStyle = theme ? { color: fgColor } : undefined;
+						const agentLabel = getAgentDefinition(agentKind).label;
+						const dirName = cwd ? cwd.split("/").pop() || cwd : null;
+						const hasMultipleSessions =
+							sessions && sessions.length > 1 && onSelectSession;
+						const sessionOptions = hasMultipleSessions
+							? sessions.map((s) => ({
+									id: s.paneId,
+									label:
+										(s.cwd ?? "").split("/").pop() || s.cwd || "No directory",
+									detail: getAgentDefinition(s.agentKind).label,
+									icon: getAgentIcon(s.agentKind, 12),
+								}))
+							: [];
+
+						return (
+							<div
+								className={`shrink-0 flex items-center gap-2 px-3 py-1.5 border-b ${theme ? "" : "border-inferay-border"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} select-none`}
+								style={
+									theme ? { borderColor, backgroundColor: bgColor } : undefined
+								}
+								draggable={draggable}
+								onDragStart={onDragStart}
+								onDragEnd={onDragEnd}
+							>
+								<span className="text-inferay-accent">
+									{getAgentIcon(agentKind, 10)}
+								</span>
+								<span className="text-[9px] font-medium" style={dimStyle}>
+									{agentLabel}
+								</span>
+								{dirName && (
+									<>
+										<span className="text-[9px]" style={dimStyle}>
+											›
+										</span>
+										{hasMultipleSessions ? (
+											<DropdownButton
+												value={paneId}
+												options={sessionOptions}
+												onChange={onSelectSession}
+												minWidth={220}
+												buttonClassName="h-4 rounded-md border-transparent px-1.5 text-[9px] font-medium hover:bg-inferay-text/[0.06]"
+												labelClassName="max-w-[120px] truncate text-[9px]"
+											/>
+										) : (
+											<span
+												className="text-[9px] font-medium truncate"
+												style={textStyle}
+												title={cwd}
+											>
+												{dirName}
+											</span>
+										)}
+									</>
+								)}
+								<span className="flex-1" />
+								{isSelected && (
+									<div className="h-1.5 w-1.5 rounded-full bg-inferay-accent" />
+								)}
+								{onClose && (
+									<button
+										type="button"
+										onClick={(e) => {
+											e.stopPropagation();
+											onClose(paneId);
+										}}
+										className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+										title="Close"
+									>
+										<svg
+											aria-hidden="true"
+											width="8"
+											height="8"
+											viewBox="0 0 8 8"
+											fill="none"
+											stroke="currentColor"
+											strokeWidth="1.5"
+											strokeLinecap="round"
+										>
+											<path d="M1 1l6 6M7 1l-6 6" />
+										</svg>
+									</button>
+								)}
+							</div>
+						);
+					})()}
 				<div
 					ref={scrollRef}
 					className="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-none"
