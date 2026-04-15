@@ -30,7 +30,6 @@ const THEME_IDS = {
 	onedark: "onedark",
 	ocean: "ocean",
 	rose: "rose",
-	light: "light",
 	githubLight: "githubLight",
 	solarizedLight: "solarizedLight",
 	custom: "custom",
@@ -60,7 +59,6 @@ const TERM_THEME_DATA: [
 	["onedark", "One Dark", "#2b303b", "#abb2bf", "#88bffa", "#3c414c"],
 	["ocean", "Ocean", "#0d1b2a", "#edf6f9", "#00b4d8", "#1b2838"],
 	["rose", "Rose Pine", "#191724", "#e0def4", "#c4a7e7", "#26233a"],
-	["light", "Light", "#ffffff", "#333333", "#000000", "#e0e0e0"],
 	["githubLight", "GitHub Light", "#ffffff", "#1f2328", "#0969da", "#e1e4e8"],
 	[
 		"solarizedLight",

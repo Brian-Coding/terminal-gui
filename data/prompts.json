@@ -34,9 +34,10 @@
 		"category": "learning",
 		"tags": ["explain", "learning"],
 		"isBuiltIn": true,
-		"executionCount": 0,
+		"executionCount": 1,
 		"createdAt": 1700000000000,
-		"updatedAt": 1700000000000
+		"updatedAt": 1700000000000,
+		"lastUsed": 1776351879592
 	},
 	{
 		"_id": "builtin-test",
@@ -125,10 +126,10 @@
 		"category": "custom",
 		"tags": [],
 		"isBuiltIn": false,
-		"executionCount": 4,
+		"executionCount": 5,
 		"createdAt": 1774724618882,
 		"updatedAt": 1774724618882,
-		"lastUsed": 1775600729872
+		"lastUsed": 1776365580402
 	},
 	{
 		"_id": "custom-start",
@@ -167,9 +168,10 @@
 		"category": "custom",
 		"tags": [],
 		"isBuiltIn": false,
-		"executionCount": 0,
+		"executionCount": 1,
 		"createdAt": 1774724650658,
-		"updatedAt": 1774724650658
+		"updatedAt": 1774724650658,
+		"lastUsed": 1776365711861
 	},
 	{
 		"_id": "builtin-goodbot-analyze",

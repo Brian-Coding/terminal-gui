@@ -341,6 +341,47 @@ export function ChatComposer({
 							e.target.value = "";
 						}}
 					/>
+					{attachedImages.length > 0 && (
+						<div
+							role="group"
+							className="mb-2 flex min-h-[72px] items-center gap-2 overflow-x-auto overflow-y-hidden rounded-lg border px-2 py-2"
+							aria-label="Attached images"
+							style={{
+								borderColor: theme
+									? borderColor
+									: "var(--color-inferay-border)",
+								backgroundColor: theme
+									? `${surfaceColor ?? bgColor}cc`
+									: "var(--color-inferay-surface)",
+							}}
+						>
+							{attachedImages.map((img) => (
+								<div
+									key={img.path}
+									className="relative group h-14 w-14 shrink-0 overflow-hidden rounded-lg"
+									style={{
+										border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
+										backgroundColor: theme ? bgColor : "rgba(0,0,0,0.18)",
+									}}
+								>
+									<img
+										src={img.previewUrl}
+										alt={img.name}
+										title={img.name}
+										className="h-full w-full object-cover"
+									/>
+									<button
+										type="button"
+										onClick={() => removeAttachedImage(img.path)}
+										className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+										title="Remove image"
+									>
+										<IconX size={10} />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
 					<div
 						className="relative flex flex-col rounded-xl overflow-visible"
 						ref={inputContainerRef}
@@ -351,35 +392,6 @@ export function ChatComposer({
 								: "var(--color-inferay-surface)",
 						}}
 					>
-						{attachedImages.length > 0 && (
-							<div
-								className="flex items-center gap-2 px-3 py-2"
-								style={{
-									borderBottom: `1px solid ${theme ? `${borderColor}80` : "var(--color-inferay-border)"}`,
-								}}
-							>
-								{attachedImages.map((img) => (
-									<div key={img.path} className="relative group">
-										<img
-											src={img.previewUrl}
-											alt={img.name}
-											className="h-10 w-10 rounded-md object-cover"
-											style={{
-												border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
-											}}
-										/>
-										<button
-											type="button"
-											onClick={() => removeAttachedImage(img.path)}
-											className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[8px] opacity-0 group-hover:opacity-100 transition-opacity"
-										>
-											x
-										</button>
-									</div>
-								))}
-							</div>
-						)}
-
 						{fileMenu.show && fileResults.length > 0 && (
 							<div
 								className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border shadow-lg overflow-y-auto z-[9999]"
@@ -505,7 +517,7 @@ export function ChatComposer({
 							</div>
 						)}
 
-						<div className="flex items-center gap-2 px-3 py-1.5">
+						<div className="flex items-end gap-2 px-3 py-1.5">
 							<button
 								type="button"
 								onClick={() => fileInputRef.current?.click()}
@@ -531,7 +543,10 @@ export function ChatComposer({
 								</svg>
 							</button>
 
-							<div className="relative flex-1" style={{ maxHeight: "120px" }}>
+							<div
+								className="relative min-w-0 flex-1 overflow-hidden"
+								style={{ maxHeight: "120px" }}
+							>
 								<div
 									ref={highlightOverlayRef}
 									className="absolute top-0 left-0 right-0 pr-8 text-[13px] pointer-events-none whitespace-pre-wrap"

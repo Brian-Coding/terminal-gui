@@ -102,9 +102,9 @@ export const IconLayoutGrid = iconMulti([
 ]);
 
 export const IconLayoutRows = iconMulti([
-	"M3 3h18v5H3z",
-	"M3 10h18v5H3z",
-	"M3 17h18v5H3z",
+	"M3 3h5v18H3z",
+	"M10 3h5v18h-5z",
+	"M17 3h5v18h-5z",
 ]);
 
 export const IconFolder = icon(

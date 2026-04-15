@@ -357,6 +357,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
 		const [editingQueueText, setEditingQueueText] = useState("");
 		const containerRef = useRef<HTMLDivElement>(null);
+		const [isAtBottom, setIsAtBottom] = useState(true);
 		const currentBtwRef = useRef<string | null>(null);
 		const [mdPreview, setMdPreview] = useState<{
 			show: boolean;
@@ -365,6 +366,19 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			loading: boolean;
 			error: string | null;
 		}>({ show: false, path: "", content: null, loading: false, error: null });
+
+		const handleScroll = useCallback(() => {
+			const el = scrollRef.current;
+			if (!el) return;
+			const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+			setIsAtBottom(atBottom);
+		}, []);
+
+		const scrollToBottom = useCallback(() => {
+			const el = scrollRef.current;
+			if (!el) return;
+			el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+		}, []);
 
 		const handleMdFileClick = useCallback((filePath: string) => {
 			setMdPreview({
@@ -1126,7 +1140,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		useEffect(() => {
 			const ta = textareaRef.current;
 			if (!ta) return;
-			const width = ta.clientWidth - 24;
+			const width = ta.clientWidth - 32;
 			if (width > 0 && input) {
 				const measured = measureTextareaHeight(
 					input,
@@ -1634,24 +1648,49 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							</div>
 						);
 					})()}
-				<div
-					ref={scrollRef}
-					className="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-none"
-					style={theme ? { backgroundColor: bgColor } : undefined}
-				>
-					<ChatMessageList
-						messages={messages}
-						expandedTools={expandedTools}
-						toggleTool={toggleTool}
-						bubbleTheme={bubbleTheme}
-						checkpoints={checkpoints}
-						revertCheckpoint={revertCheckpoint}
-						isLoading={isLoading}
-						handleSendMessage={handleSendMessage}
-						fgDim={fgDim}
-						theme={theme}
-						onMdFileClick={handleMdFileClick}
-					/>
+				<div className="relative flex-1 overflow-hidden">
+					<div
+						ref={scrollRef}
+						className="h-full overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-none"
+						style={theme ? { backgroundColor: bgColor } : undefined}
+						onScroll={handleScroll}
+					>
+						<ChatMessageList
+							messages={messages}
+							expandedTools={expandedTools}
+							toggleTool={toggleTool}
+							bubbleTheme={bubbleTheme}
+							checkpoints={checkpoints}
+							revertCheckpoint={revertCheckpoint}
+							isLoading={isLoading}
+							handleSendMessage={handleSendMessage}
+							fgDim={fgDim}
+							theme={theme}
+							onMdFileClick={handleMdFileClick}
+						/>
+					</div>
+					{!isAtBottom && (
+						<button
+							type="button"
+							onClick={scrollToBottom}
+							className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full border border-inferay-border bg-inferay-surface shadow-sm transition-opacity hover:bg-inferay-surface-2"
+						>
+							<svg
+								aria-hidden="true"
+								width="12"
+								height="12"
+								viewBox="0 0 12 12"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="1.5"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								className="text-inferay-text-2"
+							>
+								<path d="M6 2v8M3 7l3 3 3-3" />
+							</svg>
+						</button>
+					)}
 				</div>
 
 				<ChatStatusBar

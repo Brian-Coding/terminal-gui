@@ -243,8 +243,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				];
 				const sessionId = ctx.getSessionId();
 				const args = sessionId
-					? [codexCmd, "exec", "resume", ...baseArgs, sessionId, prompt]
-					: [codexCmd, "exec", ...baseArgs, prompt];
+					? [codexCmd, "exec", "resume", ...baseArgs, sessionId, "--", prompt]
+					: [codexCmd, "exec", ...baseArgs, "--", prompt];
 
 				proc = Bun.spawn(args, {
 					stdout: "pipe",

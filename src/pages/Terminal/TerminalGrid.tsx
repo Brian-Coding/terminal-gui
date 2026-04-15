@@ -158,7 +158,7 @@ export const TerminalGrid = memo(function TerminalGrid(
 			{panes.map((pane, idx) => (
 				<div
 					key={pane.id}
-					className="overflow-hidden border border-inferay-border transition-all"
+					className="overflow-hidden border-r border-b border-inferay-border transition-all"
 					style={cellStyle(idx)}
 					onDragOver={(e) => handleDragOver(e, idx)}
 					onDrop={(e) => handleDrop(e, idx)}

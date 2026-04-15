@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
+import { loadAppThemeId } from "../../lib/app-theme.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { readStoredBoolean, writeStoredValue } from "../../lib/stored-json.ts";
 import { IconSettings, IconUser } from "../ui/Icons.tsx";
@@ -71,26 +72,35 @@ const navItems: NavItem[] = [
 ];
 
 const logoUrl = resolveServerUrl("/logo.png");
-const logoImageStyle = {
-	filter: "saturate(0.94) contrast(1.04) brightness(0.99)",
-};
-const logoOverlayStyle = {
-	backgroundColor: "var(--color-inferay-accent)",
-	opacity: 0.06,
-	maskImage: `url(${logoUrl})`,
-	maskPosition: "center",
-	maskRepeat: "no-repeat",
-	maskSize: "cover",
-	WebkitMaskImage: `url(${logoUrl})`,
-	WebkitMaskPosition: "center",
-	WebkitMaskRepeat: "no-repeat",
-	WebkitMaskSize: "cover",
-};
 
 export function Sidebar() {
 	const [collapsed, setCollapsed] = useState(() => {
 		return readStoredBoolean("sidebar-collapsed");
 	});
+
+	const isDefault = loadAppThemeId() === "default";
+	const logoImageStyle = useMemo(
+		() => ({
+			filter: "saturate(0.94) contrast(1.04) brightness(0.99)",
+			opacity: isDefault ? 1 : 0.7,
+		}),
+		[isDefault]
+	);
+	const logoOverlayStyle = useMemo(
+		() => ({
+			backgroundColor: "var(--color-inferay-accent)",
+			opacity: 0.06,
+			maskImage: `url(${logoUrl})`,
+			maskPosition: "center",
+			maskRepeat: "no-repeat",
+			maskSize: "cover",
+			WebkitMaskImage: `url(${logoUrl})`,
+			WebkitMaskPosition: "center",
+			WebkitMaskRepeat: "no-repeat",
+			WebkitMaskSize: "cover",
+		}),
+		[]
+	);
 
 	useEffect(() => {
 		writeStoredValue("sidebar-collapsed", String(collapsed));

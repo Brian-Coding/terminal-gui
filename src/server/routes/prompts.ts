@@ -154,8 +154,12 @@ async function handleIncrementUsage(id: string): Promise<Response> {
 	if (idx === -1) {
 		return Response.json({ error: "Not found" }, { status: 404 });
 	}
-	prompts[idx].executionCount += 1;
-	prompts[idx].lastUsed = Date.now();
+	const prompt = prompts[idx];
+	if (!prompt) {
+		return Response.json({ error: "Not found" }, { status: 404 });
+	}
+	prompt.executionCount += 1;
+	prompt.lastUsed = Date.now();
 	await savePrompts(prompts);
 	return Response.json({ ok: true });
 }
