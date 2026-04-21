@@ -6,8 +6,9 @@
 	"scripts": {
 		"prepare": "husky",
 		"dev": "bash scripts/electrobun.sh dev",
+		"build:native": "bash scripts/build-native.sh",
 		"build:renderer": "bun scripts/build-renderer.ts",
-		"build": "bun run build:renderer && bash scripts/electrobun.sh build",
+		"build": "bun run build:renderer && bun run build:native && bash scripts/electrobun.sh build",
 		"start": "bash scripts/electrobun.sh run",
 		"format": "bunx biome format --write ./src",
 		"format:prettier": "prettier . --write",

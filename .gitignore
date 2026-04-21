@@ -32,6 +32,8 @@ DerivedData/
 .build/
 .swiftpm/
 Package.resolved
+native/bin/
+native/diff-engine/target/
 src/data/terminal-state.json
 data/terminal-state.json
 

@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
+import { unwatchDirectory, watchDirectory } from "../services/file-watcher.ts";
 import {
-	type GitStatusResult,
 	commit,
+	type GitStatusResult,
 	getBlame,
 	getBranches,
 	getCommitDetails,
@@ -16,7 +17,10 @@ import {
 	unstageAll,
 	unstageFile,
 } from "../services/git.ts";
-import { watchDirectory, unwatchDirectory } from "../services/file-watcher.ts";
+import {
+	getNativeGitGraph,
+	getNativeGitStatuses,
+} from "../services/native-git.ts";
 
 interface DiffLine {
 	number: number | null;
@@ -282,6 +286,11 @@ export function gitRoutes() {
 				const url = new URL(req.url);
 				const cwd = url.searchParams.get("cwd");
 				if (!cwd) return badRequest("Missing cwd parameter");
+				const nativeProjects = await getNativeGitStatuses([cwd]);
+				const nativeStatus = nativeProjects?.[0] ?? null;
+				if (nativeStatus) {
+					return Response.json(nativeStatus);
+				}
 				const status = await getStatus(cwd);
 				if (!status)
 					return Response.json(
@@ -303,6 +312,10 @@ export function gitRoutes() {
 						seen.add(cwd);
 						unique.push(cwd);
 					}
+				}
+				const nativeStatuses = await getNativeGitStatuses(unique);
+				if (nativeStatuses) {
+					return Response.json(nativeStatuses);
 				}
 				const results = await Promise.all(unique.map((cwd) => getStatus(cwd)));
 				return Response.json(results.filter(Boolean) as GitStatusResult[]);
@@ -425,8 +438,12 @@ export function gitRoutes() {
 				const cwd = url.searchParams.get("cwd");
 				const limit = Number(url.searchParams.get("limit") || 50);
 				if (!cwd) return badRequest("Missing cwd parameter");
+				const nativeCommits = await getNativeGitGraph(cwd, limit);
+				if (nativeCommits) {
+					return Response.json(nativeCommits);
+				}
 				const commits = await getGraphLog(cwd, limit);
-				return Response.json({ commits });
+				return Response.json({ commits, rows: [] });
 			}),
 		},
 

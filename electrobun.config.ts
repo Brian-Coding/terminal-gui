@@ -19,6 +19,7 @@ const config: ElectrobunConfig = {
 			"dist/main.css": "views/main.css",
 			"dist/main.js.map": "views/main.js.map",
 			data: "data",
+			native: "native",
 			public: "public",
 		},
 		mac: {

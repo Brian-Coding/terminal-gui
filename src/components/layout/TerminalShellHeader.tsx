@@ -256,8 +256,8 @@ export function TerminalShellHeader() {
 	}, []);
 
 	return (
-		<div className="flex h-12 shrink-0 items-center gap-3 border-b border-inferay-border bg-inferay-bg px-3">
-			<div className="flex items-center gap-1 shrink-0">
+		<div className="electrobun-webkit-app-region-drag flex h-12 shrink-0 items-center gap-3 border-b border-inferay-border bg-inferay-bg px-3">
+			<div className="electrobun-webkit-app-region-no-drag flex items-center gap-1 shrink-0">
 				<ViewTab
 					active={shellState.mainView === "editor"}
 					icon={<IconCode size={12} />}
@@ -280,7 +280,10 @@ export function TerminalShellHeader() {
 			{location.pathname === "/terminal" && (
 				<>
 					<div className="flex-1 min-w-0" />
-					<div className="relative shrink-0" ref={workspaceMenuRef}>
+					<div
+						className="electrobun-webkit-app-region-no-drag relative shrink-0"
+						ref={workspaceMenuRef}
+					>
 						<button
 							type="button"
 							onClick={() => setShowWorkspaceMenu((v) => !v)}
@@ -358,7 +361,7 @@ export function TerminalShellHeader() {
 					</div>
 					{shellState.mainView === "chat" && (
 						<>
-							<div className="flex items-center shrink-0 rounded-lg border border-inferay-border bg-inferay-surface overflow-hidden h-7">
+							<div className="electrobun-webkit-app-region-no-drag flex items-center shrink-0 rounded-lg border border-inferay-border bg-inferay-surface overflow-hidden h-7">
 								<button
 									type="button"
 									onClick={() => updateLayoutMode("grid")}
@@ -378,13 +381,13 @@ export function TerminalShellHeader() {
 							</div>
 							{layoutMode === "grid" && selectedGroup && (
 								<>
-									<div className="flex items-center gap-1.5 shrink-0">
+									<div className="electrobun-webkit-app-region-no-drag flex items-center gap-1.5 shrink-0">
 										<span className="text-[9px] text-inferay-text-3 sm:text-[10px]">
 											Col
 										</span>
 										<DropdownButton
 											value={String(selectedGroup.columns)}
-											options={[1, 2, 3, 4].map((n) => ({
+											options={[1, 2, 3, 4, 5, 6].map((n) => ({
 												id: String(n),
 												label: String(n),
 											}))}
@@ -394,7 +397,7 @@ export function TerminalShellHeader() {
 											minWidth={60}
 										/>
 									</div>
-									<div className="flex items-center gap-1.5 shrink-0">
+									<div className="electrobun-webkit-app-region-no-drag flex items-center gap-1.5 shrink-0">
 										<span className="text-[9px] text-inferay-text-3 sm:text-[10px]">
 											Row
 										</span>
@@ -414,7 +417,10 @@ export function TerminalShellHeader() {
 							)}
 						</>
 					)}
-					<div className="relative shrink-0" ref={newMenuRef}>
+					<div
+						className="electrobun-webkit-app-region-no-drag relative shrink-0"
+						ref={newMenuRef}
+					>
 						<button
 							type="button"
 							onClick={() => setShowNewMenu((value) => !value)}
@@ -450,7 +456,7 @@ export function TerminalShellHeader() {
 							title={
 								shellState.editorZenMode ? "Exit zen mode" : "Enter zen mode"
 							}
-							className={`flex h-7 w-7 items-center justify-center rounded-lg border border-inferay-border bg-inferay-surface transition-colors ${
+							className={`electrobun-webkit-app-region-no-drag flex h-7 w-7 items-center justify-center rounded-lg border border-inferay-border bg-inferay-surface transition-colors ${
 								shellState.editorZenMode
 									? "bg-inferay-surface-2 text-inferay-text"
 									: "text-inferay-text-3 hover:bg-inferay-surface-2 hover:text-inferay-text-2"

@@ -1,5 +1,5 @@
-import { memo, useMemo } from "react";
-import type { GraphNode } from "../../hooks/useGitGraph";
+import { memo, useEffect, useMemo, useState } from "react";
+import type { GraphNode, GraphRow } from "../../hooks/useGitGraph";
 
 interface WipFile {
 	path: string;
@@ -9,6 +9,7 @@ interface WipFile {
 
 interface CommitGraphProps {
 	commits: GraphNode[];
+	rows: GraphRow[];
 	selectedHash?: string;
 	onSelect?: (hash: string) => void;
 	className?: string;
@@ -16,317 +17,754 @@ interface CommitGraphProps {
 	branch?: string;
 }
 
-const ROW_HEIGHT = 32;
-const COLUMN_WIDTH = 16;
-const NODE_RADIUS = 4;
-const GRAPH_PADDING = 8;
+interface ColumnVisibility {
+	author: boolean;
+	sha: boolean;
+	date: boolean;
+}
 
-function RefBadge({ ref: refName }: { ref: string }) {
-	const isHead = refName.includes("HEAD");
-	const isBranch =
-		refName.startsWith("origin/") || (!refName.includes("tag:") && !isHead);
-	const isTag = refName.startsWith("tag:");
+const ROW_HEIGHT = 28;
+const COLUMN_WIDTH = 12;
+const AVATAR_SIZE = 16;
+const GRAPH_PADDING = 6;
+const LINE_WIDTH = 2.5;
+const AUTHOR_WIDTH = 136;
+const SHA_WIDTH = 68;
+const DATE_WIDTH = 100;
+const REF_WIDTH = 112;
+const COLUMN_PREFS_KEY = "commit-graph-columns-v5";
+const DEFAULT_COLUMNS: ColumnVisibility = {
+	author: true,
+	sha: true,
+	date: false,
+};
 
-	let bg = "bg-inferay-text/10";
-	let text = "text-inferay-text-2";
-	let displayName = refName;
+function hexToRgba(hex: string, alpha: number) {
+	const c = hex.replace("#", "");
+	const n =
+		c.length === 3
+			? c
+					.split("")
+					.map((ch) => `${ch}${ch}`)
+					.join("")
+			: c;
+	return `rgba(${Number.parseInt(n.slice(0, 2), 16)}, ${Number.parseInt(n.slice(2, 4), 16)}, ${Number.parseInt(n.slice(4, 6), 16)}, ${alpha})`;
+}
 
-	if (isHead) {
-		bg = "bg-cyan-500/20";
-		text = "text-cyan-400";
-		displayName = refName.replace("HEAD -> ", "").replace("HEAD", "HEAD");
-	} else if (refName.startsWith("origin/")) {
-		bg = "bg-blue-500/15";
-		text = "text-blue-400";
-		displayName = refName.replace("origin/", "");
-	} else if (isTag) {
-		bg = "bg-amber-500/15";
-		text = "text-amber-400";
-		displayName = refName.replace("tag: ", "");
-	} else if (isBranch) {
-		bg = "bg-green-500/15";
-		text = "text-green-400";
+interface ParsedRef {
+	label: string;
+	kind: "head" | "local" | "remote" | "tag";
+}
+
+function parseRefs(refs: string[]): ParsedRef[] {
+	const out: ParsedRef[] = [];
+	const localNames = new Set<string>();
+
+	// First pass: collect local branch names
+	for (const raw of refs) {
+		if (raw.includes("HEAD -> ")) {
+			localNames.add(raw.replace("HEAD -> ", ""));
+		} else if (
+			!raw.startsWith("origin/") &&
+			!raw.startsWith("tag: ") &&
+			raw !== "HEAD"
+		) {
+			localNames.add(raw);
+		}
 	}
 
+	for (const raw of refs) {
+		// Skip bare HEAD, origin/HEAD, and stash refs
+		if (raw === "HEAD" || raw === "origin/HEAD" || raw.includes("stash"))
+			continue;
+
+		if (raw.includes("HEAD -> ")) {
+			out.push({ label: raw.replace("HEAD -> ", ""), kind: "head" });
+		} else if (raw.startsWith("tag: ")) {
+			out.push({ label: raw.replace("tag: ", ""), kind: "tag" });
+		} else if (raw.startsWith("origin/")) {
+			// Skip remote ref if we already have the local branch
+			const remoteName = raw.replace("origin/", "");
+			if (localNames.has(remoteName)) continue;
+			out.push({ label: raw, kind: "remote" });
+		} else {
+			out.push({ label: raw, kind: "local" });
+		}
+	}
+
+	const order = { head: 0, local: 1, remote: 2, tag: 3 };
+	out.sort((a, b) => order[a.kind] - order[b.kind]);
+	return out;
+}
+
+function loadColumns(): ColumnVisibility {
+	try {
+		const raw = localStorage.getItem(COLUMN_PREFS_KEY);
+		if (!raw) return DEFAULT_COLUMNS;
+		return { ...DEFAULT_COLUMNS, ...(JSON.parse(raw) as ColumnVisibility) };
+	} catch {
+		return DEFAULT_COLUMNS;
+	}
+}
+
+/** Small SVG icons for ref badges */
+function RefIcon({ kind }: { kind: ParsedRef["kind"] }) {
+	const size = 10;
+	if (kind === "head") {
+		// Checkmark
+		return (
+			<svg
+				aria-hidden="true"
+				focusable="false"
+				width={size}
+				height={size}
+				viewBox="0 0 10 10"
+				fill="none"
+				className="shrink-0"
+			>
+				<path
+					d="M2 5.5 L4 7.5 L8 3"
+					stroke="currentColor"
+					strokeWidth="1.5"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+				/>
+			</svg>
+		);
+	}
+	if (kind === "tag") {
+		// Tag
+		return (
+			<svg
+				aria-hidden="true"
+				focusable="false"
+				width={size}
+				height={size}
+				viewBox="0 0 10 10"
+				fill="none"
+				className="shrink-0"
+			>
+				<path
+					d="M1.5 5.5V2a.5.5 0 01.5-.5h3.5L9 5l-3.5 3.5L1.5 5.5z"
+					stroke="currentColor"
+					strokeWidth="1"
+					strokeLinejoin="round"
+				/>
+				<circle cx="3.5" cy="3.5" r=".7" fill="currentColor" />
+			</svg>
+		);
+	}
+	if (kind === "remote") {
+		// Cloud / remote
+		return (
+			<svg
+				aria-hidden="true"
+				focusable="false"
+				width={size}
+				height={size}
+				viewBox="0 0 10 10"
+				fill="none"
+				className="shrink-0"
+			>
+				<path
+					d="M2.5 7h5a2 2 0 000-4 2.5 2.5 0 00-5 1 1.5 1.5 0 000 3z"
+					stroke="currentColor"
+					strokeWidth="1"
+					strokeLinejoin="round"
+				/>
+			</svg>
+		);
+	}
+	// Local branch
+	return (
+		<svg
+			aria-hidden="true"
+			focusable="false"
+			width={size}
+			height={size}
+			viewBox="0 0 10 10"
+			fill="none"
+			className="shrink-0"
+		>
+			<path
+				d="M5 1.5v4M3 3l2-1.5L7 3"
+				stroke="currentColor"
+				strokeWidth="1.2"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+			<circle cx="5" cy="7.5" r="1.2" stroke="currentColor" strokeWidth="1" />
+		</svg>
+	);
+}
+
+function RefBadge({
+	label,
+	color,
+	kind,
+}: {
+	label: string;
+	color: string;
+	kind: ParsedRef["kind"];
+}) {
 	return (
 		<span
-			className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium ${bg} ${text}`}
+			className="inline-flex h-4 max-w-full items-center gap-1 overflow-hidden whitespace-nowrap text-ellipsis rounded-full px-1.5 text-[9px] font-medium leading-none"
+			style={{
+				border: `1px solid ${hexToRgba(color, 0.28)}`,
+				backgroundColor: hexToRgba(color, 0.1),
+				color,
+			}}
 		>
-			{displayName}
+			<RefIcon kind={kind} />
+			<span className="truncate">{label}</span>
 		</span>
 	);
 }
+
+function RefBadges({ refs, color }: { refs: string[]; color: string }) {
+	const parsed = parseRefs(refs);
+	if (!parsed.length) return null;
+	const visible = parsed.slice(0, 1);
+	const extra = parsed.length - 1;
+	return (
+		<div className="flex items-center gap-1 overflow-hidden">
+			{visible.map((ref) => (
+				<RefBadge
+					key={ref.label}
+					label={ref.label}
+					color={color}
+					kind={ref.kind}
+				/>
+			))}
+			{extra > 0 && (
+				<span className="shrink-0 text-[8px] text-inferay-text-3">
+					+{extra}
+				</span>
+			)}
+		</div>
+	);
+}
+
+// ── Header ──────────────────────────────────────────────────────
+
+function HeaderRow({
+	graphWidth,
+	columns,
+	isColumnsOpen,
+	onToggleColumnsMenu,
+	onToggleColumn,
+}: {
+	graphWidth: number;
+	columns: ColumnVisibility;
+	isColumnsOpen: boolean;
+	onToggleColumnsMenu: () => void;
+	onToggleColumn: (key: keyof ColumnVisibility) => void;
+}) {
+	return (
+		<div className="sticky top-0 z-10 flex h-7 items-center border-b border-inferay-border bg-inferay-bg/95 text-[9px] font-semibold uppercase tracking-[0.16em] text-inferay-text-3 backdrop-blur">
+			<div className="shrink-0 px-2 text-right" style={{ width: REF_WIDTH }}>
+				Refs
+			</div>
+			<div className="shrink-0" style={{ width: graphWidth }} />
+			<div className="min-w-0 flex-1 px-3">Description</div>
+			{columns.author && (
+				<div
+					className="shrink-0 border-l border-inferay-border px-3"
+					style={{ width: AUTHOR_WIDTH }}
+				>
+					Author
+				</div>
+			)}
+			{columns.date && (
+				<div
+					className="shrink-0 border-l border-inferay-border px-3"
+					style={{ width: DATE_WIDTH }}
+				>
+					Date
+				</div>
+			)}
+			{columns.sha && (
+				<div
+					className="shrink-0 border-l border-inferay-border px-3 text-right"
+					style={{ width: SHA_WIDTH }}
+				>
+					SHA
+				</div>
+			)}
+			<div className="relative shrink-0 border-l border-inferay-border px-2">
+				<button
+					type="button"
+					onClick={onToggleColumnsMenu}
+					className="rounded border border-inferay-border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.12em] text-inferay-text-3 hover:border-inferay-border-bold hover:text-inferay-text-2"
+				>
+					Cols
+				</button>
+				{isColumnsOpen && (
+					<div className="absolute right-2 top-8 z-20 w-28 rounded-md border border-inferay-border bg-inferay-surface p-1 shadow-lg">
+						{(
+							[
+								["author", "Author"],
+								["sha", "SHA"],
+								["date", "Date"],
+							] as const
+						).map(([key, label]) => (
+							<button
+								key={key}
+								type="button"
+								onClick={() => onToggleColumn(key)}
+								className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-[10px] text-inferay-text-2 hover:bg-inferay-surface-2"
+							>
+								{label}
+								<span className="text-inferay-text-3">
+									{columns[key] ? "On" : "Off"}
+								</span>
+							</button>
+						))}
+					</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
+// ── WIP Row ─────────────────────────────────────────────────────
+
 const WipRow = memo(function WipRow({
-	maxColumn,
+	graphWidth,
 	selected,
 	onClick,
 	fileCount,
 	branch,
+	columns,
 }: {
-	maxColumn: number;
+	graphWidth: number;
 	selected: boolean;
 	onClick: () => void;
 	fileCount: number;
 	branch?: string;
+	columns: ColumnVisibility;
 }) {
-	const graphWidth = (maxColumn + 1) * COLUMN_WIDTH + GRAPH_PADDING * 2;
-	const cx = GRAPH_PADDING + COLUMN_WIDTH / 2; // Always column 0
-	const cy = ROW_HEIGHT / 2;
+	const nodeLeft = GRAPH_PADDING + COLUMN_WIDTH / 2 - AVATAR_SIZE / 2;
+	const nodeTop = ROW_HEIGHT / 2 - AVATAR_SIZE / 2;
 
 	return (
 		<div
-			className={`group flex items-center h-8 px-2 cursor-pointer transition-colors ${
-				selected ? "bg-inferay-accent/15" : "hover:bg-inferay-text/5"
-			}`}
+			className="group relative flex cursor-pointer items-center transition-colors hover:bg-inferay-surface"
+			style={{
+				height: ROW_HEIGHT,
+				backgroundColor: selected
+					? "rgba(249,115,22,0.08)"
+					: "rgba(249,115,22,0.025)",
+			}}
 			onClick={onClick}
 		>
-			<div className="shrink-0 flex items-center" style={{ width: graphWidth }}>
-				<svg
-					width={graphWidth}
-					height={ROW_HEIGHT}
-					className="overflow-visible"
+			{selected && (
+				<div className="absolute left-0 top-0 h-full w-[3px] bg-orange-500" />
+			)}
+
+			{/* Ref gutter */}
+			<div
+				className="flex h-full shrink-0 items-center justify-end overflow-hidden px-2"
+				style={{ width: REF_WIDTH }}
+			>
+				<RefBadge label={`WIP ${branch ?? ""}`} color="#f97316" kind="local" />
+			</div>
+
+			{/* Graph cell: dashed circle node */}
+			<div className="relative h-full shrink-0" style={{ width: graphWidth }}>
+				<div
+					className="absolute flex items-center justify-center rounded-full border-2 border-dashed"
+					style={{
+						left: nodeLeft,
+						top: nodeTop,
+						width: AVATAR_SIZE,
+						height: AVATAR_SIZE,
+						borderColor: "#f97316",
+						backgroundColor: "var(--color-inferay-bg)",
+						boxShadow: "0 0 6px rgba(249,115,22,0.2)",
+						zIndex: 3,
+					}}
 				>
-					<circle
-						cx={cx}
-						cy={cy}
-						r={NODE_RADIUS}
-						fill="none"
-						stroke="#f97316"
-						strokeWidth={2}
-						strokeDasharray="2 2"
+					<div
+						className="h-2 w-2 rounded-full"
+						style={{ backgroundColor: "rgba(249,115,22,0.45)" }}
 					/>
-				</svg>
+				</div>
 			</div>
 
-			<div className="flex-1 min-w-0 flex items-center gap-2">
-				<span className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium bg-orange-500/20 text-orange-400">
-					WIP on {branch ?? "branch"}
+			{/* Message */}
+			<div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+				<span className="truncate text-[11px] text-inferay-text-2">
+					Uncommitted changes
 				</span>
-
-				{fileCount > 0 && (
-					<span className="text-[10px] text-inferay-text-3">
-						{fileCount} file{fileCount !== 1 ? "s" : ""} changed
-					</span>
-				)}
+				<span className="shrink-0 text-[10px] text-inferay-text-3">
+					{fileCount} file{fileCount === 1 ? "" : "s"}
+				</span>
 			</div>
 
-			<div className="shrink-0 flex items-center gap-1 ml-2 text-[9px] tabular-nums">
-				<span className="text-inferay-text-3/60">uncommitted</span>
-			</div>
+			{columns.author && (
+				<div
+					className="flex h-full shrink-0 items-center gap-2 border-l border-inferay-border px-3 text-[10px] text-inferay-text-3"
+					style={{ width: AUTHOR_WIDTH }}
+				>
+					<div className="h-4 w-4 rounded-full border border-dashed border-orange-500/70" />
+					<span className="truncate">Workspace</span>
+				</div>
+			)}
+			{columns.date && (
+				<div
+					className="flex h-full shrink-0 items-center border-l border-inferay-border px-3 text-[10px] text-inferay-text-3"
+					style={{ width: DATE_WIDTH }}
+				>
+					Now
+				</div>
+			)}
+			{columns.sha && (
+				<div
+					className="flex h-full shrink-0 items-center justify-end border-l border-inferay-border px-3 text-[10px] font-mono text-inferay-text-3"
+					style={{ width: SHA_WIDTH }}
+				>
+					---
+				</div>
+			)}
+			<div className="shrink-0" style={{ width: 38 }} />
 		</div>
 	);
 });
+
+// ── Commit Row ──────────────────────────────────────────────────
 
 const CommitRow = memo(function CommitRow({
 	commit,
-	maxColumn,
+	graphWidth,
 	selected,
 	onClick,
-	rowOffset,
+	columns,
+	index,
 }: {
 	commit: GraphNode;
-	maxColumn: number;
+	graphWidth: number;
 	selected: boolean;
 	onClick: () => void;
-	rowOffset: number;
+	columns: ColumnVisibility;
+	index: number;
 }) {
-	const graphWidth = (maxColumn + 1) * COLUMN_WIDTH + GRAPH_PADDING * 2;
-	const cx = GRAPH_PADDING + commit.column * COLUMN_WIDTH + COLUMN_WIDTH / 2;
-	const cy = ROW_HEIGHT / 2;
+	const nodeLeft =
+		GRAPH_PADDING +
+		commit.column * COLUMN_WIDTH +
+		COLUMN_WIDTH / 2 -
+		AVATAR_SIZE / 2;
+	const nodeTop = ROW_HEIGHT / 2 - AVATAR_SIZE / 2;
+	const hasRefs = commit.refs.length > 0;
 
 	return (
 		<div
-			className={`group flex items-center h-8 px-2 cursor-pointer transition-colors ${
-				selected ? "bg-inferay-accent/15" : "hover:bg-inferay-text/5"
-			}`}
+			className="group relative flex cursor-pointer items-center transition-colors hover:bg-inferay-surface"
+			style={{
+				height: ROW_HEIGHT,
+				backgroundColor: selected
+					? "rgba(255,255,255,0.035)"
+					: index % 2 === 1
+						? "rgba(255,255,255,0.012)"
+						: undefined,
+			}}
 			onClick={onClick}
 		>
-			<div className="shrink-0 flex items-center" style={{ width: graphWidth }}>
-				<svg
-					width={graphWidth}
-					height={ROW_HEIGHT}
-					className="overflow-visible"
-				>
-					<circle
-						cx={cx}
-						cy={cy}
-						r={NODE_RADIUS}
-						fill={commit.color}
-						stroke={selected ? "#fff" : commit.color}
-						strokeWidth={selected ? 2 : 0}
-					/>
-				</svg>
+			{/* Selected accent bar */}
+			{selected && (
+				<div
+					className="absolute left-0 top-0 h-full w-[3px]"
+					style={{ backgroundColor: commit.color }}
+				/>
+			)}
+
+			{/* Ref gutter */}
+			<div
+				className="flex h-full shrink-0 items-center justify-end overflow-hidden px-2"
+				style={{ width: REF_WIDTH }}
+			>
+				{hasRefs ? <RefBadges refs={commit.refs} color={commit.color} /> : null}
 			</div>
 
-			<div className="flex-1 min-w-0 flex items-center gap-2">
-				<span className="shrink-0 font-mono text-[10px] text-inferay-accent">
-					{commit.hash}
-				</span>
+			{/* Graph cell: avatar node on the line */}
+			<div className="relative h-full shrink-0" style={{ width: graphWidth }}>
+				<img
+					src={commit.authorAvatarUrl}
+					alt=""
+					className="absolute rounded-full"
+					style={{
+						left: nodeLeft,
+						top: nodeTop,
+						width: AVATAR_SIZE,
+						height: AVATAR_SIZE,
+						border: `2.5px solid ${commit.color}`,
+						backgroundColor: "var(--color-inferay-bg)",
+						boxShadow: `0 0 6px ${hexToRgba(commit.color, 0.25)}`,
+						zIndex: 3,
+					}}
+				/>
+			</div>
 
-				{commit.refs.length > 0 && (
-					<div className="shrink-0 flex items-center gap-1">
-						{commit.refs.slice(0, 3).map((ref, i) => (
-							<RefBadge key={i} ref={ref} />
-						))}
-						{commit.refs.length > 3 && (
-							<span className="text-[9px] text-inferay-text-3">
-								+{commit.refs.length - 3}
-							</span>
-						)}
-					</div>
-				)}
-
-				<span className="truncate text-[11px] text-inferay-text-2 group-hover:text-inferay-text">
+			{/* Commit message + author */}
+			<div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+				<div className="min-w-0 truncate text-[11px] leading-none text-inferay-text-2 group-hover:text-inferay-text">
 					{commit.message}
-				</span>
+				</div>
 			</div>
 
-			<div className="shrink-0 flex items-center gap-3 ml-2">
-				<span className="text-[10px] text-inferay-text-3 truncate max-w-[80px]">
-					{commit.author}
-				</span>
-				<span className="text-[10px] text-inferay-text-3/60 tabular-nums">
+			{columns.author && (
+				<div
+					className="flex h-full shrink-0 items-center gap-2 border-l border-inferay-border px-3"
+					style={{ width: AUTHOR_WIDTH }}
+				>
+					<img
+						src={commit.authorAvatarUrl}
+						alt=""
+						className="h-4 w-4 shrink-0 rounded-full"
+					/>
+					<span className="truncate text-[10px] text-inferay-text-3">
+						{commit.author}
+					</span>
+				</div>
+			)}
+			{columns.date && (
+				<div
+					className="flex h-full shrink-0 items-center border-l border-inferay-border px-3 text-[10px] text-inferay-text-3"
+					style={{ width: DATE_WIDTH }}
+				>
 					{commit.date}
-				</span>
-			</div>
+				</div>
+			)}
+			{columns.sha && (
+				<div
+					className="flex h-full shrink-0 items-center justify-end border-l border-inferay-border px-3 text-[10px] font-mono text-inferay-text-3"
+					style={{ width: SHA_WIDTH }}
+				>
+					{commit.hash}
+				</div>
+			)}
+			<div className="shrink-0" style={{ width: 38 }} />
 		</div>
 	);
 });
 
+// ── Connection types & path building ────────────────────────────
+
+interface RowTransition {
+	row: number;
+	fromCol: number;
+	toCol: number;
+	color: string;
+}
+
+function colX(col: number): number {
+	return REF_WIDTH + GRAPH_PADDING + col * COLUMN_WIDTH + COLUMN_WIDTH / 2;
+}
+
+function rowY(row: number): number {
+	return row * ROW_HEIGHT + ROW_HEIGHT / 2;
+}
+
+function rowTop(row: number): number {
+	return row * ROW_HEIGHT + 1;
+}
+
+function rowBottom(row: number): number {
+	return (row + 1) * ROW_HEIGHT - 1;
+}
+
+function buildConnection(conn: RowTransition): string {
+	const x1 = colX(conn.fromCol);
+	const y1 = rowY(conn.row);
+	const x2 = colX(conn.toCol);
+	const elbowY = y1 + ROW_HEIGHT * 0.36;
+	const endY = rowY(conn.row + 1);
+	const direction = x2 > x1 ? 1 : -1;
+	const radius = 3;
+
+	return [
+		`M ${x1} ${y1}`,
+		`L ${x1} ${elbowY - radius}`,
+		`Q ${x1} ${elbowY} ${x1 + direction * radius} ${elbowY}`,
+		`L ${x2 - direction * radius} ${elbowY}`,
+		`Q ${x2} ${elbowY} ${x2} ${elbowY + radius}`,
+		`L ${x2} ${endY}`,
+	].join(" ");
+}
+
+// ── Main component ──────────────────────────────────────────────
+
 export const CommitGraph = memo(function CommitGraph({
 	commits,
+	rows,
 	selectedHash,
 	onSelect,
 	className = "",
 	wipFiles = [],
 	branch,
 }: CommitGraphProps) {
+	const [columns, setColumns] = useState<ColumnVisibility>(DEFAULT_COLUMNS);
+	const [isColumnsOpen, setIsColumnsOpen] = useState(false);
 	const hasWip = wipFiles.length > 0;
-	const wipOffset = hasWip ? 1 : 0; // Offset for WIP row
+	const wipOffset = hasWip ? 1 : 0;
+
+	useEffect(() => setColumns(loadColumns()), []);
+	useEffect(() => {
+		try {
+			localStorage.setItem(COLUMN_PREFS_KEY, JSON.stringify(columns));
+		} catch {}
+	}, [columns]);
 
 	const maxColumn = useMemo(() => {
 		let max = 0;
-		for (const c of commits) {
-			if (c.column > max) max = c.column;
-		}
+		for (const c of commits) if (c.column > max) max = c.column;
 		return max;
 	}, [commits]);
-	const connections = useMemo(() => {
-		const lines: Array<{
-			fromRow: number;
-			toRow: number;
-			fromCol: number;
-			toCol: number;
+
+	const graphWidth = (maxColumn + 1) * COLUMN_WIDTH + GRAPH_PADDING * 2;
+	const totalHeight = (commits.length + wipOffset) * ROW_HEIGHT;
+
+	const toggleColumn = (key: keyof ColumnVisibility) =>
+		setColumns((cur) => ({ ...cur, [key]: !cur[key] }));
+
+	const railSegments = useMemo(() => {
+		const segments: Array<{
+			key: string;
+			row: number;
+			column: number;
 			color: string;
 		}> = [];
-
-		const hashToRow = new Map<string, number>();
-		commits.forEach((c, i) => hashToRow.set(c.hash, i + wipOffset));
-		if (hasWip && commits.length > 0) {
-			lines.push({
-				fromRow: 0,
-				toRow: wipOffset,
-				fromCol: 0,
-				toCol: commits[0]!.column,
-				color: "#f97316",
-			});
-		}
-
-		for (let i = 0; i < commits.length; i++) {
-			const commit = commits[i]!;
-			const row = i + wipOffset;
-			for (const parentHash of commit.parents) {
-				const parentRow = hashToRow.get(parentHash);
-				if (parentRow !== undefined) {
-					const parentCommit = commits[parentRow - wipOffset]!;
-					lines.push({
-						fromRow: row,
-						toRow: parentRow,
-						fromCol: commit.column,
-						toCol: parentCommit.column,
-						color: commit.color,
-					});
-				}
+		for (const row of rows) {
+			for (const rail of row.rails) {
+				segments.push({
+					key: `rail-${row.row + wipOffset}-${rail.column}`,
+					row: row.row + wipOffset,
+					column: rail.column,
+					color: rail.color,
+				});
 			}
 		}
+		if (hasWip && commits.length > 0) {
+			segments.unshift({
+				key: "rail-wip-0",
+				row: 0,
+				column: 0,
+				color: commits[0]!.color,
+			});
+		}
+		return segments;
+	}, [rows, wipOffset, hasWip, commits]);
 
-		return lines;
-	}, [commits, hasWip, wipOffset]);
+	const transitions = useMemo(() => {
+		const result: RowTransition[] = [];
+		for (const row of rows) {
+			for (const transition of row.transitions) {
+				result.push({
+					row: row.row + wipOffset,
+					fromCol: transition.fromColumn,
+					toCol: transition.toColumn,
+					color: transition.color,
+				});
+			}
+		}
+		if (hasWip && commits.length > 0) {
+			result.unshift({
+				row: 0,
+				fromCol: 0,
+				toCol: commits[0]!.column,
+				color: commits[0]!.color,
+			});
+		}
+		return result;
+	}, [rows, wipOffset, hasWip, commits]);
 
 	if (!commits.length && !hasWip) {
 		return (
-			<div className={`flex items-center justify-center py-8 ${className}`}>
+			<div
+				className={`flex items-center justify-center rounded-md border border-inferay-border bg-inferay-bg py-8 ${className}`}
+			>
 				<p className="text-[11px] text-inferay-text-3">No commits</p>
 			</div>
 		);
 	}
 
-	const graphWidth = (maxColumn + 1) * COLUMN_WIDTH + GRAPH_PADDING * 2;
-	const totalHeight = (commits.length + wipOffset) * ROW_HEIGHT;
-
 	return (
-		<div className={`relative overflow-auto ${className}`}>
+		<div
+			className={`relative overflow-auto rounded-md border border-inferay-border bg-inferay-bg ${className}`}
+		>
+			<HeaderRow
+				graphWidth={graphWidth}
+				columns={columns}
+				isColumnsOpen={isColumnsOpen}
+				onToggleColumnsMenu={() => setIsColumnsOpen((o) => !o)}
+				onToggleColumn={toggleColumn}
+			/>
+
+			{/* SVG lines layer — clipped to ref+graph area */}
 			<svg
-				className="absolute top-0 left-2 pointer-events-none"
-				width={graphWidth}
+				aria-hidden="true"
+				overflow="hidden"
+				className="pointer-events-none absolute top-7 left-0"
+				width={REF_WIDTH + graphWidth}
 				height={totalHeight}
-				style={{ zIndex: 0 }}
+				style={{ zIndex: 1 }}
 			>
-				{connections.map((conn, i) => {
-					const x1 =
-						GRAPH_PADDING + conn.fromCol * COLUMN_WIDTH + COLUMN_WIDTH / 2;
-					const y1 = conn.fromRow * ROW_HEIGHT + ROW_HEIGHT / 2;
-					const x2 =
-						GRAPH_PADDING + conn.toCol * COLUMN_WIDTH + COLUMN_WIDTH / 2;
-					const y2 = conn.toRow * ROW_HEIGHT + ROW_HEIGHT / 2;
-					if (conn.fromCol === conn.toCol) {
-						return (
-							<line
-								key={i}
-								x1={x1}
-								y1={y1}
-								x2={x2}
-								y2={y2}
-								stroke={conn.color}
-								strokeWidth={2}
-								strokeOpacity={0.6}
-							/>
-						);
-					}
-					const midY = (y1 + y2) / 2;
-					const path = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+				{/* Row-local rails keep width and ownership consistent per lane */}
+				{railSegments.map((segment) => {
+					const x = colX(segment.column);
+					return (
+						<line
+							key={segment.key}
+							x1={x}
+							y1={rowTop(segment.row)}
+							x2={x}
+							y2={rowBottom(segment.row)}
+							stroke={segment.color}
+							strokeWidth={LINE_WIDTH}
+							strokeOpacity={0.98}
+							strokeLinecap="round"
+						/>
+					);
+				})}
+
+				{/* Lane-switch elbows */}
+				{transitions.map((transition, i) => {
 					return (
 						<path
 							key={i}
-							d={path}
-							stroke={conn.color}
-							strokeWidth={2}
-							strokeOpacity={0.6}
+							d={buildConnection(transition)}
+							stroke={transition.color}
+							strokeWidth={LINE_WIDTH}
+							strokeOpacity={0.9}
+							strokeLinecap="round"
 							fill="none"
 						/>
 					);
 				})}
 			</svg>
 
-			<div className="relative" style={{ zIndex: 1 }}>
+			{/* Rows layer — avatar nodes sit on top of lines */}
+			<div className="relative" style={{ zIndex: 2 }}>
 				{hasWip && (
 					<WipRow
-						maxColumn={maxColumn}
+						graphWidth={graphWidth}
 						selected={selectedHash === "wip"}
 						onClick={() => onSelect?.("wip")}
 						fileCount={wipFiles.length}
 						branch={branch}
+						columns={columns}
 					/>
 				)}
-
 				{commits.map((commit, i) => (
 					<CommitRow
 						key={commit.hash}
 						commit={commit}
-						maxColumn={maxColumn}
+						graphWidth={graphWidth}
 						selected={selectedHash === commit.hash}
 						onClick={() => onSelect?.(commit.hash)}
-						rowOffset={wipOffset}
+						columns={columns}
+						index={i}
 					/>
 				))}
 			</div>
