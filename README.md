@@ -62,6 +62,12 @@ Download the latest release from [inferay.com](https://inferay.com) and drag to 
 # Install dependencies
 bun install
 
+# Install Rust toolchain
+# https://rustup.rs
+
+# Build the Rust diff sidecar
+bun run build:native
+
 # Build the app and create DMG installer
 bash scripts/build-dmg.sh
 ```
@@ -83,6 +89,7 @@ After the build completes, you'll find the installer at `artifacts/inferay-insta
 - **Terminal**: xterm.js
 - **Styling**: Tailwind CSS v4
 - **Desktop**: Electrobun
+- **Native acceleration**: optional Rust sidecar for diff computation
 
 ## License
 
