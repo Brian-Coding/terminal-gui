@@ -1,8 +1,6 @@
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
-import {
-	computeNativeDiff,
-	resolveNativeDiffBinary,
-} from "../services/native-diff.ts";
+import { resolveNativeCoreBinary } from "../services/native-core.ts";
+import { computeNativeDiff } from "../services/native-diff.ts";
 
 export function nativeRoutes() {
 	return {
@@ -22,7 +20,7 @@ export function nativeRoutes() {
 						{
 							ok: false,
 							error: "Native diff unavailable",
-							available: Boolean(resolveNativeDiffBinary()),
+							available: Boolean(resolveNativeCoreBinary()),
 						},
 						{ status: 503 }
 					);

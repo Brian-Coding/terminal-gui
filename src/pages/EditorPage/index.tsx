@@ -228,10 +228,11 @@ export function EditorPage() {
 		project?.files.filter((f) => !f.staged && f.status !== "?") ?? [];
 	const untracked = project?.files.filter((f) => f.status === "?") ?? [];
 	const selectedFile = session ? (selectedFiles[session.paneId] ?? null) : null;
-	const { commits: graphCommits, loading: graphLoading } = useGitGraph(
-		mainViewMode === "graph" ? session?.cwd : undefined,
-		100
-	);
+	const {
+		commits: graphCommits,
+		rows: graphRows,
+		loading: graphLoading,
+	} = useGitGraph(mainViewMode === "graph" ? session?.cwd : undefined, 100);
 	const { details: commitDetails, loading: commitDetailsLoading } =
 		useCommitDetails(
 			mainViewMode === "graph" ? session?.cwd : undefined,
@@ -623,6 +624,7 @@ export function EditorPage() {
 						) : (
 							<CommitGraph
 								commits={graphCommits}
+								rows={graphRows}
 								selectedHash={selectedCommitHash ?? undefined}
 								onSelect={setSelectedCommitHash}
 								className="h-full"
@@ -750,6 +752,7 @@ export function EditorPage() {
 									) : (
 										<CommitGraph
 											commits={graphCommits}
+											rows={graphRows}
 											selectedHash={selectedCommitHash ?? undefined}
 											onSelect={setSelectedCommitHash}
 											className="h-full"
