@@ -1,4 +1,5 @@
-import React, {
+import type React from "react";
+import {
 	forwardRef,
 	useCallback,
 	useEffect,
@@ -7,35 +8,45 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import { usePrompts } from "../../hooks/usePrompts.ts";
 import { useGitStatus } from "../../hooks/useGitStatus.ts";
+import { usePrompts } from "../../hooks/usePrompts.ts";
+import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition } from "../../lib/agents.ts";
 import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
 import {
 	type AgentKind,
 	changePaneAgentKind,
-	getStatusInfo,
 } from "../../lib/terminal-utils.ts";
 import { wsClient } from "../../lib/websocket.ts";
+import { InlineDirectoryPicker } from "../../pages/Terminal/InlineDirectoryPicker.tsx";
+import { NewSessionButtons } from "../../pages/Terminal/NewSessionButtons.tsx";
+import { IconArrowDown } from "../ui/Icons.tsx";
+import { AgentChatHeader } from "./AgentChatHeader.tsx";
+import { AgentChatStatusBar } from "./AgentChatStatusBar.tsx";
+import {
+	type AgentChatSession,
+	type AttachedImageInfo,
+	addMessage,
+	adjustBrightness,
+	type BubbleTheme,
+	type ChatMessage,
+	type CheckpointInfo,
+	nextId,
+	type QueuedMessageInfo,
+	type SlashCommand,
+	trimMessages,
+} from "./agent-chat-shared.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatMessageList } from "./ChatMessageList.tsx";
 import {
-	applyInlineCompletion,
-	getCommandDisplayText,
-	getCommandPrompt,
-	expandInlineCommandPrompts,
-} from "./chat-command-utils.ts";
-import {
 	extractToolActivities,
-	findTriggerAtCursor,
-	getStatusToolName,
 	type ToolActivity,
 } from "./chat-agent-utils.ts";
 import {
-	appendMessageContent,
-	mergeSyncedMessages,
-	patchMessageById,
-} from "./chat-state-utils.ts";
+	expandInlineCommandPrompts,
+	getCommandDisplayText,
+	getCommandPrompt,
+} from "./chat-command-utils.ts";
 import {
 	clearAgentChatMessages,
 	clearStoredCheckpoints,
@@ -50,33 +61,12 @@ import {
 	saveStoredSessionId,
 } from "./chat-session-store.ts";
 import {
-	IconAlertTriangle,
-	IconArrowDown,
-	IconCircle,
-	IconEye,
-	IconFilePlus,
-	IconGitBranch,
-	IconGlobe,
-	IconMessageCircle,
-	IconPencil,
-	IconSearch,
-	IconSparkles,
-	IconStop,
-	IconTerminal,
-	IconWrench,
-	IconX,
-} from "../ui/Icons.tsx";
-import { getAgentIcon } from "../../lib/agent-ui.tsx";
-import { DropdownButton } from "../ui/DropdownButton.tsx";
-
-interface QueuedMessage {
-	id: string;
-	text: string;
-	displayText: string;
-	images?: string[];
-}
-
-let queueIdCounter = 0;
+	appendMessageContent,
+	mergeSyncedMessages,
+	patchMessageById,
+} from "./chat-state-utils.ts";
+import { useAgentChatComposerState } from "./useAgentChatComposerState.ts";
+import { useAgentChatMenus } from "./useAgentChatMenus.ts";
 
 interface TerminalTheme {
 	bg: string;
@@ -84,15 +74,10 @@ interface TerminalTheme {
 	cursor: string;
 }
 
-export interface AgentChatSession {
-	paneId: string;
-	cwd?: string;
-	agentKind: AgentKind;
-}
-
 interface AgentChatViewProps {
 	paneId: string;
 	cwd?: string;
+	referencePaths?: string[];
 	showInput?: boolean;
 	theme?: TerminalTheme;
 	agentKind?: AgentKind;
@@ -105,19 +90,14 @@ interface AgentChatViewProps {
 	onDragEnd?: () => void;
 	sessions?: AgentChatSession[];
 	onSelectSession?: (paneId: string) => void;
-}
-
-export interface QueuedMessageInfo {
-	id: string;
-	text: string;
-	displayText: string;
-	images?: string[];
-}
-
-export interface AttachedImageInfo {
-	name: string;
-	path: string;
-	previewUrl: string;
+	/** Called when user picks directories from empty state picker */
+	onDirectoryChange?: (
+		paneId: string,
+		cwd: string,
+		referencePaths?: string[]
+	) => void;
+	/** Called when user wants to add a new pane of a specific agent kind */
+	onAddPane?: (agentKind: AgentKind) => void;
 }
 
 export interface AgentChatHandle {
@@ -137,79 +117,6 @@ export interface AgentChatHandle {
 	removeAttachedImage: (path: string) => void;
 }
 
-interface ChatMessage {
-	id: string;
-	role: "user" | "assistant" | "tool" | "system" | "btw";
-	content: string;
-	toolName?: string;
-	isStreaming?: boolean;
-	btwQuestion?: string;
-	/** Image paths attached to user messages */
-	images?: string[];
-}
-
-interface CheckpointInfo {
-	id: string;
-	timestamp: number;
-	changedFileCount: number;
-	changedFiles: { path: string; action: "created" | "modified" | "deleted" }[];
-	reverted: boolean;
-	/** ID of the last message when this checkpoint was created */
-	afterMessageId: string | null;
-}
-
-const MAX_MESSAGES = 80;
-const MAX_TOTAL_CHARS = 150000;
-
-let msgId = 0;
-function nextId() {
-	return `c${++msgId}-${Date.now().toString(36)}`;
-}
-function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
-	if (msgs.length <= MAX_MESSAGES) return msgs;
-	let trimmed = msgs.slice(-MAX_MESSAGES);
-	if (trimmed.length > 50) {
-		let totalChars = trimmed.reduce((sum, m) => sum + m.content.length, 0);
-		while (totalChars > MAX_TOTAL_CHARS && trimmed.length > 1) {
-			totalChars -= trimmed[0]?.content.length ?? 0;
-			trimmed = trimmed.slice(1);
-		}
-	}
-
-	return trimmed;
-}
-function addMessage(msgs: ChatMessage[], msg: ChatMessage): ChatMessage[] {
-	return [...msgs, msg];
-}
-
-function adjustBrightness(hex: string, percent: number): string {
-	const num = parseInt(hex.replace("#", ""), 16);
-	const r = Math.min(255, Math.max(0, (num >> 16) + percent));
-	const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00ff) + percent));
-	const b = Math.min(255, Math.max(0, (num & 0x0000ff) + percent));
-	return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
-}
-
-interface BubbleTheme {
-	bg: string;
-	fg: string;
-	cursor: string;
-	surface: string;
-	border: string;
-	fgMuted: string;
-	fgDim: string;
-}
-
-interface SlashCommand {
-	id?: string;
-	name: string;
-	description: string;
-	action: "local" | "send";
-	promptTemplate?: string;
-	category?: string;
-	isLocalCommand?: boolean;
-	isFromLibrary?: boolean;
-}
 const LOCAL_COMMANDS: SlashCommand[] = [
 	{
 		name: "clear",
@@ -230,6 +137,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		{
 			paneId,
 			cwd,
+			referencePaths,
 			showInput = true,
 			theme,
 			agentKind = "claude",
@@ -242,6 +150,8 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			onDragEnd,
 			sessions,
 			onSelectSession,
+			onDirectoryChange,
+			onAddPane,
 		},
 		ref
 	) {
@@ -253,6 +163,17 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		);
 		const messagesRef = useRef(messages);
 		messagesRef.current = messages;
+		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+		const scheduleMessageSave = useCallback(
+			(nextMessages: ChatMessage[]) => {
+				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+				if (nextMessages.some((message) => message.isStreaming)) return;
+				saveTimerRef.current = setTimeout(() => {
+					saveStoredMessages(paneId, nextMessages);
+				}, 2000);
+			},
+			[paneId]
+		);
 		const setMessages = useCallback(
 			(update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
 				setMessagesRaw((prev) => {
@@ -261,8 +182,15 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							? (update as (prev: ChatMessage[]) => ChatMessage[])(prev)
 							: update;
 					messagesRef.current = next;
+					scheduleMessageSave(next);
 					return next;
 				});
+			},
+			[scheduleMessageSave]
+		);
+		useEffect(
+			() => () => {
+				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 			},
 			[]
 		);
@@ -317,7 +245,9 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			startTime: null,
 			expandedTools: new Set(),
 		});
-		const { isLoading, status, startTime, expandedTools } = chatUiState;
+		const chatUiStateRef = useRef(chatUiState);
+		chatUiStateRef.current = chatUiState;
+		const { isLoading, status, expandedTools } = chatUiState;
 		const setLoadingState = useCallback(
 			(
 				v:
@@ -332,12 +262,16 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							startTime: number | null;
 					  })
 			) => {
-				setChatUiState((prev) => {
-					const next = typeof v === "function" ? v(prev) : v;
-					return { ...prev, ...next };
-				});
+				const prev = chatUiStateRef.current;
+				const patch = typeof v === "function" ? v(prev) : v;
+				const next = { ...prev, ...patch };
+				chatUiStateRef.current = next;
+				setChatUiState(next);
+				if (prev.status !== next.status) {
+					onStatusChange?.(paneId, next.status);
+				}
 			},
-			[]
+			[onStatusChange, paneId]
 		);
 		const setExpandedTools = useCallback(
 			(v: Set<string> | ((prev: Set<string>) => Set<string>)) => {
@@ -348,11 +282,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			},
 			[]
 		);
-		const [isDragOver, setIsDragOver] = useState(false);
-		const [attachedImages, setAttachedImages] = useState<
-			{ name: string; path: string; previewUrl: string }[]
-		>([]);
-		const [commandMenu, setCommandMenu] = useState<{
+		const [, setCommandMenu] = useState<{
 			show: boolean;
 			selectedIdx: number;
 			position: {
@@ -362,36 +292,11 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				maxHeight: number;
 			} | null;
 		}>({ show: false, selectedIdx: 0, position: null });
-		const [fileMenu, setFileMenu] = useState<{
-			show: boolean;
-			selectedIdx: number;
-			query: string;
-			atIndex: number; // cursor position of the '@'
-			position: {
-				top: number;
-				left: number;
-				width: number;
-				maxHeight: number;
-			} | null;
-		}>({ show: false, selectedIdx: 0, query: "", atIndex: -1, position: null });
-		const [slashMenu, setSlashMenu] = useState<{
-			show: boolean;
-			selectedIdx: number;
-			query: string;
-			slashIndex: number; // cursor position of the '/'
-		}>({ show: false, selectedIdx: 0, query: "", slashIndex: -1 });
-		const [fileResults, setFileResults] = useState<
-			{ name: string; path: string; isDir: boolean }[]
-		>([]);
 		const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>(() => {
 			return loadStoredCheckpoints<CheckpointInfo>(paneId);
 		});
 		const checkpointsRef = useRef(checkpoints);
 		checkpointsRef.current = checkpoints;
-
-		const fileSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-			null
-		);
 		const scrollRef = useRef<HTMLDivElement>(null);
 		const textareaRef = useRef<HTMLTextAreaElement>(null);
 		const highlightOverlayRef = useRef<HTMLDivElement>(null);
@@ -399,20 +304,33 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		const currentAssistantRef = useRef<string | null>(null);
 		const currentToolRef = useRef<string | null>(null);
 		const hasStreamedRef = useRef(false);
-		const queueRef = useRef<QueuedMessage[]>([]);
-		const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-		const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
-		const [editingQueueText, setEditingQueueText] = useState("");
 		const containerRef = useRef<HTMLDivElement>(null);
 		const [isAtBottom, setIsAtBottom] = useState(true);
 		const currentBtwRef = useRef<string | null>(null);
-		const [mdPreview, setMdPreview] = useState<{
-			show: boolean;
-			path: string;
-			content: string | null;
-			loading: boolean;
-			error: string | null;
-		}>({ show: false, path: "", content: null, loading: false, error: null });
+		const {
+			isDragOver,
+			setIsDragOver,
+			attachedImages,
+			queueRef,
+			queuedMessages,
+			setQueuedMessages,
+			queueMessage,
+			shiftQueuedMessage,
+			removeQueuedMessage,
+			updateQueuedMessage,
+			editingQueueId,
+			setEditingQueueId,
+			editingQueueText,
+			setEditingQueueText,
+			mdPreview,
+			setMdPreview,
+			handleMdFileClick,
+			attachImage,
+			removeAttachedImage,
+			clearAttachedImages,
+			handleDrop,
+			handlePaste,
+		} = useAgentChatComposerState();
 
 		const handleScroll = useCallback(() => {
 			const el = scrollRef.current;
@@ -446,35 +364,6 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			return () => window.removeEventListener("keydown", onKeyDown);
 		}, [isSelected, isAtBottom, scrollToBottom]);
 
-		const handleMdFileClick = useCallback((filePath: string) => {
-			setMdPreview({
-				show: true,
-				path: filePath,
-				content: null,
-				loading: true,
-				error: null,
-			});
-			wsClient.send({ type: "file:read", path: filePath });
-		}, []);
-		useEffect(() => {
-			const handleMessage = (msg: Record<string, unknown>) => {
-				if (msg.type === "file:content" && mdPreview.loading) {
-					setMdPreview((prev) => ({
-						...prev,
-						content: msg.content as string,
-						loading: false,
-					}));
-				} else if (msg.type === "file:error" && mdPreview.loading) {
-					setMdPreview((prev) => ({
-						...prev,
-						error: (msg.error as string) || "Failed to read file",
-						loading: false,
-					}));
-				}
-			};
-			return wsClient.onMessage(handleMessage);
-		}, [mdPreview.loading]);
-
 		useEffect(() => {
 			requestAnimationFrame(() => textareaRef.current?.focus());
 		}, []);
@@ -495,18 +384,6 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				);
 			},
 			[setMessages]
-		);
-		const queueMessage = useCallback(
-			(text: string, displayText: string, images?: string[]) => {
-				queueRef.current.push({
-					id: String(++queueIdCounter),
-					text,
-					displayText,
-					images: images?.length ? images : undefined,
-				});
-				setQueuedMessages([...queueRef.current]);
-			},
-			[]
 		);
 		const { prompts: localPrompts, incrementUsage: incrementLocalUsage } =
 			usePrompts();
@@ -539,123 +416,27 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			}
 			return [...deduped.values()];
 		}, [agentKind, localPrompts]);
-		const slashCommandInfo = useMemo(() => {
-			if (!slashMenu.show || slashMenu.slashIndex === -1) {
-				return { query: "", filtered: [] };
-			}
-			const query = slashMenu.query.toLowerCase();
-			const filtered = allCommands.filter((cmd) =>
-				cmd.name.toLowerCase().startsWith(query)
-			);
-			return { query, filtered };
-		}, [slashMenu.show, slashMenu.slashIndex, slashMenu.query, allCommands]);
-
-		const filteredCommands = slashCommandInfo.filtered;
-		const showCommands = slashMenu.show && filteredCommands.length > 0;
-		const cachedRects = useRef<{ input: DOMRect; container: DOMRect } | null>(
-			null
-		);
-		useEffect(() => {
-			const inputEl = inputContainerRef.current;
-			const containerEl = containerRef.current;
-			if (!inputEl || !containerEl) return;
-			const update = () => {
-				cachedRects.current = {
-					input: inputEl.getBoundingClientRect(),
-					container: containerEl.getBoundingClientRect(),
-				};
-			};
-			update();
-			const obs = new ResizeObserver(update);
-			obs.observe(inputEl);
-			obs.observe(containerEl);
-			return () => obs.disconnect();
-		}, []);
-
-		const getMenuPosition = useCallback((maxH: number) => {
-			const r = cachedRects.current;
-			if (!r) return null;
-			const availableHeight = r.input.top - r.container.top - 16;
-			return {
-				top: r.input.top,
-				left: r.input.left,
-				width: r.input.width,
-				maxHeight: Math.min(availableHeight * 0.75, maxH),
-			};
-		}, []);
-		const handleInputForSlashMenu = useCallback(
-			(value: string, cursorPos: number) => {
-				const trigger = findTriggerAtCursor(value, cursorPos, "/");
-				if (!trigger) {
-					if (slashMenu.show)
-						setSlashMenu((prev) => ({ ...prev, show: false }));
-					return;
-				}
-
-				setSlashMenu({
-					show: true,
-					selectedIdx: 0,
-					query: trigger.query,
-					slashIndex: trigger.index,
-				});
-			},
-			[slashMenu.show]
-		);
-		const handleInputForFileMenu = useCallback(
-			(value: string, cursorPos: number) => {
-				const trigger = findTriggerAtCursor(value, cursorPos, "@");
-				if (!trigger) {
-					if (fileMenu.show) setFileMenu((prev) => ({ ...prev, show: false }));
-					return;
-				}
-
-				let position: typeof fileMenu.position = fileMenu.position;
-				{
-					const pos = getMenuPosition(300);
-					if (pos) position = pos;
-				}
-
-				setFileMenu({
-					show: true,
-					selectedIdx: 0,
-					query: trigger.query,
-					atIndex: trigger.index,
-					position,
-				});
-				if (fileSearchTimerRef.current)
-					clearTimeout(fileSearchTimerRef.current);
-				fileSearchTimerRef.current = setTimeout(async () => {
-					try {
-						const params = new URLSearchParams({
-							q: trigger.query,
-							limit: "15",
-						});
-						if (cwd) params.set("cwd", cwd);
-						const res = await fetch(`/api/files/search?${params}`);
-						const data = await res.json();
-						setFileResults(data.results || []);
-					} catch {
-						setFileResults([]);
-					}
-				}, 150);
-			},
-			[cwd, fileMenu.show, fileMenu.position, getMenuPosition]
-		);
-		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-		useEffect(() => {
-			if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-			if (messagesRef.current.some((m) => m.isStreaming)) return;
-			saveTimerRef.current = setTimeout(() => {
-				saveStoredMessages(paneId, messagesRef.current);
-			}, 2000);
-			return () => {
-				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-			};
-		}, [paneId]);
-		useEffect(() => {
-			onStatusChange?.(paneId, status);
-		}, [paneId, status, onStatusChange]);
-
+		const {
+			fileMenu,
+			setFileMenu,
+			fileResults,
+			slashMenu,
+			setSlashMenu,
+			filteredCommands,
+			showCommands,
+			handleInputForFileMenu,
+			handleInputForSlashMenu,
+			selectCommand,
+			selectFile,
+		} = useAgentChatMenus({
+			cwd,
+			input,
+			setInput,
+			allCommands,
+			textareaRef,
+			inputContainerRef,
+			containerRef,
+		});
 		const sendToServer = useCallback(
 			(text: string) => {
 				setLoadingState({
@@ -666,6 +447,24 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				currentAssistantRef.current = null;
 
 				let prompt = text;
+				const sessionId = loadStoredSessionId(paneId);
+				if (!sessionId && (cwd || (referencePaths?.length ?? 0) > 0)) {
+					const workspaceLines = [
+						"You are working in a multi-directory workspace.",
+						cwd
+							? `Primary working directory (use this as the execution root unless the user says otherwise): ${cwd}`
+							: null,
+						referencePaths?.length
+							? `Additional reference directories available in this workspace:\n${referencePaths.map((path) => `- ${path}`).join("\n")}`
+							: null,
+						referencePaths?.length
+							? "The additional directories are supporting context. Read and reference them when relevant, but treat the primary working directory as the default root."
+							: null,
+					]
+						.filter(Boolean)
+						.join("\n\n");
+					prompt = `<workspace-context>\n${workspaceLines}\n</workspace-context>\n\n${prompt}`;
+				}
 				// On first message after switching agent kind, prepend prior conversation context
 				if (agentKindJustChanged.current) {
 					agentKindJustChanged.current = false;
@@ -687,8 +486,6 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					}
 				}
 
-				let sessionId: string | null = null;
-				sessionId = loadStoredSessionId(paneId);
 				wsClient.send({
 					type: "chat:send",
 					paneId,
@@ -698,7 +495,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					agentKind,
 				});
 			},
-			[paneId, cwd, agentKind, setLoadingState]
+			[paneId, cwd, referencePaths, agentKind, setLoadingState]
 		);
 		const extractToolActivitiesForHandle = useCallback(
 			(): ToolActivity[] => extractToolActivities(messagesRef.current),
@@ -759,45 +556,35 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						displayText: q.displayText,
 						images: q.images,
 					})),
-				removeQueuedMessage: (id: string) => {
-					queueRef.current = queueRef.current.filter((q) => q.id !== id);
-					setQueuedMessages([...queueRef.current]);
-				},
-				updateQueuedMessage: (id: string, text: string) => {
-					const item = queueRef.current.find((q) => q.id === id);
-					if (item) {
-						item.text = text;
-						item.displayText = text;
-						setQueuedMessages([...queueRef.current]);
-					}
-				},
+				removeQueuedMessage,
+				updateQueuedMessage,
 				stopGeneration,
 				isLoading: () => isLoading,
 				getAttachedImages: () => [...attachedImages],
-				attachImageFile: async (file: File) => {
-					await attachImage(file);
-				},
-				removeAttachedImage: (path: string) => {
-					removeAttachedImage(path);
-				},
+				attachImageFile: attachImage,
+				removeAttachedImage,
 			}),
 			[
 				appendLocalMessages,
+				attachImage,
 				isLoading,
 				queueMessage,
+				removeAttachedImage,
+				removeQueuedMessage,
 				status,
 				sendToServer,
 				extractToolActivitiesForHandle,
 				queuedMessages,
 				stopGeneration,
 				attachedImages,
+				updateQueuedMessage,
 			]
 		);
 
 		useEffect(() => {
 			const cleanup = wsClient.subscribe(paneId, (msg: any) => {
 				if (msg.type === "chat:event") {
-					handleChatEvent(msg.event);
+					handleChatEventRef.current(msg.event);
 					if (msg.event?.session_id) {
 						saveStoredSessionId(paneId, msg.event.session_id);
 					}
@@ -833,8 +620,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					currentToolRef.current = null;
 					hasStreamedRef.current = false;
 					wsClient.send({ type: "chat:reconnect", paneId });
-					const next = queueRef.current.shift();
-					setQueuedMessages([...queueRef.current]);
+					const next = shiftQueuedMessage();
 					if (next) {
 						appendLocalMessages([
 							{
@@ -866,8 +652,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						status: "error",
 						startTime: null,
 					});
-					const next = queueRef.current.shift();
-					setQueuedMessages([...queueRef.current]);
+					const next = shiftQueuedMessage();
 					if (next) {
 						appendLocalMessages([
 							{
@@ -1038,10 +823,10 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		}, [
 			paneId,
 			appendLocalMessages,
-			handleChatEvent,
 			sendToServer,
 			setLoadingState,
 			setMessages,
+			shiftQueuedMessage,
 		]);
 
 		function handleChatEvent(event: any) {
@@ -1225,6 +1010,8 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				}
 			}
 		}
+		const handleChatEventRef = useRef(handleChatEvent);
+		handleChatEventRef.current = handleChatEvent;
 
 		useEffect(() => {
 			const ta = textareaRef.current;
@@ -1338,54 +1125,6 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			]
 		);
 
-		const selectCommand = useCallback(
-			(idx: number) => {
-				const cmd = filteredCommands[idx];
-				if (!cmd) return;
-				const cursorPos = textareaRef.current?.selectionStart ?? input.length;
-				const { nextValue, nextCursor } = applyInlineCompletion(
-					input,
-					cursorPos,
-					slashMenu.slashIndex,
-					`/${cmd.name}`
-				);
-				setInput(nextValue);
-				setSlashMenu((prev) => ({ ...prev, show: false }));
-				requestAnimationFrame(() => {
-					const ta = textareaRef.current;
-					if (ta) {
-						ta.focus();
-						ta.setSelectionRange(nextCursor, nextCursor);
-					}
-				});
-			},
-			[filteredCommands, input, slashMenu.slashIndex, setInput]
-		);
-
-		const selectFile = useCallback(
-			(idx: number) => {
-				const file = fileResults[idx];
-				if (!file) return;
-				const cursorPos = textareaRef.current?.selectionStart ?? input.length;
-				const { nextValue, nextCursor } = applyInlineCompletion(
-					input,
-					cursorPos,
-					fileMenu.atIndex,
-					`@${file.path}`
-				);
-				setInput(nextValue);
-				setFileMenu((prev) => ({ ...prev, show: false }));
-				requestAnimationFrame(() => {
-					const ta = textareaRef.current;
-					if (ta) {
-						ta.focus();
-						ta.setSelectionRange(nextCursor, nextCursor);
-					}
-				});
-			},
-			[fileResults, fileMenu.atIndex, input, setInput]
-		);
-
 		const sendMessage = useCallback(() => {
 			const text = input.trim();
 			if (!text && attachedImages.length === 0) return;
@@ -1417,8 +1156,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			setInput("");
 			setSlashMenu((prev) => ({ ...prev, show: false }));
 			setFileMenu((prev) => ({ ...prev, show: false }));
-			for (const img of attachedImages) URL.revokeObjectURL(img.previewUrl);
-			setAttachedImages([]);
+			clearAttachedImages();
 			if (textareaRef.current) textareaRef.current.style.height = "20px";
 
 			if (isLoading) {
@@ -1443,7 +1181,10 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			allCommands,
 			incrementLocalUsage,
 			sendToServer,
+			clearAttachedImages,
 			setInput,
+			setFileMenu,
+			setSlashMenu,
 		]);
 
 		const handleKeyDown = useCallback(
@@ -1524,60 +1265,10 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				fileMenu.selectedIdx,
 				fileResults,
 				selectFile,
+				setFileMenu,
+				setSlashMenu,
 			]
 		);
-
-		const handleDrop = useCallback(
-			async (e: React.DragEvent) => {
-				e.preventDefault();
-				setIsDragOver(false);
-				for (const file of Array.from(e.dataTransfer.files)) {
-					if (file.type.startsWith("image/")) await attachImage(file);
-				}
-			},
-			[attachImage]
-		);
-
-		const handlePaste = useCallback(
-			async (e: React.ClipboardEvent) => {
-				for (const item of Array.from(e.clipboardData.items)) {
-					if (item.type.startsWith("image/")) {
-						e.preventDefault();
-						const file = item.getAsFile();
-						if (file) await attachImage(file);
-						return;
-					}
-				}
-			},
-			[attachImage]
-		);
-
-		async function attachImage(file: File) {
-			try {
-				const fd = new FormData();
-				fd.append("file", file);
-				const res = await fetch("/api/upload-temp", {
-					method: "POST",
-					body: fd,
-				});
-				const data = await res.json();
-				if (data.path) {
-					const previewUrl = URL.createObjectURL(file);
-					setAttachedImages((prev) => [
-						...prev,
-						{ name: file.name, path: data.path, previewUrl },
-					]);
-				}
-			} catch {}
-		}
-
-		function removeAttachedImage(path: string) {
-			setAttachedImages((prev) => {
-				const target = prev.find((img) => img.path === path);
-				if (target) URL.revokeObjectURL(target.previewUrl);
-				return prev.filter((img) => img.path !== path);
-			});
-		}
 
 		const toggleTool = useCallback(
 			(id: string) => {
@@ -1634,6 +1325,13 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				fgDim,
 			]
 		);
+		const handleAgentKindChange = useCallback(
+			(nextAgentKind: AgentKind) => {
+				changePaneAgentKind(paneId, nextAgentKind);
+				clearStoredSessionId(paneId);
+			},
+			[paneId]
+		);
 
 		return (
 			<div
@@ -1647,133 +1345,28 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				onDragLeave={() => setIsDragOver(false)}
 				onDrop={handleDrop}
 			>
-				{!hideHeader &&
-					(() => {
-						const dimStyle = theme ? { color: fgDim } : undefined;
-						const textStyle = theme ? { color: fgColor } : undefined;
-						const agentLabel = getAgentDefinition(agentKind).label;
-						const dirName = cwd ? cwd.split("/").pop() || cwd : null;
-						const hasMultipleSessions =
-							sessions && sessions.length > 1 && onSelectSession;
-						const sessionOptions = hasMultipleSessions
-							? sessions.map((s) => ({
-									id: s.paneId,
-									label:
-										(s.cwd ?? "").split("/").pop() || s.cwd || "No directory",
-									detail: getAgentDefinition(s.agentKind).label,
-									icon: getAgentIcon(s.agentKind, 12),
-								}))
-							: [];
-
-						return (
-							<div
-								className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 border-b ${theme ? "" : "border-inferay-border"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} select-none`}
-								style={
-									theme ? { borderColor, backgroundColor: bgColor } : undefined
-								}
-								draggable={draggable}
-								onDragStart={onDragStart}
-								onDragEnd={onDragEnd}
-							>
-								{/* Agent kind selector — Claude / Codex */}
-								<div
-									draggable={false}
-									onMouseDown={(e) => e.stopPropagation()}
-									onDragStart={(e) => e.preventDefault()}
-								>
-									<DropdownButton
-										value={agentKind}
-										options={agentKindOptions}
-										onChange={(id) => {
-											changePaneAgentKind(paneId, id as AgentKind);
-											clearStoredSessionId(paneId);
-										}}
-										icon={
-											<span className="text-inferay-accent">
-												{getAgentIcon(agentKind, 10)}
-											</span>
-										}
-										minWidth={110}
-										buttonClassName="h-4 rounded-md border-transparent px-1 text-[9px] font-medium text-inferay-accent hover:bg-inferay-text/[0.06] gap-1"
-										labelClassName="text-[9px]"
-										renderOption={(opt, isSelected) => (
-											<div
-												className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-													isSelected
-														? "bg-inferay-accent/15 text-inferay-text"
-														: "text-inferay-text-3 hover:bg-inferay-text/5 hover:text-inferay-text"
-												}`}
-											>
-												<span className="shrink-0">{opt.icon}</span>
-												<span className="font-medium">{opt.label}</span>
-											</div>
-										)}
-									/>
-								</div>
-								{/* Directory */}
-								{dirName && (
-									<>
-										<span className="text-[9px]" style={dimStyle}>
-											›
-										</span>
-										{hasMultipleSessions ? (
-											<DropdownButton
-												value={paneId}
-												options={sessionOptions}
-												onChange={onSelectSession}
-												minWidth={220}
-												buttonClassName="h-4 rounded-md border-transparent px-1.5 text-[9px] font-medium hover:bg-inferay-text/[0.06]"
-												labelClassName="max-w-[120px] truncate text-[9px]"
-											/>
-										) : (
-											<span
-												className="text-[9px] font-medium truncate"
-												style={textStyle}
-												title={cwd}
-											>
-												{dirName}
-											</span>
-										)}
-									</>
-								)}
-								{/* Git branch */}
-								{gitBranch && (
-									<>
-										<span className="text-[9px]" style={dimStyle}>
-											›
-										</span>
-										<IconGitBranch
-											size={9}
-											className="text-inferay-text-3 shrink-0"
-										/>
-										<span
-											className="text-[9px] font-medium text-inferay-text-3 truncate max-w-[80px]"
-											title={gitBranch}
-										>
-											{gitBranch}
-										</span>
-									</>
-								)}
-								<span className="flex-1" />
-								{isSelected && (
-									<div className="h-1.5 w-1.5 rounded-full bg-inferay-accent" />
-								)}
-								{onClose && (
-									<button
-										type="button"
-										onClick={(e) => {
-											e.stopPropagation();
-											onClose(paneId);
-										}}
-										className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
-										title="Close"
-									>
-										<IconX size={8} />
-									</button>
-								)}
-							</div>
-						);
-					})()}
+				{!hideHeader && (
+					<AgentChatHeader
+						paneId={paneId}
+						cwd={cwd}
+						theme={theme}
+						bgColor={bgColor}
+						borderColor={borderColor}
+						fgColor={fgColor}
+						fgDim={fgDim}
+						agentKind={agentKind}
+						agentKindOptions={agentKindOptions}
+						gitBranch={gitBranch}
+						draggable={draggable}
+						onDragStart={onDragStart}
+						onDragEnd={onDragEnd}
+						isSelected={isSelected}
+						onClose={onClose}
+						sessions={sessions}
+						onSelectSession={onSelectSession}
+						onAgentKindChange={handleAgentKindChange}
+					/>
+				)}
 				<div className="relative flex-1 overflow-hidden">
 					<div
 						ref={scrollRef}
@@ -1781,6 +1374,44 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						style={theme ? { backgroundColor: bgColor } : undefined}
 						onScroll={handleScroll}
 					>
+						{messages.length === 0 &&
+							!isLoading &&
+							!cwd &&
+							(onDirectoryChange || onAddPane) && (
+								<div className="absolute inset-0 z-10 flex flex-col">
+									<div className="flex-1 flex items-center justify-center">
+										<div className="flex flex-col items-center gap-4">
+											<p
+												className="text-xs"
+												style={theme ? { color: fgDim } : undefined}
+											>
+												Start a new session
+											</p>
+											{onAddPane && <NewSessionButtons onAddPane={onAddPane} />}
+										</div>
+									</div>
+									{onDirectoryChange && (
+										<div className="shrink-0 px-3 pb-2">
+											<InlineDirectoryPicker
+												onSelect={(path) => {
+													if (path) onDirectoryChange(paneId, path);
+												}}
+												onCancel={() => {}}
+												multiSelect
+												onMultiSelect={(paths) => {
+													if (paths.length > 0) {
+														onDirectoryChange(
+															paneId,
+															paths[0]!,
+															paths.slice(1)
+														);
+													}
+												}}
+											/>
+										</div>
+									)}
+								</div>
+							)}
 						<ChatMessageList
 							messages={messages}
 							expandedTools={expandedTools}
@@ -1807,26 +1438,27 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				</div>
 
 				<div className="relative shrink-0">
-					{/* Eased gradient fade behind the bottom bar */}
+					{/* Solid bg behind content + gradient fade extending above */}
 					<div
 						className="pointer-events-none absolute left-0 right-0 bottom-0"
+						style={{ top: 0, backgroundColor: bgColor }}
+					/>
+					<div
+						className="pointer-events-none absolute left-0 right-0"
 						style={{
-							top: "-64px",
-							background: `linear-gradient(to bottom, ${bgColor}00 0%, ${bgColor}18 12%, ${bgColor}50 24%, ${bgColor}90 36%, ${bgColor}cc 48%, ${bgColor} 60%, ${bgColor} 100%)`,
+							bottom: "100%",
+							height: "64px",
+							background: `linear-gradient(to bottom, ${bgColor}00 0%, ${bgColor}10 20%, ${bgColor}30 40%, ${bgColor}60 58%, ${bgColor}90 74%, ${bgColor} 100%)`,
 						}}
 					/>
 					<div className="relative z-10">
 						<ChatComposer
 							statusBar={
-								<ChatStatusBar
+								<AgentChatStatusBar
 									messages={messages}
 									isLoading={isLoading}
 									status={status}
 									onStop={stopGeneration}
-									theme={theme}
-									borderColor={borderColor}
-									bgColor={bgColor}
-									fgDim={fgDim}
 								/>
 							}
 							showInput={showInput}
@@ -1877,162 +1509,3 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		);
 	}
 );
-function StatusIcon({
-	iconType,
-	size,
-	className,
-	style,
-}: {
-	iconType: string;
-	size: number;
-	className: string;
-	style?: React.CSSProperties;
-}) {
-	const props = { size, className, style };
-	switch (iconType) {
-		case "sparkles":
-			return <IconSparkles {...props} />;
-		case "message":
-			return <IconMessageCircle {...props} />;
-		case "alert":
-			return <IconAlertTriangle {...props} />;
-		case "wrench":
-			return <IconWrench {...props} />;
-		case "terminal":
-			return <IconTerminal {...props} />;
-		default:
-			return <IconCircle {...props} />;
-	}
-}
-
-const ChatStatusBar = React.memo(function ChatStatusBar({
-	messages,
-	isLoading,
-	status,
-	onStop,
-	theme,
-	borderColor,
-	bgColor,
-	fgDim,
-}: {
-	messages: ChatMessage[];
-	isLoading: boolean;
-	status: string;
-	onStop: () => void;
-	theme?: { bg: string; fg: string; cursor: string };
-	borderColor?: string;
-	bgColor: string;
-	fgDim: string;
-}) {
-	const [isHovered, setIsHovered] = useState(false);
-	const toolActivities = useMemo(
-		() => extractToolActivities(messages),
-		[messages]
-	);
-
-	if (!isLoading) return null;
-	const latestActivity = toolActivities[toolActivities.length - 1];
-	const statusToolName = getStatusToolName(status);
-	const hasActivity = toolActivities.length > 0 || statusToolName;
-
-	const getToolIcon = (toolName: string) => {
-		const baseClass = "w-3 h-3 shrink-0";
-		switch (toolName.toLowerCase()) {
-			case "read":
-				return <IconEye className={baseClass} />;
-			case "edit":
-			case "patch": // Codex patch tool
-				return <IconPencil className={baseClass} />;
-			case "write":
-				return <IconFilePlus className={baseClass} />;
-			case "bash":
-			case "exec": // Codex exec tool
-				return <IconTerminal className={baseClass} />;
-			case "grep":
-			case "glob":
-				return <IconSearch className={baseClass} />;
-			case "web_search": // Codex web search
-			case "websearch":
-			case "webfetch":
-				return <IconGlobe className={baseClass} />;
-			default:
-				return <IconWrench className={baseClass} />;
-		}
-	};
-	const displayToolName = latestActivity?.toolName ?? statusToolName;
-	const displaySummary = latestActivity?.summary ?? statusToolName;
-	const activityCount = toolActivities.length;
-
-	return (
-		<div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1">
-			{hasActivity ? (
-				<div
-					className="relative"
-					onMouseEnter={() => setIsHovered(true)}
-					onMouseLeave={() => setIsHovered(false)}
-				>
-					<div className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-xs font-medium cursor-default bg-inferay-surface-2 text-inferay-text-2 hover:bg-inferay-surface-3 transition-all border border-inferay-border">
-						{displayToolName && (
-							<span className="text-inferay-text-3">
-								{getToolIcon(displayToolName)}
-							</span>
-						)}
-						<span className="max-w-[150px] truncate">
-							{displaySummary || "Working..."}
-						</span>
-						{activityCount > 1 && (
-							<span className="text-[9px] tabular-nums text-inferay-text-3">
-								+{activityCount - 1}
-							</span>
-						)}
-					</div>
-
-					{isHovered && activityCount > 0 && (
-						<div className="absolute bottom-full left-0 mb-1 min-w-[240px] max-w-[320px] rounded-lg overflow-hidden bg-inferay-surface shadow-lg border border-inferay-border">
-							<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-inferay-border text-inferay-text-3">
-								<span>Activity</span>
-								<span className="tabular-nums">{activityCount}</span>
-							</div>
-							<div className="overflow-y-auto" style={{ maxHeight: "200px" }}>
-								{toolActivities.map((activity, idx) => (
-									<div
-										key={activity.id}
-										className={`flex items-center gap-2 px-2.5 py-1.5 text-[10px] ${
-											idx < toolActivities.length - 1
-												? "border-b border-inferay-border/50"
-												: ""
-										}`}
-									>
-										<span className="shrink-0 text-inferay-text-3">
-											{getToolIcon(activity.toolName)}
-										</span>
-										<span className="flex-1 truncate text-inferay-text-2">
-											{activity.summary}
-										</span>
-										{activity.isStreaming && (
-											<span className="h-1.5 w-1.5 rounded-full shrink-0 bg-inferay-text-3" />
-										)}
-									</div>
-								))}
-							</div>
-						</div>
-					)}
-				</div>
-			) : (
-				<div className="flex items-center gap-2">
-					<span className="h-1.5 w-1.5 rounded-full animate-pulse bg-inferay-text-3" />
-					<span className="text-[10px] text-inferay-text-3">Working...</span>
-				</div>
-			)}
-
-			<button
-				type="button"
-				onClick={onStop}
-				className="shrink-0 flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-medium transition-all bg-inferay-surface-2 text-inferay-text-2 hover:bg-inferay-surface-3 border border-inferay-border"
-			>
-				<IconStop className="w-3 h-3" />
-				Stop
-			</button>
-		</div>
-	);
-});

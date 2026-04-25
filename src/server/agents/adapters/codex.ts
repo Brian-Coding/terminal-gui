@@ -244,6 +244,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				if (ctx.model) {
 					baseArgs.push("--model", ctx.model);
 				}
+				if (ctx.reasoningLevel) {
+					baseArgs.push("-c", `reasoning_effort="${ctx.reasoningLevel}"`);
+				}
 				const sessionId = ctx.getSessionId();
 				const args = sessionId
 					? [codexCmd, "exec", "resume", ...baseArgs, sessionId, "--", prompt]

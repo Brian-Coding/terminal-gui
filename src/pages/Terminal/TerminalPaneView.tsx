@@ -9,11 +9,13 @@ import { IconTerminal, IconX } from "../../components/ui/Icons.tsx";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
 import type {
+	AgentKind,
 	TerminalPaneModel,
 	TerminalTheme,
 } from "../../lib/terminal-utils.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { InlineDirectoryPicker } from "./InlineDirectoryPicker.tsx";
+import { NewSessionButtons } from "./NewSessionButtons.tsx";
 
 interface TerminalPaneViewProps {
 	pane: TerminalPaneModel;
@@ -23,13 +25,19 @@ interface TerminalPaneViewProps {
 	fontFamily: string;
 	onSelect: (paneId: string) => void;
 	onClose: (paneId: string, force?: boolean) => void;
-	onDirectorySelect?: (paneId: string, path: string | null) => void;
+	onDirectorySelect?: (
+		paneId: string,
+		path: string | null,
+		referencePaths?: string[]
+	) => void;
 	onDirectoryCancel?: (paneId: string) => void;
 	chatRef: (paneId: string, handle: AgentChatHandle | null) => void;
 	onAgentStatusChange?: (paneId: string, status: string) => void;
 	paneIndex?: number;
 	onHeaderDragStart?: (e: React.DragEvent, index: number) => void;
 	onHeaderDragEnd?: () => void;
+	onAddPane?: (agentKind: AgentKind) => void;
+	onSetPaneAgentKind?: (paneId: string, agentKind: AgentKind) => void;
 }
 
 export const TerminalPaneView = memo(function TerminalPaneView({
@@ -47,6 +55,8 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	paneIndex,
 	onHeaderDragStart,
 	onHeaderDragEnd,
+	onAddPane,
+	onSetPaneAgentKind,
 }: TerminalPaneViewProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const termRef = useRef<Terminal | null>(null);
@@ -202,7 +212,6 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	if (pane.pendingCwd) {
 		return (
 			<div
-				role="button"
 				tabIndex={0}
 				onClick={() => onSelect(pane.id)}
 				onKeyDown={(e) => {
@@ -218,16 +227,8 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 						backgroundColor: theme.bg,
 					}}
 				>
-					<span className="text-inferay-text-3">
-						{isAgentChatPane ? (
-							getAgentIcon(pane.agentKind, 10)
-						) : (
-							<IconTerminal size={10} />
-						)}
-					</span>
 					<span className="text-[9px] font-medium text-inferay-text-2">
-						{isAgentChatPane ? `${paneLabel} ›` : ""} New{" "}
-						{isAgentChatPane ? "Session" : paneLabel}
+						New Session
 					</span>
 					<span className="flex-1" />
 					<button
@@ -242,11 +243,34 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 						<IconX size={8} />
 					</button>
 				</div>
-				<div className="flex-1 flex items-center justify-center">
-					<InlineDirectoryPicker
-						onSelect={(path) => onDirectorySelect?.(pane.id, path)}
-						onCancel={() => onDirectoryCancel?.(pane.id)}
-					/>
+				<div className="flex-1 flex flex-col">
+					<div className="flex-1 flex items-center justify-center">
+						<div className="flex flex-col items-center gap-4">
+							<p className="text-xs text-inferay-text-2">
+								Start a new terminal or agent session
+							</p>
+							<NewSessionButtons
+								selectedKind={pane.agentKind}
+								onAddPane={(kind) => {
+									if (onSetPaneAgentKind) {
+										onSetPaneAgentKind(pane.id, kind);
+									}
+								}}
+							/>
+						</div>
+					</div>
+					<div className="shrink-0 px-3 pb-2">
+						<InlineDirectoryPicker
+							onSelect={(path) => onDirectorySelect?.(pane.id, path)}
+							onCancel={() => onDirectoryCancel?.(pane.id)}
+							multiSelect
+							onMultiSelect={(paths) => {
+								if (paths.length > 0) {
+									onDirectorySelect?.(pane.id, paths[0]!, paths.slice(1));
+								}
+							}}
+						/>
+					</div>
 				</div>
 			</div>
 		);
@@ -265,7 +289,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 			tabIndex={isAgentChatPane ? undefined : 0}
 			role={isAgentChatPane ? undefined : "button"}
 			className="relative flex h-full min-h-0 flex-col overflow-hidden"
-			style={{ backgroundColor: theme.bg }}
+			style={isAgentChatPane ? undefined : { backgroundColor: theme.bg }}
 		>
 			{!isAgentChatPane && (
 				<div
@@ -350,11 +374,16 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					<AgentChatView
 						paneId={pane.id}
 						cwd={pane.cwd}
+						referencePaths={pane.referencePaths}
 						theme={theme}
 						agentKind={pane.agentKind}
 						onStatusChange={onAgentStatusChange}
 						onClose={onClose}
 						isSelected={isSelected}
+						onDirectoryChange={(pid, cwd, refs) =>
+							onDirectorySelect?.(pid, cwd, refs)
+						}
+						onAddPane={onAddPane}
 						draggable={paneIndex != null && !!onHeaderDragStart}
 						onDragStart={(e) => {
 							if (paneIndex != null && onHeaderDragStart) {

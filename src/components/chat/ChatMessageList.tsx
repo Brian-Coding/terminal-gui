@@ -551,7 +551,7 @@ export function ChatMessageList({
 }) {
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
 	return (
-		<div className="min-w-0 px-3 pt-2 pb-14 space-y-2">
+		<div className="min-w-0 px-3 pt-2 pb-8 space-y-2">
 			{messages.length === 0 && (
 				<p
 					className="pt-8 text-center text-[10px]"

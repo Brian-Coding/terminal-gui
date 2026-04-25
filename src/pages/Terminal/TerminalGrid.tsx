@@ -2,6 +2,7 @@ import type React from "react";
 import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
 import type {
+	AgentKind,
 	TerminalPaneModel,
 	TerminalTheme,
 } from "../../lib/terminal-utils.ts";
@@ -18,11 +19,17 @@ interface TerminalGridProps {
 	fontFamily: string;
 	onSelectPane: (paneId: string) => void;
 	onClosePane: (paneId: string, force?: boolean) => void;
-	onDirectorySelect: (paneId: string, path: string | null) => void;
+	onDirectorySelect: (
+		paneId: string,
+		path: string | null,
+		referencePaths?: string[]
+	) => void;
 	onDirectoryCancel: (paneId: string) => void;
 	onChatRef: (paneId: string, handle: AgentChatHandle | null) => void;
 	onAgentStatusChange?: (paneId: string, status: string) => void;
 	onReorderPanes?: (fromIndex: number, toIndex: number) => void;
+	onAddPane?: (agentKind: AgentKind) => void;
+	onSetPaneAgentKind?: (paneId: string, agentKind: AgentKind) => void;
 }
 
 const paneViewProps = (
@@ -46,6 +53,8 @@ const paneViewProps = (
 	paneIndex: idx,
 	onHeaderDragStart: onDragStart,
 	onHeaderDragEnd: onDragEnd,
+	onAddPane: p.onAddPane,
+	onSetPaneAgentKind: p.onSetPaneAgentKind,
 });
 
 export const TerminalGrid = memo(function TerminalGrid(

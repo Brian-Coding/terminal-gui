@@ -1,43 +1,43 @@
 import { memo } from "react";
-import { Button } from "../../components/ui/Button.tsx";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition, NEW_PANE_AGENT_KINDS } from "../../lib/agents.ts";
 import type { AgentKind } from "../../lib/terminal-utils.ts";
 
 interface NewSessionButtonsProps {
 	labelPrefix?: string;
-	layout?: "row" | "column";
+	selectedKind?: AgentKind;
 	onAddPane: (kind: AgentKind) => void;
 }
 
 export const NewSessionButtons = memo(function NewSessionButtons({
 	labelPrefix,
-	layout = "row",
+	selectedKind,
 	onAddPane,
 }: NewSessionButtonsProps) {
 	return (
-		<div
-			className={
-				layout === "column"
-					? "flex w-full max-w-56 flex-col gap-2"
-					: "flex flex-wrap gap-2"
-			}
-		>
+		<div className="flex flex-wrap justify-center gap-2">
 			{NEW_PANE_AGENT_KINDS.map((kind) => {
 				const label = getAgentDefinition(kind).label;
+				const isSelected = kind === selectedKind;
 				return (
-					<Button
+					<button
 						key={kind}
-						size="sm"
-						variant="secondary"
-						className={layout === "column" ? "w-full" : ""}
+						type="button"
 						onClick={() => onAddPane(kind)}
+						className={`flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border px-3 text-xs font-medium transition-all ${
+							isSelected
+								? "text-inferay-text"
+								: "text-inferay-text-3 hover:text-inferay-text-2"
+						}`}
+						style={{
+							backgroundColor: isSelected
+								? "var(--color-inferay-surface-2)"
+								: "var(--color-inferay-surface)",
+						}}
 					>
-						{labelPrefix &&
-							kind !== "terminal" &&
-							getAgentIcon(kind, 12, "mr-1.5")}
+						{kind !== "terminal" && getAgentIcon(kind, 12)}
 						{labelPrefix ? `${labelPrefix} ${label}` : label}
-					</Button>
+					</button>
 				);
 			})}
 		</div>

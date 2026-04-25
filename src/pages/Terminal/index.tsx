@@ -124,6 +124,7 @@ type GroupAction =
 			groupId: string;
 			paneId: string;
 			path: string | null;
+			referencePaths?: string[];
 	  }
 	| { type: "setColumns"; groupId: string; columns: number }
 	| { type: "setRows"; groupId: string; rows: number }
@@ -135,6 +136,12 @@ type GroupAction =
 			groupId: string;
 			fromIndex: number;
 			toIndex: number;
+	  }
+	| {
+			type: "setPaneAgentKind";
+			groupId: string;
+			paneId: string;
+			agentKind: AgentKind;
 	  }
 	| { type: "replaceAll"; groups: TerminalGroupModel[] };
 
@@ -183,6 +190,7 @@ function groupsReducer(
 											...p,
 											cwd: action.path ?? undefined,
 											pendingCwd: false,
+											referencePaths: action.referencePaths,
 											title: getPaneTitle(
 												p.agentKind,
 												action.path ?? undefined
@@ -217,6 +225,23 @@ function groupsReducer(
 				if (moved) panes.splice(action.toIndex, 0, moved);
 				return { ...g, panes };
 			});
+		case "setPaneAgentKind":
+			return state.map((g) =>
+				g.id === action.groupId
+					? {
+							...g,
+							panes: g.panes.map((p) =>
+								p.id === action.paneId
+									? ({
+											...p,
+											agentKind: action.agentKind,
+											isClaude: action.agentKind === "claude",
+										} as TerminalPaneModel)
+									: p
+							),
+						}
+					: g
+			);
 		case "replaceAll":
 			return action.groups;
 	}
@@ -574,10 +599,23 @@ export function TerminalPage({
 			),
 		[withSelectedGroup]
 	);
-	const handleDirectorySelected = useCallback(
-		(paneId: string, path: string | null) =>
+	const handleSetPaneAgentKind = useCallback(
+		(paneId: string, agentKind: AgentKind) =>
 			withSelectedGroup((groupId) =>
-				groupsDispatch({ type: "directorySelected", groupId, paneId, path })
+				groupsDispatch({ type: "setPaneAgentKind", groupId, paneId, agentKind })
+			),
+		[withSelectedGroup]
+	);
+	const handleDirectorySelected = useCallback(
+		(paneId: string, path: string | null, referencePaths?: string[]) =>
+			withSelectedGroup((groupId) =>
+				groupsDispatch({
+					type: "directorySelected",
+					groupId,
+					paneId,
+					path,
+					referencePaths,
+				})
 			),
 		[withSelectedGroup]
 	);
@@ -673,11 +711,7 @@ export function TerminalPage({
 										Start a new terminal or agent session
 									</p>
 								</div>
-								<NewSessionButtons
-									labelPrefix="New"
-									layout="column"
-									onAddPane={handleAddPane}
-								/>
+								<NewSessionButtons onAddPane={handleAddPane} />
 							</div>
 						</div>
 					) : (
@@ -697,6 +731,8 @@ export function TerminalPage({
 							onChatRef={handleChatRef}
 							onAgentStatusChange={handleAgentStatusChange}
 							onReorderPanes={reorderPanes}
+							onAddPane={handleAddPane}
+							onSetPaneAgentKind={handleSetPaneAgentKind}
 						/>
 					)}
 				</div>
@@ -757,13 +793,7 @@ export function TerminalPage({
 									icon={<TerminalEmptyStateBrand />}
 									title="No Sessions"
 									description="Start a new terminal or agent session"
-									action={
-										<NewSessionButtons
-											labelPrefix="New"
-											layout="column"
-											onAddPane={handleAddPane}
-										/>
-									}
+									action={<NewSessionButtons onAddPane={handleAddPane} />}
 								/>
 							) : mainView === "editor" ? (
 								<EditorPage key={editorViewKey} />
@@ -778,13 +808,7 @@ export function TerminalPage({
 										}
 										title="No Panes"
 										description="Add a terminal or agent session to get started"
-										action={
-											<NewSessionButtons
-												labelPrefix="New"
-												layout="row"
-												onAddPane={handleAddPane}
-											/>
-										}
+										action={<NewSessionButtons onAddPane={handleAddPane} />}
 									/>
 								) : (
 									<TerminalGrid
@@ -803,6 +827,8 @@ export function TerminalPage({
 										onChatRef={handleChatRef}
 										onAgentStatusChange={handleAgentStatusChange}
 										onReorderPanes={reorderPanes}
+										onAddPane={handleAddPane}
+										onSetPaneAgentKind={handleSetPaneAgentKind}
 									/>
 								)
 							) : mainView === "graph" ? (
@@ -833,6 +859,8 @@ export function TerminalPage({
 									onChatRef={handleChatRef}
 									onAgentStatusChange={handleAgentStatusChange}
 									onReorderPanes={reorderPanes}
+									onAddPane={handleAddPane}
+									onSetPaneAgentKind={handleSetPaneAgentKind}
 								/>
 							)}
 							{showSettings && (

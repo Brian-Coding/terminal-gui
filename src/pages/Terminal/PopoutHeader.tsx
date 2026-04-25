@@ -445,32 +445,14 @@ export const PopoutHeader = memo(function PopoutHeader(
 					)}
 				</div>
 
-				<div className="relative" ref={refs.newMenu}>
+				<div ref={refs.newMenu}>
 					<MenuTrigger
-						onClick={() => toggleMenu("newMenu")}
+						onClick={() => onAddPane("terminal")}
 						icon={<IconPlus size={12} />}
 						label="New"
-						isOpen={menus.newMenu}
+						isOpen={false}
 						variant="primary"
 					/>
-					{menus.newMenu && (
-						<DropdownMenu className="right-0 min-w-[100px]">
-							{NEW_PANE_AGENT_KINDS.map((kind) => (
-								<button
-									type="button"
-									key={kind}
-									onClick={() => {
-										onAddPane(kind);
-										closeMenu("newMenu");
-									}}
-									className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-inferay-text-2 hover:bg-inferay-surface-2 transition-colors"
-								>
-									{getAgentIcon(kind, 12)}
-									<span>{getAgentDefinition(kind).label}</span>
-								</button>
-							))}
-						</DropdownMenu>
-					)}
 				</div>
 			</div>
 		</div>

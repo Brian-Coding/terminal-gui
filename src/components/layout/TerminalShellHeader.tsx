@@ -270,34 +270,15 @@ export function TerminalShellHeader() {
 							</div>
 						</>
 					)}
-					<div className="relative shrink-0" ref={newMenuRef}>
+					<div className="shrink-0">
 						<button
 							type="button"
-							onClick={() => setShowNewMenu((value) => !value)}
+							onClick={() => addPaneToSelectedGroup("terminal")}
 							className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-xs font-medium text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
 						>
-							<span>New</span>
 							<IconPlus size={10} />
-							<IconChevronDown
-								size={10}
-								className={`transition-transform ${showNewMenu ? "rotate-180" : ""}`}
-							/>
+							<span>New</span>
 						</button>
-						{showNewMenu && (
-							<div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-lg border border-inferay-border bg-inferay-surface shadow-lg">
-								{NEW_PANE_AGENT_KINDS.map((agentKind) => (
-									<button
-										type="button"
-										key={agentKind}
-										onClick={() => addPaneToSelectedGroup(agentKind)}
-										className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
-									>
-										{getAgentIcon(agentKind, 12, "text-inferay-text-3")}
-										<span>{getAgentDefinition(agentKind).label}</span>
-									</button>
-								))}
-							</div>
-						)}
 					</div>
 					{shellState.mainView === "editor" && (
 						<button

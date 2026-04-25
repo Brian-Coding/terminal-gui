@@ -115,6 +115,7 @@ export interface TerminalPaneModel {
 	readonly paneType?: PaneType;
 	cwd?: string;
 	pendingCwd?: boolean;
+	referencePaths?: string[];
 }
 
 export interface TerminalGroupModel {

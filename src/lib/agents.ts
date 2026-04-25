@@ -13,6 +13,19 @@ export interface ModelOption {
 	readonly detail?: string;
 }
 
+export interface ReasoningLevel {
+	readonly id: string;
+	readonly label: string;
+	readonly detail: string;
+}
+
+export const CODEX_REASONING_LEVELS: readonly ReasoningLevel[] = [
+	{ id: "low", label: "Low", detail: "Fast responses" },
+	{ id: "medium", label: "Medium", detail: "Balanced (default)" },
+	{ id: "high", label: "High", detail: "Greater depth" },
+	{ id: "extra_high", label: "Extra High", detail: "Maximum reasoning" },
+] as const;
+
 export interface AgentDefinition {
 	readonly kind: AgentKind;
 	readonly label: string;
@@ -55,9 +68,18 @@ const CLAUDE_MODELS: readonly ModelOption[] = [
 ] as const;
 
 const CODEX_MODELS: readonly ModelOption[] = [
-	{ id: "o3", label: "o3", detail: "★ Most capable" },
-	{ id: "gpt-5.2", label: "GPT-5.2", detail: "Best value" },
-	{ id: "o4-mini", label: "o4-mini", detail: "Fastest" },
+	{ id: "gpt-5.4", label: "GPT-5.4", detail: "Everyday coding" },
+	{ id: "gpt-5.2-codex", label: "GPT-5.2 Codex", detail: "★ Frontier agentic" },
+	{
+		id: "gpt-5.1-codex-max",
+		label: "GPT-5.1 Codex Max",
+		detail: "Deep reasoning",
+	},
+	{ id: "gpt-5.4-mini", label: "GPT-5.4 Mini", detail: "Fast & cheap" },
+	{ id: "gpt-5.3-codex", label: "GPT-5.3 Codex", detail: "Coding-optimized" },
+	{ id: "gpt-5.3-codex-spark", label: "GPT-5.3 Spark", detail: "Ultra-fast" },
+	{ id: "gpt-5.2", label: "GPT-5.2", detail: "Long-running agents" },
+	{ id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", detail: "Cheapest" },
 ] as const;
 
 export const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
@@ -98,7 +120,7 @@ export const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
 		supportsResume: true,
 		nativeSlashCommands: [],
 		models: CODEX_MODELS,
-		defaultModel: "o3",
+		defaultModel: "gpt-5.4",
 	},
 } as const;
 

@@ -180,6 +180,7 @@ interface ChatSession {
 	paneId: string;
 	agentKind: ChatAgentKind;
 	model?: string;
+	reasoningLevel?: string;
 	sessionId: string | null;
 	clients: Set<ServerWebSocket<any>>;
 	currentHandle: AgentHandle | null;
@@ -319,6 +320,7 @@ async function runAgent(session: ChatSession, paneId: string, text: string) {
 		paneId,
 		cwd: session.cwd,
 		model: session.model,
+		reasoningLevel: session.reasoningLevel,
 		getSessionId: () => session.sessionId,
 		updateSessionId: (nextSessionId) =>
 			updateSessionId(session, paneId, nextSessionId),
@@ -361,7 +363,8 @@ export const ChatService = {
 		cwd?: string,
 		clientSessionId?: string | null,
 		agentKind: ChatAgentKind = "claude",
-		model?: string
+		model?: string,
+		reasoningLevel?: string
 	) {
 		let session = sessions.get(paneId);
 		if (!session) {
@@ -369,6 +372,7 @@ export const ChatService = {
 				paneId,
 				agentKind,
 				model,
+				reasoningLevel,
 				sessionId: clientSessionId || null,
 				clients: new Set([ws]),
 				currentHandle: null,
@@ -384,6 +388,7 @@ export const ChatService = {
 		}
 		session.agentKind = agentKind;
 		if (model) session.model = model;
+		if (reasoningLevel !== undefined) session.reasoningLevel = reasoningLevel;
 		session.clients.add(ws);
 		if (cwd) session.cwd = cwd;
 		if (!session.sessionId && clientSessionId)

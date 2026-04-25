@@ -7,12 +7,14 @@ import {
 	useState,
 } from "react";
 import {
-	type AttachedImageInfo,
 	type AgentChatHandle,
 	AgentChatView,
-	type QueuedMessageInfo,
-	type ToolActivity,
 } from "../../components/chat/AgentChatView.tsx";
+import type {
+	AttachedImageInfo,
+	QueuedMessageInfo,
+} from "../../components/chat/agent-chat-shared.ts";
+import type { ToolActivity } from "../../components/chat/chat-agent-utils.ts";
 import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
 import { CommitGraph } from "../../components/git/CommitGraph.tsx";
 import {
@@ -70,6 +72,7 @@ interface Session {
 	paneTitle: string;
 	agentKind: "claude" | "codex";
 	cwd?: string;
+	referencePaths?: string[];
 	pendingCwd?: boolean;
 	messageCount: number;
 }
@@ -89,6 +92,7 @@ function flattenSessions(groups: TerminalGroupModel[]): Session[] {
 							paneTitle: p.title,
 							agentKind: p.agentKind,
 							cwd: p.cwd,
+							referencePaths: p.referencePaths,
 							pendingCwd: p.pendingCwd,
 							messageCount: 0,
 						},
@@ -591,6 +595,7 @@ export function EditorPage() {
 							ref={chatRef}
 							paneId={session.paneId}
 							cwd={session.cwd}
+							referencePaths={session.referencePaths}
 							agentKind={session.agentKind}
 							theme={theme}
 							onStatusChange={(id, status) => {
@@ -703,6 +708,7 @@ export function EditorPage() {
 							ref={chatRef}
 							paneId={session.paneId}
 							cwd={session.cwd}
+							referencePaths={session.referencePaths}
 							agentKind={session.agentKind}
 							theme={theme}
 							onStatusChange={(id, status) => {
