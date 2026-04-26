@@ -17,9 +17,9 @@ export function IconButton({
 	const sizes = { xs: "p-0.5", sm: "p-1", md: "p-1.5" };
 	const variants = {
 		ghost:
-			"text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-text/[0.06]",
-		danger: "text-inferay-text-3 hover:text-red-400 hover:bg-red-500/10",
-		subtle: "text-inferay-text-3 hover:text-inferay-text-2",
+			"text-inferay-muted-gray hover:text-inferay-soft-white hover:bg-inferay-white/[0.06]",
+		danger: "text-inferay-muted-gray hover:text-red-400 hover:bg-red-500/10",
+		subtle: "text-inferay-muted-gray hover:text-inferay-soft-white",
 	};
 	return (
 		<button

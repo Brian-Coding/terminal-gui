@@ -1,10 +1,10 @@
 import type { ServerWebSocket } from "bun";
 import type { ChatAgentKind } from "../../lib/agents.ts";
-import { getAgentAdapter } from "../agents/registry.ts";
 import {
 	createClaudeEnv,
 	resolveClaudeBinary,
 } from "../../lib/terminal-command.ts";
+import { getAgentAdapter } from "../agents/registry.ts";
 import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
 import { CheckpointService } from "./checkpoint.ts";
 
@@ -330,6 +330,8 @@ async function runAgent(session: ChatSession, paneId: string, text: string) {
 		},
 		emitStatus: (status, isLoading = true) =>
 			broadcast(session, { type: "chat:status", paneId, status, isLoading }),
+		emitActivity: (activity) =>
+			broadcast(session, { type: "chat:activity", paneId, activity }),
 		emitSystemMessage: (message) => {
 			session.messageBuffer.pushSystem(message);
 			broadcast(session, { type: "chat:system", paneId, message });

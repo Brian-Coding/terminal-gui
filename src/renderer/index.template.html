@@ -30,9 +30,9 @@
 						var c = localStorage.getItem("inferay-app-custom-theme");
 						if (c) {
 							colors = JSON.parse(c);
-							var bg = colors.bg;
-							if (bg) {
-								var n = parseInt(bg.replace("#", ""), 16);
+							var black = colors.black;
+							if (black) {
+								var n = parseInt(black.replace("#", ""), 16);
 								light =
 									(((n >> 16) & 255) * 299 +
 										((n >> 8) & 255) * 587 +

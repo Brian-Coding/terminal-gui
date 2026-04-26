@@ -124,12 +124,12 @@ export const TerminalGrid = memo(function TerminalGrid(
 		return (
 			<div
 				ref={containerRef}
-				className="flex bg-inferay-bg h-full overflow-x-auto overscroll-none"
+				className="flex bg-inferay-black h-full overflow-x-auto overscroll-none"
 			>
 				{panes.map((pane, idx) => (
 					<div
 						key={pane.id}
-						className="shrink-0 h-full overflow-hidden border-r border-inferay-border transition-all"
+						className="shrink-0 h-full overflow-hidden border-r border-inferay-gray-border transition-all"
 						style={{ width: 400, ...cellStyle(idx) }}
 						onDragOver={(e) => handleDragOver(e, idx)}
 						onDrop={(e) => handleDrop(e, idx)}
@@ -158,7 +158,7 @@ export const TerminalGrid = memo(function TerminalGrid(
 	return (
 		<div
 			ref={containerRef}
-			className="grid bg-inferay-bg"
+			className="grid bg-inferay-black"
 			style={{
 				gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
 				gridTemplateRows: `repeat(${totalGridRows}, ${rowHeight}px)`,
@@ -167,7 +167,7 @@ export const TerminalGrid = memo(function TerminalGrid(
 			{panes.map((pane, idx) => (
 				<div
 					key={pane.id}
-					className="overflow-hidden border-r border-b border-inferay-border transition-all"
+					className="overflow-hidden border-r border-b border-inferay-gray-border transition-all"
 					style={cellStyle(idx)}
 					onDragOver={(e) => handleDragOver(e, idx)}
 					onDrop={(e) => handleDrop(e, idx)}

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { parseInlineTokens, parseMarkdownBlocks } from "./chat-text.ts";
 import { IconCheck, IconCopy, IconHelpCircle, IconSend } from "../ui/Icons.tsx";
+import { parseInlineTokens, parseMarkdownBlocks } from "./chat-text.ts";
 
 type ChatTheme = {
 	bg: string;
@@ -39,12 +39,14 @@ function CopyButton({
 			onClick={handleCopy}
 			className={`flex items-center justify-center h-5 w-5 rounded transition-colors ${className ?? ""}`}
 			style={{
-				backgroundColor: theme ? theme.surface : "var(--color-inferay-surface)",
+				backgroundColor: theme
+					? theme.surface
+					: "var(--color-inferay-dark-gray)",
 				color: copied
 					? "#22c55e"
 					: theme
 						? theme.fgDim
-						: "var(--color-inferay-text-3)",
+						: "var(--color-inferay-muted-gray)",
 			}}
 			title={copied ? "Copied!" : "Copy"}
 		>
@@ -223,9 +225,8 @@ export function Markdown({
 							key={blockKey}
 							className="overflow-x-auto rounded border text-[10px]"
 							style={{
-								borderColor: theme?.border ?? "var(--color-inferay-border)",
-								backgroundColor:
-									theme?.surface ?? "var(--color-inferay-surface)",
+								borderColor: "var(--color-inferay-gray-border)",
+								backgroundColor: "var(--color-inferay-dark-gray)",
 							}}
 						>
 							<table className="w-full border-collapse">
@@ -236,10 +237,10 @@ export function Markdown({
 												key={hi}
 												className="px-2 py-1 text-left font-semibold whitespace-nowrap"
 												style={{
-													borderBottom: `1px solid ${theme?.border ?? "var(--color-inferay-border)"}`,
+													borderBottom:
+														"1px solid var(--color-inferay-gray-border)",
 													color: theme?.fg ?? "#e5e5e5",
-													backgroundColor:
-														theme?.surface ?? "var(--color-inferay-surface)",
+													backgroundColor: "var(--color-inferay-dark-gray)",
 												}}
 											>
 												{h}
@@ -257,7 +258,7 @@ export function Markdown({
 													style={{
 														borderBottom:
 															ri < b.rows.length - 1
-																? `1px solid ${theme?.border ?? "var(--color-inferay-border)"}`
+																? "1px solid var(--color-inferay-gray-border)"
 																: "none",
 														color: theme?.fg ?? "#e5e5e5",
 													}}
@@ -319,11 +320,11 @@ export function AskUserQuestionCard({
 	);
 	const [submitted, setSubmitted] = useState(false);
 	const accentColor = theme?.cursor ?? "#007AFF";
-	const surfaceBg = theme?.surface ?? "rgba(255,255,255,0.04)";
-	const borderClr = theme?.border ?? "rgba(255,255,255,0.08)";
-	const fgColor = theme?.fg ?? "#e5e5e5";
-	const fgMuted = theme?.fgMuted ?? "#e5e5e588";
-	const fgDim = theme?.fgDim ?? "#e5e5e555";
+	const surfaceBg = theme?.surface ?? "var(--color-inferay-dark-gray)";
+	const borderClr = theme?.border ?? "var(--color-inferay-gray-border)";
+	const fgColor = theme?.fg ?? "var(--color-inferay-white)";
+	const fgMuted = theme?.fgMuted ?? "var(--color-inferay-soft-white)";
+	const fgDim = theme?.fgDim ?? "var(--color-inferay-muted-gray)";
 
 	const toggleOption = useCallback(
 		(qi: number, oi: number, multiSelect: boolean) => {

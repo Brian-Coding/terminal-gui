@@ -5,8 +5,8 @@ import { PROJECT_ROOT } from "../lib/path-utils.ts";
 import { buildApiRoutes } from "./routes/api.ts";
 import { handlePromptRequest } from "./routes/prompts.ts";
 import { TerminalService } from "./routes/terminal.ts";
+import { ChatService } from "./services/agent-chat.ts";
 import { CheckpointService } from "./services/checkpoint.ts";
-import { ChatService } from "./services/claude-chat.ts";
 import { PidTracker } from "./services/pid-tracker.ts";
 import { websocketHandler } from "./ws.ts";
 

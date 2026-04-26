@@ -218,7 +218,7 @@ export function InlineDirectoryPicker({
 		<div className="relative w-full" ref={containerRef}>
 			{/* Results popout — above the input */}
 			{showResults && itemCount > 0 && (
-				<div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-inferay-border bg-inferay-surface shadow-lg overflow-hidden z-10">
+				<div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray shadow-lg overflow-hidden z-10">
 					<div className="max-h-[180px] overflow-y-auto">
 						{displayList.map((pick, i) => (
 							<button
@@ -228,12 +228,12 @@ export function InlineDirectoryPicker({
 								onClick={() => handleItemClick(pick.path)}
 								className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left transition-colors ${
 									i === selectedIndex
-										? "bg-inferay-accent/15 text-inferay-text"
-										: "text-inferay-text-2 hover:bg-inferay-surface-2"
+										? "bg-inferay-accent/15 text-inferay-white"
+										: "text-inferay-soft-white hover:bg-inferay-gray"
 								}`}
 							>
 								<span
-									className={`shrink-0 ${i === selectedIndex ? "text-inferay-accent" : "text-inferay-text-3"}`}
+									className={`shrink-0 ${i === selectedIndex ? "text-inferay-accent" : "text-inferay-muted-gray"}`}
 								>
 									{pick.isGitRepo ? (
 										<IconGitBranch size={12} />
@@ -245,20 +245,20 @@ export function InlineDirectoryPicker({
 									<span className="block truncate text-xs font-medium">
 										{pick.name}
 									</span>
-									<span className="block truncate text-[9px] text-inferay-text-3">
+									<span className="block truncate text-[9px] text-inferay-muted-gray">
 										{shortenPath(pick.path)}
 									</span>
 								</div>
 								<IconChevronRight
 									size={10}
-									className="text-inferay-text-3 shrink-0"
+									className="text-inferay-muted-gray shrink-0"
 								/>
 							</button>
 						))}
 					</div>
 					{loading && (
 						<div className="absolute right-2 top-2">
-							<div className="w-3 h-3 border border-inferay-text-3 border-t-transparent rounded-full animate-spin" />
+							<div className="w-3 h-3 border border-inferay-muted-gray border-t-transparent rounded-full animate-spin" />
 						</div>
 					)}
 				</div>
@@ -271,14 +271,14 @@ export function InlineDirectoryPicker({
 						{selectedPaths.map((p, i) => (
 							<span
 								key={p}
-								className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-inferay-surface-2 text-inferay-text-2 border border-inferay-border"
+								className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-inferay-gray text-inferay-soft-white border border-inferay-gray-border"
 							>
 								{i === 0 ? "● " : ""}
 								{nameFromPath(p)}
 								<button
 									type="button"
 									onClick={() => togglePath(p)}
-									className="hover:text-inferay-text transition-colors"
+									className="hover:text-inferay-white transition-colors"
 								>
 									<IconX size={8} />
 								</button>
@@ -289,8 +289,8 @@ export function InlineDirectoryPicker({
 			)}
 
 			{/* Input — styled like chat message input */}
-			<div className="flex items-center gap-2 rounded-xl border border-inferay-border bg-inferay-surface px-3 py-2">
-				<span className="shrink-0 text-inferay-text-3">
+			<div className="flex items-center gap-2 rounded-xl border border-inferay-gray-border bg-inferay-dark-gray px-3 py-2">
+				<span className="shrink-0 text-inferay-muted-gray">
 					<IconFolder size={14} />
 				</span>
 				<input
@@ -306,13 +306,13 @@ export function InlineDirectoryPicker({
 					autoCorrect="off"
 					autoCapitalize="off"
 					spellCheck={false}
-					className="flex-1 bg-transparent text-[13px] text-inferay-text placeholder:text-inferay-text-3 outline-none"
+					className="flex-1 bg-transparent text-[13px] text-inferay-white placeholder:text-inferay-muted-gray outline-none"
 				/>
 				{multiSelect && selectedPaths.length > 0 && (
 					<button
 						type="button"
 						onClick={handleStart}
-						className="shrink-0 px-2 py-0.5 rounded-md text-[10px] font-medium bg-inferay-surface-2 text-inferay-text-2 hover:bg-inferay-surface-3 transition-colors border border-inferay-border"
+						className="shrink-0 px-2 py-0.5 rounded-md text-[10px] font-medium bg-inferay-gray text-inferay-soft-white hover:bg-inferay-light-gray transition-colors border border-inferay-gray-border"
 					>
 						Start{selectedPaths.length > 1 ? ` (${selectedPaths.length})` : ""}
 					</button>

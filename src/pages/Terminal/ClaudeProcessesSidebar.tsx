@@ -48,15 +48,15 @@ export const ClaudeProcessesSidebar = memo(function ClaudeProcessesSidebar({
 					? "text-red-400"
 					: processes.length > 0
 						? "text-amber-400"
-						: "text-inferay-text-3"
+						: "text-inferay-muted-gray"
 			}
 			expanded={expanded}
 			onToggle={onToggle}
 			emptyMessage="No Claude processes running"
 		>
 			{processes.length > 0 && (
-				<div className="flex items-center justify-between px-2 py-1 mb-1 rounded-md bg-inferay-surface/50">
-					<span className="text-[9px] text-inferay-text-3">
+				<div className="flex items-center justify-between px-2 py-1 mb-1 rounded-md bg-inferay-dark-gray/50">
+					<span className="text-[9px] text-inferay-muted-gray">
 						{processes.length} process{processes.length !== 1 ? "es" : ""} ·{" "}
 						{formatRss(totalRss)}
 					</span>
@@ -74,7 +74,7 @@ export const ClaudeProcessesSidebar = memo(function ClaudeProcessesSidebar({
 			{processes.map((p) => (
 				<div
 					key={p.pid}
-					className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors mb-0.5 hover:bg-inferay-surface group"
+					className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors mb-0.5 hover:bg-inferay-dark-gray group"
 				>
 					<div className="shrink-0">
 						<IconCircle
@@ -84,12 +84,12 @@ export const ClaudeProcessesSidebar = memo(function ClaudeProcessesSidebar({
 					</div>
 					<div className="min-w-0 flex-1">
 						<p
-							className="truncate text-[11px] font-medium text-inferay-text"
+							className="truncate text-[11px] font-medium text-inferay-white"
 							title={p.cwd || `PID ${p.pid}`}
 						>
 							{cwdLabel(p.cwd) || `PID ${p.pid}`}
 						</p>
-						<p className="truncate text-[9px] text-inferay-text-3">
+						<p className="truncate text-[9px] text-inferay-muted-gray">
 							{p.cpu}% CPU · {formatRss(p.rss)} · {formatElapsed(p.elapsed)}
 						</p>
 					</div>

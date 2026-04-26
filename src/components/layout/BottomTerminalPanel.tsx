@@ -325,11 +325,11 @@ export function BottomTerminalPanel() {
 	if (state.terminals.length === 0 && !state.open) {
 		// Just the bar with a "New Terminal" button
 		return (
-			<div className="flex h-10 shrink-0 items-center gap-2 border-t border-inferay-border bg-inferay-bg px-3">
+			<div className="flex h-10 shrink-0 items-center gap-2 border-t border-inferay-gray-border bg-inferay-black px-3">
 				<button
 					type="button"
 					onClick={addTerminal}
-					className="flex h-6 items-center gap-1.5 rounded-md border border-inferay-border bg-inferay-surface px-2 text-[11px] font-medium text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
+					className="flex h-6 items-center gap-1.5 rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-2 text-[11px] font-medium text-inferay-soft-white transition-colors hover:bg-inferay-gray"
 				>
 					<IconTerminal size={11} />
 					<span>Terminal</span>
@@ -344,12 +344,12 @@ export function BottomTerminalPanel() {
 			{/* Resize handle */}
 			{state.open && (
 				<div
-					className="h-1 cursor-row-resize bg-inferay-border/50 hover:bg-inferay-accent/30 transition-colors"
+					className="h-1 cursor-row-resize bg-inferay-gray-border/50 hover:bg-inferay-accent/30 transition-colors"
 					onMouseDown={handleResizeStart}
 				/>
 			)}
 			{/* Tab bar - same height as top bar concept */}
-			<div className="flex h-10 shrink-0 items-center gap-0.5 border-t border-inferay-border bg-inferay-bg px-2">
+			<div className="flex h-10 shrink-0 items-center gap-0.5 border-t border-inferay-gray-border bg-inferay-black px-2">
 				{state.terminals.map((term, idx) => (
 					<div
 						key={term.id}
@@ -360,8 +360,8 @@ export function BottomTerminalPanel() {
 						onDrop={(e) => handleTabDrop(e, idx)}
 						className={`group flex items-center gap-1.5 rounded-md px-2 h-6 text-[11px] font-medium cursor-grab active:cursor-grabbing select-none transition-all ${
 							state.selectedId === term.id && state.open
-								? "bg-inferay-surface-2 text-inferay-text"
-								: "text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2"
+								? "bg-inferay-gray text-inferay-white"
+								: "text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 						} ${
 							dragOverTabIndex === idx && dragTabIndex !== idx
 								? "ring-1 ring-inferay-accent/40"
@@ -388,7 +388,7 @@ export function BottomTerminalPanel() {
 								e.stopPropagation();
 								closeTerminal(term.id);
 							}}
-							className="flex items-center justify-center h-3.5 w-3.5 rounded opacity-0 group-hover:opacity-100 transition-opacity text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+							className="flex items-center justify-center h-3.5 w-3.5 rounded opacity-0 group-hover:opacity-100 transition-opacity text-inferay-muted-gray hover:text-red-400 hover:bg-red-500/15"
 						>
 							<IconX size={7} />
 						</button>
@@ -397,7 +397,7 @@ export function BottomTerminalPanel() {
 				<button
 					type="button"
 					onClick={addTerminal}
-					className="flex items-center justify-center h-6 w-6 rounded-md text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2 transition-colors"
+					className="flex items-center justify-center h-6 w-6 rounded-md text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white transition-colors"
 					title="New Terminal"
 				>
 					<IconPlus size={10} />
@@ -406,7 +406,7 @@ export function BottomTerminalPanel() {
 			{/* Terminal panel */}
 			{state.open && (
 				<div
-					className="bg-inferay-bg overflow-hidden"
+					className="bg-inferay-black overflow-hidden"
 					style={{ height: state.panelHeight }}
 				>
 					{state.terminals.map((term) => (

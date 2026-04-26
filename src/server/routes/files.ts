@@ -1,8 +1,19 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, readdir, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import { tryRoute } from "../../lib/route-helpers.ts";
+
+const IMAGE_EXTENSIONS = new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".webp",
+	".svg",
+	".bmp",
+	".ico",
+]);
 
 const TMP_DIR = resolve(PROJECT_ROOT, "data/.tmp");
 
@@ -73,6 +84,51 @@ export function fileRoutes() {
 				const filePath = resolve(TMP_DIR, `${Date.now()}-${safeName}`);
 				await Bun.write(filePath, file);
 				return Response.json({ path: filePath });
+			}),
+		},
+
+		"/api/images": {
+			GET: tryRoute(async () => {
+				await mkdir(TMP_DIR, { recursive: true });
+				const entries = await readdir(TMP_DIR);
+				const images: {
+					name: string;
+					path: string;
+					timestamp: number;
+					size: number;
+				}[] = [];
+				for (const entry of entries) {
+					const ext = entry.substring(entry.lastIndexOf(".")).toLowerCase();
+					if (!IMAGE_EXTENSIONS.has(ext)) continue;
+					const full = resolve(TMP_DIR, entry);
+					const info = await stat(full);
+					const dashIdx = entry.indexOf("-");
+					const ts =
+						dashIdx > 0 ? Number(entry.substring(0, dashIdx)) : info.mtimeMs;
+					images.push({
+						name: dashIdx > 0 ? entry.substring(dashIdx + 1) : entry,
+						path: full,
+						timestamp: ts,
+						size: info.size,
+					});
+				}
+				images.sort((a, b) => b.timestamp - a.timestamp);
+				return Response.json({ images });
+			}),
+		},
+
+		"/api/delete-temp": {
+			DELETE: tryRoute(async (req) => {
+				const url = new URL(req.url);
+				const filePath = url.searchParams.get("path");
+				if (!filePath)
+					return Response.json({ error: "No path provided" }, { status: 400 });
+				const resolved = resolve(filePath);
+				if (!resolved.startsWith(TMP_DIR))
+					return Response.json({ error: "Access denied" }, { status: 403 });
+				const { unlink } = await import("node:fs/promises");
+				await unlink(resolved);
+				return Response.json({ ok: true });
 			}),
 		},
 

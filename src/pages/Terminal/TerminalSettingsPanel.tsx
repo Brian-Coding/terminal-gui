@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { fetchJsonOr } from "../../lib/fetch-json.ts";
+import { IconX } from "../../components/ui/Icons.tsx";
 import {
 	APP_THEMES,
 	type AppThemeId,
@@ -8,6 +8,7 @@ import {
 	mapAppThemeToTerminalTheme,
 	saveAppThemeId,
 } from "../../lib/app-theme.ts";
+import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import {
 	type CustomThemeColors,
 	type HexColor,
@@ -17,7 +18,6 @@ import {
 	saveTerminalState,
 	type ThemeId,
 } from "../../lib/terminal-utils.ts";
-import { IconX } from "../../components/ui/Icons.tsx";
 
 interface TerminalSettingsPanelProps {
 	themeId: ThemeId;
@@ -40,10 +40,10 @@ function ColorInput({
 				type="color"
 				value={value}
 				onChange={(e) => onChange(e.target.value as HexColor)}
-				className="h-7 w-7 cursor-pointer rounded border border-inferay-border bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded-sm [&::-webkit-color-swatch]:border-none"
+				className="h-7 w-7 cursor-pointer rounded border border-inferay-gray-border bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0.5 [&::-webkit-color-swatch]:rounded-sm [&::-webkit-color-swatch]:border-none"
 			/>
-			<span className="text-[10px] text-inferay-text-3">{label}</span>
-			<span className="ml-auto font-mono text-[9px] text-inferay-text-3">
+			<span className="text-[10px] text-inferay-muted-gray">{label}</span>
+			<span className="ml-auto font-mono text-[9px] text-inferay-muted-gray">
 				{value}
 			</span>
 		</label>
@@ -59,31 +59,31 @@ function ThemeOrb({
 	theme: {
 		id: string;
 		name: string;
-		colors: { accent: string; bg: string; surface: string };
+		colors: { accent: string; black: string; darkGray: string };
 	};
 	selected: boolean;
 	onClick: () => void;
 	dashed?: boolean;
 }) {
-	const { accent, bg, surface } = theme.colors;
+	const { accent, black, darkGray } = theme.colors;
 	return (
 		<button
 			type="button"
 			onClick={onClick}
 			className={`group flex flex-col items-center gap-1.5 rounded-xl border p-2 transition-all ${
 				selected
-					? "border-inferay-border-bold bg-inferay-surface/40"
-					: "border-transparent hover:bg-inferay-surface-2"
+					? "border-inferay-gray-border-bold bg-inferay-dark-gray/40"
+					: "border-transparent hover:bg-inferay-gray"
 			}`}
 		>
 			<div
-				className={`relative h-12 w-12 rounded-full ${dashed ? "border border-dashed border-inferay-border" : ""}`}
-				style={{ backgroundColor: bg }}
+				className={`relative h-12 w-12 rounded-full ${dashed ? "border border-dashed border-inferay-gray-border" : ""}`}
+				style={{ backgroundColor: black }}
 			>
 				<div
 					className="absolute inset-0 rounded-full transition-transform group-hover:scale-105"
 					style={{
-						background: `radial-gradient(circle at 35% 35%, ${accent}ee, ${accent}88 40%, ${surface}44 70%, transparent 100%)`,
+						background: `radial-gradient(circle at 35% 35%, ${accent}ee, ${accent}88 40%, ${darkGray}44 70%, transparent 100%)`,
 						boxShadow: selected
 							? `0 0 16px 2px ${accent}60, inset 0 0 8px ${accent}30`
 							: `0 0 10px 1px ${accent}25`,
@@ -102,7 +102,7 @@ function ThemeOrb({
 				/>
 			</div>
 			<span
-				className={`text-[9px] leading-none ${selected ? "font-semibold text-inferay-text" : "text-inferay-text-3"}`}
+				className={`text-[9px] leading-none ${selected ? "font-semibold text-inferay-white" : "text-inferay-muted-gray"}`}
 			>
 				{theme.name}
 			</span>
@@ -163,10 +163,10 @@ function SearchFoldersSection() {
 
 	return (
 		<div>
-			<h4 className="mb-2 text-[10px] font-semibold text-inferay-text-2">
+			<h4 className="mb-2 text-[10px] font-semibold text-inferay-soft-white">
 				SEARCH FOLDERS
 			</h4>
-			<p className="mb-2 text-[9px] text-inferay-text-3">
+			<p className="mb-2 text-[9px] text-inferay-muted-gray">
 				Directories to scan when searching for projects. Use ~/path for
 				home-relative paths.
 			</p>
@@ -174,15 +174,15 @@ function SearchFoldersSection() {
 				{folders.map((folder, idx) => (
 					<div
 						key={folder}
-						className="flex items-center gap-1.5 rounded px-1.5 py-0.5 group hover:bg-inferay-surface-2"
+						className="flex items-center gap-1.5 rounded px-1.5 py-0.5 group hover:bg-inferay-gray"
 					>
-						<span className="flex-1 truncate font-mono text-[10px] text-inferay-text-2">
+						<span className="flex-1 truncate font-mono text-[10px] text-inferay-soft-white">
 							{folder}
 						</span>
 						<button
 							type="button"
 							onClick={() => removeFolder(idx)}
-							className="opacity-0 group-hover:opacity-100 flex items-center justify-center h-4 w-4 rounded transition-opacity text-inferay-text-3 hover:text-red-400"
+							className="opacity-0 group-hover:opacity-100 flex items-center justify-center h-4 w-4 rounded transition-opacity text-inferay-muted-gray hover:text-red-400"
 							title="Remove"
 						>
 							<IconX size={8} />
@@ -193,7 +193,7 @@ function SearchFoldersSection() {
 			<button
 				type="button"
 				onClick={browseFolder}
-				className="w-full rounded border border-dashed border-inferay-border bg-inferay-bg px-2 py-1.5 text-[10px] text-inferay-text-2 hover:bg-inferay-surface-2 transition-colors mb-1.5"
+				className="w-full rounded border border-dashed border-inferay-gray-border bg-inferay-black px-2 py-1.5 text-[10px] text-inferay-soft-white hover:bg-inferay-gray transition-colors mb-1.5"
 			>
 				+ Browse Folder
 			</button>
@@ -207,13 +207,13 @@ function SearchFoldersSection() {
 						if (e.key === "Enter") addFolder();
 					}}
 					placeholder="~/path/to/folder"
-					className="flex-1 rounded border border-inferay-border bg-inferay-bg px-2 py-1 text-[10px] text-inferay-text-2 outline-none placeholder:text-inferay-text-3"
+					className="flex-1 rounded border border-inferay-gray-border bg-inferay-black px-2 py-1 text-[10px] text-inferay-soft-white outline-none placeholder:text-inferay-muted-gray"
 				/>
 				<button
 					type="button"
 					onClick={addFolder}
 					disabled={!newFolder.trim()}
-					className="rounded border border-inferay-border bg-inferay-bg px-2 py-1 text-[10px] text-inferay-text-2 hover:bg-inferay-surface-2 disabled:opacity-30"
+					className="rounded border border-inferay-gray-border bg-inferay-black px-2 py-1 text-[10px] text-inferay-soft-white hover:bg-inferay-gray disabled:opacity-30"
 				>
 					Add
 				</button>
@@ -273,18 +273,18 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 		<>
 			<div
 				role="presentation"
-				className="fixed inset-0 bg-inferay-bg/30 z-[50]"
+				className="fixed inset-0 bg-inferay-black/30 z-[50]"
 				onClick={onClose}
 			/>
-			<div className="fixed right-3 top-8 z-[51] w-[330px] max-h-[calc(100vh-3rem)] overflow-y-auto rounded-xl border border-inferay-border bg-inferay-bg shadow-2xl">
-				<div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 border-b border-inferay-border bg-inferay-bg rounded-t-xl">
-					<span className="text-[10px] font-bold tracking-widest text-inferay-text-3">
+			<div className="fixed right-3 top-8 z-[51] w-[330px] max-h-[calc(100vh-3rem)] overflow-y-auto rounded-xl border border-inferay-gray-border bg-inferay-black shadow-2xl">
+				<div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5 border-b border-inferay-gray-border bg-inferay-black rounded-t-xl">
+					<span className="text-[10px] font-bold tracking-widest text-inferay-muted-gray">
 						THEME
 					</span>
 					<button
 						type="button"
 						onClick={onClose}
-						className="text-[10px] font-bold text-inferay-text-3 hover:text-inferay-text"
+						className="text-[10px] font-bold text-inferay-muted-gray hover:text-inferay-white"
 					>
 						x
 					</button>
@@ -306,8 +306,8 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 									name: "Custom",
 									colors: {
 										accent: custom.cursor,
-										surface: custom.bg,
-										bg: custom.bg,
+										darkGray: custom.bg,
+										black: custom.bg,
 									},
 								}}
 								selected={isCustom}
@@ -318,9 +318,9 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 					</div>
 					{isCustom && (
 						<>
-							<div className="h-px bg-inferay-border" />
+							<div className="h-px bg-inferay-gray-border" />
 							<div>
-								<h4 className="mb-3 text-[10px] font-semibold text-inferay-text-2">
+								<h4 className="mb-3 text-[10px] font-semibold text-inferay-soft-white">
 									CUSTOM COLORS
 								</h4>
 								<div className="space-y-2.5">
@@ -346,7 +346,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 									/>
 								</div>
 								<div
-									className="mt-3 rounded-md p-3 font-mono text-[11px] leading-relaxed border border-inferay-border"
+									className="mt-3 rounded-md p-3 font-mono text-[11px] leading-relaxed border border-inferay-gray-border"
 									style={{ backgroundColor: custom.bg, color: custom.fg }}
 								>
 									<span style={{ color: custom.cursor }}>$</span> terminal-gui
@@ -359,7 +359,7 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 							</div>
 						</>
 					)}
-					<div className="h-px bg-inferay-border" />
+					<div className="h-px bg-inferay-gray-border" />
 					<SearchFoldersSection />
 				</div>
 			</div>

@@ -23,12 +23,12 @@ function loadMermaid(): Promise<unknown> {
 				themeVariables: {
 					darkMode: true,
 					background: "transparent",
-					primaryColor: "rgba(255,255,255,0.08)",
-					primaryTextColor: "rgba(255,255,255,0.7)",
-					primaryBorderColor: "rgba(255,255,255,0.15)",
-					lineColor: "rgba(255,255,255,0.3)",
-					secondaryColor: "rgba(255,255,255,0.05)",
-					tertiaryColor: "rgba(255,255,255,0.03)",
+					primaryColor: "var(--color-inferay-gray-border)",
+					primaryTextColor: "var(--color-inferay-soft-white)",
+					primaryBorderColor: "var(--color-inferay-gray-border-bold)",
+					lineColor: "var(--color-inferay-muted-gray)",
+					secondaryColor: "var(--color-inferay-gray)",
+					tertiaryColor: "var(--color-inferay-dark-gray)",
 					fontFamily: '"JetBrains Mono", "SF Mono", Menlo, Consolas, monospace',
 					fontSize: "11px",
 				},
@@ -70,7 +70,7 @@ function MermaidBlock({ code }: { code: string }) {
 
 	if (error)
 		return (
-			<div className="rounded-md border border-inferay-border bg-inferay-surface p-3">
+			<div className="rounded-md border border-inferay-gray-border bg-inferay-dark-gray p-3">
 				<pre className="text-[10px] text-red-400 whitespace-pre-wrap">
 					{error}
 				</pre>
@@ -80,7 +80,7 @@ function MermaidBlock({ code }: { code: string }) {
 	return (
 		<div
 			ref={ref}
-			className="flex items-center justify-center rounded-md border border-inferay-border bg-inferay-surface p-4 overflow-x-auto"
+			className="flex items-center justify-center rounded-md border border-inferay-gray-border bg-inferay-dark-gray p-4 overflow-x-auto"
 		/>
 	);
 }
@@ -127,14 +127,14 @@ function InlineToken({ token }: { token: MdInlineToken }) {
 
 		case "code":
 			return (
-				<code className="rounded bg-inferay-surface border border-inferay-border px-1.5 py-0.5 text-[10px] font-diff text-inferay-text">
+				<code className="rounded bg-inferay-dark-gray border border-inferay-gray-border px-1.5 py-0.5 text-[10px] font-diff text-inferay-white">
 					{token.text}
 				</code>
 			);
 
 		case "bold-italic":
 			return (
-				<strong className="font-bold text-inferay-text">
+				<strong className="font-bold text-inferay-white">
 					<em className="italic">
 						{token.children ? (
 							<InlineTokens tokens={token.children} />
@@ -147,7 +147,7 @@ function InlineToken({ token }: { token: MdInlineToken }) {
 
 		case "bold":
 			return (
-				<strong className="font-semibold text-inferay-text">
+				<strong className="font-semibold text-inferay-white">
 					{token.children ? (
 						<InlineTokens tokens={token.children} />
 					) : (
@@ -158,7 +158,7 @@ function InlineToken({ token }: { token: MdInlineToken }) {
 
 		case "italic":
 			return (
-				<em className="italic text-inferay-text-2">
+				<em className="italic text-inferay-soft-white">
 					{token.children ? (
 						<InlineTokens tokens={token.children} />
 					) : (
@@ -169,7 +169,7 @@ function InlineToken({ token }: { token: MdInlineToken }) {
 
 		case "strikethrough":
 			return (
-				<del className="line-through text-inferay-text-3">
+				<del className="line-through text-inferay-muted-gray">
 					{token.children ? (
 						<InlineTokens tokens={token.children} />
 					) : (
@@ -188,17 +188,17 @@ function Inline({ text }: { text: string }) {
 }
 
 const HEADING_CLASSES: Record<number, string> = {
-	1: "text-[18px] font-bold text-inferay-text pb-2 mt-6 first:mt-0 border-b border-inferay-border",
-	2: "text-[15px] font-semibold text-inferay-text pb-1.5 mt-5 first:mt-0 border-b border-inferay-border",
-	3: "text-[13px] font-semibold text-inferay-text mt-4 first:mt-0",
-	4: "text-[12px] font-semibold text-inferay-text mt-3 first:mt-0",
-	5: "text-[11px] font-semibold text-inferay-text mt-2 first:mt-0",
-	6: "text-[10px] font-semibold text-inferay-text-2 uppercase tracking-wide mt-2 first:mt-0",
+	1: "text-[18px] font-bold text-inferay-white pb-2 mt-6 first:mt-0 border-b border-inferay-gray-border",
+	2: "text-[15px] font-semibold text-inferay-white pb-1.5 mt-5 first:mt-0 border-b border-inferay-gray-border",
+	3: "text-[13px] font-semibold text-inferay-white mt-4 first:mt-0",
+	4: "text-[12px] font-semibold text-inferay-white mt-3 first:mt-0",
+	5: "text-[11px] font-semibold text-inferay-white mt-2 first:mt-0",
+	6: "text-[10px] font-semibold text-inferay-soft-white uppercase tracking-wide mt-2 first:mt-0",
 };
 
 function ListItemRenderer({ item }: { item: MdListItem }) {
 	return (
-		<li className="text-[11px] text-inferay-text-2 leading-relaxed">
+		<li className="text-[11px] text-inferay-soft-white leading-relaxed">
 			{item.checked !== undefined && (
 				<span className="mr-1.5 inline-flex">
 					{item.checked ? (
@@ -206,7 +206,7 @@ function ListItemRenderer({ item }: { item: MdListItem }) {
 							✓
 						</span>
 					) : (
-						<span className="inline-flex h-3.5 w-3.5 rounded border border-inferay-border" />
+						<span className="inline-flex h-3.5 w-3.5 rounded border border-inferay-gray-border" />
 					)}
 				</span>
 			)}
@@ -238,12 +238,12 @@ function BlockRenderer({ block }: { block: MdBlock }) {
 			return (
 				<div className="relative group">
 					{block.lang && (
-						<span className="absolute top-1.5 right-2 text-[8px] font-diff uppercase tracking-wider text-inferay-text-3/40">
+						<span className="absolute top-1.5 right-2 text-[8px] font-diff uppercase tracking-wider text-inferay-muted-gray/40">
 							{block.lang}
 						</span>
 					)}
-					<pre className="overflow-x-auto rounded-md border border-inferay-border bg-inferay-surface p-3">
-						<code className="text-[10px] font-diff text-inferay-text-2 leading-[18px] whitespace-pre">
+					<pre className="overflow-x-auto rounded-md border border-inferay-gray-border bg-inferay-dark-gray p-3">
+						<code className="text-[10px] font-diff text-inferay-soft-white leading-[18px] whitespace-pre">
 							{block.content}
 						</code>
 					</pre>
@@ -262,19 +262,19 @@ function BlockRenderer({ block }: { block: MdBlock }) {
 		}
 
 		case "hr":
-			return <hr className="border-inferay-border my-4" />;
+			return <hr className="border-inferay-gray-border my-4" />;
 
 		case "table":
 			if (!block.rows?.length) return null;
 			return (
-				<div className="overflow-x-auto rounded-md border border-inferay-border">
+				<div className="overflow-x-auto rounded-md border border-inferay-gray-border">
 					<table className="w-full text-[10px]">
 						<thead>
-							<tr className="border-b border-inferay-border bg-inferay-surface">
+							<tr className="border-b border-inferay-gray-border bg-inferay-dark-gray">
 								{block.rows[0]?.map((cell, j) => (
 									<th
 										key={j}
-										className="px-3 py-2 text-left font-medium text-inferay-text whitespace-nowrap"
+										className="px-3 py-2 text-left font-medium text-inferay-white whitespace-nowrap"
 									>
 										<Inline text={cell} />
 									</th>
@@ -285,10 +285,10 @@ function BlockRenderer({ block }: { block: MdBlock }) {
 							{block.rows.slice(1).map((row, k) => (
 								<tr
 									key={k}
-									className="border-b border-inferay-border/50 last:border-0"
+									className="border-b border-inferay-gray-border/50 last:border-0"
 								>
 									{row.map((cell, j) => (
-										<td key={j} className="px-3 py-1.5 text-inferay-text-2">
+										<td key={j} className="px-3 py-1.5 text-inferay-soft-white">
 											<Inline text={cell} />
 										</td>
 									))}
@@ -328,7 +328,7 @@ function BlockRenderer({ block }: { block: MdBlock }) {
 
 		case "paragraph":
 			return (
-				<p className="text-[11px] text-inferay-text-2 leading-relaxed">
+				<p className="text-[11px] text-inferay-soft-white leading-relaxed">
 					<Inline text={block.content} />
 				</p>
 			);

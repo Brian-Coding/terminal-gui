@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from "react";
+import { IconChevronDown, IconClock } from "../ui/Icons.tsx";
 import { GroupedEditDiff, MiniEditDiff } from "./ChatEditDiff.tsx";
 import { AskUserQuestionCard, Markdown } from "./ChatRichContent.tsx";
 import { renderTextPills } from "./chat-token-decorators.tsx";
-import { IconClock, IconChevronDown } from "../ui/Icons.tsx";
 
 type ChatTheme = {
 	bg: string;
@@ -131,7 +131,13 @@ function ToolOutputHighlight({
 			if (parsed.file_path && parsed.new_string !== undefined) {
 				return (
 					<>
-						<span style={{ color: theme?.fgDim ?? "#666" }}>{fileName}</span>
+						<span
+							style={{
+								color: theme?.fgDim ?? "var(--color-inferay-muted-gray)",
+							}}
+						>
+							{fileName}
+						</span>
 						{"\n"}
 						<span style={accentStyle}>{parsed.new_string}</span>
 					</>
@@ -148,7 +154,13 @@ function ToolOutputHighlight({
 						: parsed.content;
 				return (
 					<>
-						<span style={{ color: theme?.fgDim ?? "#666" }}>{fileName}</span>
+						<span
+							style={{
+								color: theme?.fgDim ?? "var(--color-inferay-muted-gray)",
+							}}
+						>
+							{fileName}
+						</span>
 						{"\n"}
 						<span style={accentStyle}>{preview}</span>
 					</>
@@ -189,30 +201,48 @@ function CheckpointMarker({
 	disabled?: boolean;
 }) {
 	const [expanded, setExpanded] = useState(false);
-	const accentColor = theme?.cursor ?? "#3b82f6";
 	const revertedColor = "#ef4444";
-	const baseColor = checkpoint.reverted ? revertedColor : accentColor;
 	return (
 		<div
-			className="rounded my-1"
+			className="my-1 overflow-hidden rounded-lg border"
 			style={{
-				backgroundColor: `${baseColor}08`,
-				borderLeft: `2px solid ${`${baseColor}40`}`,
+				backgroundColor: "var(--color-inferay-dark-gray)",
+				borderColor: "var(--color-inferay-gray-border)",
 			}}
 		>
-			<div className="flex items-center gap-2 px-2 py-1">
-				<IconClock size={11} style={{ color: `${baseColor}80` }} />
+			<div
+				className="flex items-center gap-2 px-2 py-1"
+				style={{
+					borderBottom: expanded
+						? "1px solid var(--color-inferay-gray-border)"
+						: "none",
+				}}
+			>
 				<button
 					type="button"
 					onClick={() => setExpanded(!expanded)}
-					className="text-[9px] font-mono px-1.5 py-0.5 rounded transition-colors"
+					className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-[11px] font-medium transition-opacity hover:opacity-80"
 					style={{
-						backgroundColor: `${accentColor}15`,
-						color: accentColor,
+						color: theme?.fg ?? "var(--color-inferay-soft-white)",
 					}}
 				>
-					{checkpoint.changedFileCount} file
-					{checkpoint.changedFileCount !== 1 ? "s" : ""} changed
+					<IconChevronDown
+						size={11}
+						className={`shrink-0 opacity-40 transition-transform duration-150 ${expanded ? "" : "-rotate-90"}`}
+					/>
+					<IconClock
+						size={11}
+						className="shrink-0 opacity-40"
+						style={{
+							color: checkpoint.reverted
+								? revertedColor
+								: (theme?.fgDim ?? "var(--color-inferay-muted-gray)"),
+						}}
+					/>
+					<span className="truncate opacity-80">
+						{checkpoint.changedFileCount} file
+						{checkpoint.changedFileCount !== 1 ? "s" : ""} changed
+					</span>
 				</button>
 				<span className="flex-1" />
 				{!checkpoint.reverted ? (
@@ -220,29 +250,28 @@ function CheckpointMarker({
 						type="button"
 						onClick={() => onRevert(checkpoint.id)}
 						disabled={disabled}
-						className="text-[9px] px-2 py-0.5 rounded font-medium transition-colors disabled:opacity-40"
+						className="rounded-md px-1.5 py-0 text-[11px] font-medium transition-colors disabled:opacity-40"
 						style={{
-							backgroundColor: `${revertedColor}15`,
-							color: revertedColor,
+							color: theme?.fgDim ?? "var(--color-inferay-soft-white)",
 						}}
 					>
 						Undo
 					</button>
 				) : (
 					<span
-						className="text-[9px] italic"
-						style={{ color: theme?.fgDim ?? "var(--color-inferay-text-3)" }}
+						className="rounded-md px-1.5 py-px text-[10px] italic"
+						style={{ color: theme?.fgDim ?? "var(--color-inferay-muted-gray)" }}
 					>
 						reverted
 					</span>
 				)}
 			</div>
 			{expanded && (
-				<div className="pb-1.5 px-2 ml-4 space-y-0.5">
+				<div className="space-y-0.5 px-2 pb-2 pt-1">
 					{checkpoint.changedFiles.map((f) => (
 						<div
 							key={f.path}
-							className="flex items-center gap-1.5 text-[9px] font-mono"
+							className="flex items-center gap-1.5 px-1 text-[9px] font-mono"
 						>
 							<span
 								style={{
@@ -261,7 +290,9 @@ function CheckpointMarker({
 										: "~"}
 							</span>
 							<span
-								style={{ color: theme?.fgDim ?? "var(--color-inferay-text-3)" }}
+								style={{
+									color: theme?.fgDim ?? "var(--color-inferay-muted-gray)",
+								}}
 							>
 								{f.path.split("/").pop()}
 							</span>
@@ -372,7 +403,9 @@ const Bubble = React.memo(function Bubble({
 		return (
 			<p
 				className="text-center text-[10px]"
-				style={{ color: theme ? theme.fgDim : "var(--color-inferay-text-3)" }}
+				style={{
+					color: theme ? theme.fgDim : "var(--color-inferay-muted-gray)",
+				}}
 			>
 				{msg.content}
 			</p>
@@ -400,7 +433,7 @@ const Bubble = React.memo(function Bubble({
 						<span
 							className="text-[10px] font-mono"
 							style={{
-								color: theme ? theme.fgDim : "var(--color-inferay-text-3)",
+								color: theme ? theme.fgDim : "var(--color-inferay-muted-gray)",
 							}}
 						>
 							- {msg.btwQuestion}

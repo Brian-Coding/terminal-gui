@@ -1,5 +1,11 @@
 import type { ChatAgentKind } from "../../lib/agents.ts";
 
+export interface AgentActivityEvent {
+	toolName: string;
+	summary: string;
+	isStreaming?: boolean;
+}
+
 export interface AgentRunContext {
 	readonly paneId: string;
 	readonly cwd: string;
@@ -9,6 +15,7 @@ export interface AgentRunContext {
 	updateSessionId(nextSessionId: string): void;
 	emitChatEvent(event: unknown): void;
 	emitStatus(status: string, isLoading?: boolean): void;
+	emitActivity(activity: AgentActivityEvent): void;
 	emitSystemMessage(message: string): void;
 }
 

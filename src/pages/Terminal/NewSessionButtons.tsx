@@ -24,15 +24,15 @@ export const NewSessionButtons = memo(function NewSessionButtons({
 						key={kind}
 						type="button"
 						onClick={() => onAddPane(kind)}
-						className={`flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border px-3 text-xs font-medium transition-all ${
+						className={`flex h-7 items-center gap-1.5 rounded-lg border border-inferay-gray-border px-3 text-xs font-medium transition-all ${
 							isSelected
-								? "text-inferay-text"
-								: "text-inferay-text-3 hover:text-inferay-text-2"
+								? "text-inferay-white"
+								: "text-inferay-muted-gray hover:text-inferay-soft-white"
 						}`}
 						style={{
 							backgroundColor: isSelected
-								? "var(--color-inferay-surface-2)"
-								: "var(--color-inferay-surface)",
+								? "var(--color-inferay-gray)"
+								: "var(--color-inferay-dark-gray)",
 						}}
 					>
 						{kind !== "terminal" && getAgentIcon(kind, 12)}

@@ -239,15 +239,17 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			status: string;
 			startTime: number | null;
 			expandedTools: Set<string>;
+			liveActivities: ToolActivity[];
 		}>({
 			isLoading: false,
 			status: "idle",
 			startTime: null,
 			expandedTools: new Set(),
+			liveActivities: [],
 		});
 		const chatUiStateRef = useRef(chatUiState);
 		chatUiStateRef.current = chatUiState;
-		const { isLoading, status, expandedTools } = chatUiState;
+		const { isLoading, status, expandedTools, liveActivities } = chatUiState;
 		const setLoadingState = useCallback(
 			(
 				v:
@@ -614,6 +616,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 								pruned.size === prev.expandedTools.size
 									? prev.expandedTools
 									: pruned,
+							liveActivities: [],
 						};
 					});
 					currentAssistantRef.current = null;
@@ -632,6 +635,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						sendToServer(next.text);
 					}
 				} else if (msg.type === "chat:user_message") {
+					setChatUiState((prev) => ({ ...prev, liveActivities: [] }));
 					setLoadingState({
 						isLoading: true,
 						status: "thinking",
@@ -678,6 +682,27 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						status: msg.status ?? prev.status,
 						startTime: prev.startTime ?? Date.now(),
 					}));
+				} else if (msg.type === "chat:activity" && msg.activity) {
+					setChatUiState((prev) => {
+						const nextActivity: ToolActivity = {
+							id: `${msg.activity.toolName}-${prev.liveActivities.length}`,
+							toolName: msg.activity.toolName,
+							summary: msg.activity.summary,
+							isStreaming: msg.activity.isStreaming ?? true,
+						};
+						const last = prev.liveActivities[prev.liveActivities.length - 1];
+						if (
+							last &&
+							last.toolName === nextActivity.toolName &&
+							last.summary === nextActivity.summary
+						) {
+							return prev;
+						}
+						return {
+							...prev,
+							liveActivities: [...prev.liveActivities, nextActivity].slice(-12),
+						};
+					});
 				} else if (msg.type === "chat:sync") {
 					const serverMessages: ChatMessage[] = msg.messages;
 					if (serverMessages.length === 0) return;
@@ -715,6 +740,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 								startTime: null,
 							};
 						});
+						setChatUiState((prev) => ({ ...prev, liveActivities: [] }));
 						currentAssistantRef.current = null;
 						currentToolRef.current = null;
 						hasStreamedRef.current = false;
@@ -1430,9 +1456,9 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						<button
 							type="button"
 							onClick={scrollToBottom}
-							className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-inferay-border bg-inferay-surface shadow-sm transition-opacity hover:bg-inferay-surface-2"
+							className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-dark-gray shadow-sm transition-opacity hover:bg-inferay-gray"
 						>
-							<IconArrowDown size={12} className="text-inferay-text-2" />
+							<IconArrowDown size={12} className="text-inferay-soft-white" />
 						</button>
 					)}
 				</div>
@@ -1456,6 +1482,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							statusBar={
 								<AgentChatStatusBar
 									messages={messages}
+									liveActivities={liveActivities}
 									isLoading={isLoading}
 									status={status}
 									onStop={stopGeneration}

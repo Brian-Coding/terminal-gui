@@ -90,7 +90,7 @@ const logoUrl = resolveServerUrl("/logo.png");
 
 function TerminalEmptyStateBrand() {
 	return (
-		<div className="rounded-2xl border border-inferay-border bg-inferay-surface p-4 shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
+		<div className="rounded-2xl border border-inferay-gray-border bg-inferay-dark-gray p-4 shadow-[0_12px_40px_rgba(0,0,0,0.18)]">
 			<img src={logoUrl} alt="inferay logo" className="h-14 w-14 rounded-xl" />
 		</div>
 	);
@@ -100,10 +100,10 @@ function GraphEmptyState({ message }: { message: string }) {
 	return (
 		<div className="flex h-full items-center justify-center p-6">
 			<div className="max-w-sm text-center">
-				<div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-inferay-border bg-inferay-surface text-inferay-text-3">
+				<div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-inferay-gray-border bg-inferay-dark-gray text-inferay-muted-gray">
 					<IconGitBranch size={18} />
 				</div>
-				<p className="text-sm text-inferay-text">{message}</p>
+				<p className="text-sm text-inferay-white">{message}</p>
 			</div>
 		</div>
 	);
@@ -681,7 +681,7 @@ export function TerminalPage({
 	}, [currentGroup]);
 	if (isPopout || (isStandalone && compactMode)) {
 		return (
-			<div className="flex h-screen flex-col bg-inferay-bg">
+			<div className="flex h-screen flex-col bg-inferay-black">
 				<PopoutHeader
 					groups={groups}
 					currentGroup={currentGroup}
@@ -707,7 +707,7 @@ export function TerminalPage({
 							<div className="flex w-full max-w-sm flex-col items-center gap-4 px-6 text-center">
 								<TerminalEmptyStateBrand />
 								<div>
-									<p className="text-sm text-inferay-text-2">
+									<p className="text-sm text-inferay-soft-white">
 										Start a new terminal or agent session
 									</p>
 								</div>
@@ -741,19 +741,19 @@ export function TerminalPage({
 	}
 	if (isPoppedOut) {
 		return (
-			<div className="flex h-full flex-col bg-inferay-bg">
-				<div className="relative h-12 shrink-0 border-b border-inferay-border bg-inferay-bg"></div>
+			<div className="flex h-full flex-col bg-inferay-black">
+				<div className="relative h-12 shrink-0 border-b border-inferay-gray-border bg-inferay-black"></div>
 				<div className="flex flex-1 items-center justify-center">
 					<div className="text-center">
 						<div className="mb-4 flex items-center justify-center">
-							<div className="rounded-full bg-inferay-surface p-4">
+							<div className="rounded-full bg-inferay-dark-gray p-4">
 								<IconExternalLink size={32} className="text-inferay-accent" />
 							</div>
 						</div>
-						<h2 className="text-lg font-medium text-inferay-text mb-2">
+						<h2 className="text-lg font-medium text-inferay-white mb-2">
 							Terminal in Separate Window
 						</h2>
-						<p className="text-sm text-inferay-text-3 mb-4">
+						<p className="text-sm text-inferay-muted-gray mb-4">
 							The terminal is currently open in a pop-out window.
 						</p>
 						<Button variant="primary" onClick={handleRestore}>
@@ -767,7 +767,7 @@ export function TerminalPage({
 	}
 	return (
 		<div
-			className={`flex flex-col bg-inferay-bg ${isStandalone ? "h-screen" : "h-full"}`}
+			className={`flex flex-col bg-inferay-black ${isStandalone ? "h-screen" : "h-full"}`}
 		>
 			<div className="relative flex flex-1 flex-col overflow-hidden">
 				<div className="flex flex-1 flex-col overflow-hidden">
@@ -803,7 +803,7 @@ export function TerminalPage({
 										icon={
 											<IconMessageCircle
 												size={18}
-												className="text-inferay-text-3"
+												className="text-inferay-muted-gray"
 											/>
 										}
 										title="No Panes"
@@ -878,7 +878,7 @@ export function TerminalPage({
 							sidebarOpen &&
 							currentGroup &&
 							currentGroup.panes.length > 0 && (
-								<div className="flex flex-col shrink-0 border-l border-inferay-border bg-inferay-bg order-last">
+								<div className="flex flex-col shrink-0 border-l border-inferay-gray-border bg-inferay-black order-last">
 									<AgentSidebar
 										panes={currentGroup.panes}
 										selectedPaneId={currentGroup.selectedPaneId}
@@ -899,7 +899,7 @@ export function TerminalPage({
 										{runningPorts.map((p) => (
 											<div
 												key={`${p.port}-${p.pid}`}
-												className="group mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-inferay-surface"
+												className="group mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-inferay-dark-gray"
 											>
 												<div className="shrink-0">
 													<IconCircle
@@ -909,13 +909,13 @@ export function TerminalPage({
 												</div>
 												<div className="min-w-0 flex-1">
 													<p
-														className="truncate text-[11px] font-medium text-inferay-text"
+														className="truncate text-[11px] font-medium text-inferay-white"
 														title={p.command}
 													>
 														:{p.port}
 													</p>
 													<p
-														className="truncate text-[9px] text-inferay-text-3"
+														className="truncate text-[9px] text-inferay-muted-gray"
 														title={p.command}
 													>
 														{p.name}

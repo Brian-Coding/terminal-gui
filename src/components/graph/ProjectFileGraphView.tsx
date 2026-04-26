@@ -54,9 +54,9 @@ function statusClasses(status: FileGraphNode["status"]) {
 		};
 	}
 	return {
-		border: "border-inferay-border",
-		bg: "bg-inferay-surface",
-		dot: "bg-inferay-text-3/60",
+		border: "border-inferay-gray-border",
+		bg: "bg-inferay-dark-gray",
+		dot: "bg-inferay-muted-gray/60",
 	};
 }
 
@@ -193,7 +193,7 @@ export function ProjectFileGraphView({
 	if (!activeCwd) {
 		return (
 			<div className="flex h-full items-center justify-center p-6">
-				<p className="text-sm text-inferay-text">
+				<p className="text-sm text-inferay-white">
 					Open a project directory in one of this group's panes to populate the
 					file graph.
 				</p>
@@ -223,11 +223,11 @@ export function ProjectFileGraphView({
 						}))}
 						onChange={onSelectCwd}
 						minWidth={220}
-						buttonClassName="h-7 rounded-lg border-inferay-border bg-inferay-surface px-2.5 text-[10px] font-medium hover:bg-inferay-surface-2"
+						buttonClassName="h-7 rounded-lg border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[10px] font-medium hover:bg-inferay-gray"
 						labelClassName="max-w-[140px] truncate text-[10px]"
 					/>
 					{project ? (
-						<div className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-[10px] text-inferay-text-2">
+						<div className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[10px] text-inferay-soft-white">
 							<IconGitBranch size={11} />
 							<span className="font-mono">{project.branch}</span>
 						</div>
@@ -236,13 +236,13 @@ export function ProjectFileGraphView({
 				<div className="absolute inset-0 overflow-auto px-12 py-16">
 					{loading ? (
 						<div className="flex h-full items-center justify-center">
-							<p className="text-[11px] text-inferay-text-3">
+							<p className="text-[11px] text-inferay-muted-gray">
 								Loading project files...
 							</p>
 						</div>
 					) : nodes.length === 0 ? (
 						<div className="flex h-full items-center justify-center">
-							<p className="text-[11px] text-inferay-text-3">
+							<p className="text-[11px] text-inferay-muted-gray">
 								No files available for this project yet.
 							</p>
 						</div>
@@ -264,7 +264,7 @@ export function ProjectFileGraphView({
 										className={`absolute flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-all ${
 											selected
 												? `${styles.border} ${styles.bg} shadow-[0_0_0_1px_rgba(255,255,255,0.05)]`
-												: "border-inferay-border bg-inferay-surface hover:bg-inferay-surface-2"
+												: "border-inferay-gray-border bg-inferay-dark-gray hover:bg-inferay-gray"
 										}`}
 										style={{ left: node.x, top: node.y }}
 										onClick={() => setSelectedNodeId(node.id)}
@@ -272,7 +272,7 @@ export function ProjectFileGraphView({
 										onMouseLeave={() => setHoveredNodeId(null)}
 									>
 										<div className={`h-2 w-2 rounded-full ${styles.dot}`} />
-										<span className="whitespace-nowrap font-mono text-[10px] text-inferay-text">
+										<span className="whitespace-nowrap font-mono text-[10px] text-inferay-white">
 											{node.label}
 										</span>
 									</button>
@@ -282,12 +282,12 @@ export function ProjectFileGraphView({
 					)}
 				</div>
 			</div>
-			<div className="w-80 shrink-0 border-l border-inferay-border bg-inferay-surface/20">
-				<div className="border-b border-inferay-border px-4 py-3">
-					<p className="text-[11px] font-medium text-inferay-text">
+			<div className="w-80 shrink-0 border-l border-inferay-gray-border bg-inferay-dark-gray/20">
+				<div className="border-b border-inferay-gray-border px-4 py-3">
+					<p className="text-[11px] font-medium text-inferay-white">
 						File Graph
 					</p>
-					<p className="text-[10px] text-inferay-text-3">
+					<p className="text-[10px] text-inferay-muted-gray">
 						{project?.name ?? cwdLabel(activeCwd)}
 					</p>
 				</div>
@@ -295,26 +295,26 @@ export function ProjectFileGraphView({
 					{selectedNode ? (
 						<>
 							<div>
-								<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-inferay-text-3">
+								<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-inferay-muted-gray">
 									Selected File
 								</p>
-								<p className="font-mono text-[11px] text-inferay-text">
+								<p className="font-mono text-[11px] text-inferay-white">
 									{selectedNode.label}
 								</p>
-								<p className="mt-1 break-all text-[10px] text-inferay-text-3">
+								<p className="mt-1 break-all text-[10px] text-inferay-muted-gray">
 									{selectedNode.path}
 								</p>
 							</div>
 							<div>
-								<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-inferay-text-3">
+								<p className="mb-1 text-[10px] uppercase tracking-[0.12em] text-inferay-muted-gray">
 									Status
 								</p>
-								<p className="text-[11px] capitalize text-inferay-text-2">
+								<p className="text-[11px] capitalize text-inferay-soft-white">
 									{selectedNode.status}
 								</p>
 							</div>
 							<div>
-								<p className="mb-2 text-[10px] uppercase tracking-[0.12em] text-inferay-text-3">
+								<p className="mb-2 text-[10px] uppercase tracking-[0.12em] text-inferay-muted-gray">
 									Related Files
 								</p>
 								<div className="space-y-2">
@@ -324,23 +324,23 @@ export function ProjectFileGraphView({
 												type="button"
 												key={node.id}
 												onClick={() => setSelectedNodeId(node.id)}
-												className="flex w-full items-center gap-2 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 py-2 text-left transition-colors hover:bg-inferay-surface-2"
+												className="flex w-full items-center gap-2 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 py-2 text-left transition-colors hover:bg-inferay-gray"
 											>
 												<div
 													className={`h-2 w-2 rounded-full ${statusClasses(node.status).dot}`}
 												/>
 												<div className="min-w-0">
-													<p className="truncate font-mono text-[10px] text-inferay-text">
+													<p className="truncate font-mono text-[10px] text-inferay-white">
 														{node.label}
 													</p>
-													<p className="truncate text-[9px] text-inferay-text-3">
+													<p className="truncate text-[9px] text-inferay-muted-gray">
 														{node.path}
 													</p>
 												</div>
 											</button>
 										))
 									) : (
-										<p className="text-[10px] text-inferay-text-3">
+										<p className="text-[10px] text-inferay-muted-gray">
 											No related files detected yet.
 										</p>
 									)}
@@ -348,7 +348,7 @@ export function ProjectFileGraphView({
 							</div>
 						</>
 					) : (
-						<p className="text-[11px] text-inferay-text-3">
+						<p className="text-[11px] text-inferay-muted-gray">
 							Select a file node to inspect its relationships.
 						</p>
 					)}

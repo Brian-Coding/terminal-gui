@@ -40,7 +40,7 @@ export function renderInputHighlights(
 	const tokens = findDecoratedTokenRanges(text);
 	if (tokens.length === 0) {
 		return (
-			<span style={{ color: theme?.text ?? "var(--color-inferay-text)" }}>
+			<span style={{ color: theme?.text ?? "var(--color-inferay-white)" }}>
 				{text}
 			</span>
 		);
@@ -56,7 +56,7 @@ export function renderInputHighlights(
 			segments.push(
 				<span
 					key={`t-${lastEnd}`}
-					style={{ color: theme?.text ?? "var(--color-inferay-text)" }}
+					style={{ color: theme?.text ?? "var(--color-inferay-white)" }}
 				>
 					{text.slice(lastEnd, token.start)}
 				</span>
@@ -85,7 +85,7 @@ export function renderInputHighlights(
 		segments.push(
 			<span
 				key={`t-${lastEnd}`}
-				style={{ color: theme?.text ?? "var(--color-inferay-text)" }}
+				style={{ color: theme?.text ?? "var(--color-inferay-white)" }}
 			>
 				{text.slice(lastEnd)}
 			</span>

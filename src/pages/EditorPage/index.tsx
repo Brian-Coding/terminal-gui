@@ -523,19 +523,19 @@ export function EditorPage() {
 	);
 
 	return (
-		<div className="flex h-full min-h-0 flex-col bg-inferay-bg">
+		<div className="flex h-full min-h-0 flex-col bg-inferay-black">
 			{!session ? (
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[400px_minmax(0,1fr)]">
-					<section className="flex min-h-0 min-w-0 flex-col border-r border-inferay-border">
+					<section className="flex min-h-0 min-w-0 flex-col border-r border-inferay-gray-border">
 						<div className={TOPBAR_CLASS}>
-							<span className="text-[10px] font-medium text-inferay-text-3">
+							<span className="text-[10px] font-medium text-inferay-muted-gray">
 								No active session
 							</span>
 							<span className="flex-1" />
 							<button
 								type="button"
 								onClick={() => setShowSettings(true)}
-								className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-inferay-text-2"
+								className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-muted-gray hover:text-inferay-soft-white"
 								title="Settings"
 							>
 								<IconSettings size={10} />
@@ -543,13 +543,13 @@ export function EditorPage() {
 						</div>
 						<EmptyState />
 					</section>
-					<aside className="min-h-0 min-w-0 bg-inferay-bg flex flex-col">
+					<aside className="min-h-0 min-w-0 bg-inferay-black flex flex-col">
 						<div className="flex min-h-0 flex-1 overflow-hidden">
 							<div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-hidden">
 								<Placeholder label="No diff available" />
 							</div>
 							<div
-								className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
+								className="flex shrink-0 flex-row border-l border-inferay-gray-border bg-inferay-black"
 								style={{ width: sidebarWidth }}
 							>
 								<div
@@ -633,7 +633,7 @@ export function EditorPage() {
 							)
 						) : graphLoading ? (
 							<div className="flex items-center justify-center h-full">
-								<p className="text-[11px] text-inferay-text-3">
+								<p className="text-[11px] text-inferay-muted-gray">
 									Loading graph...
 								</p>
 							</div>
@@ -651,7 +651,7 @@ export function EditorPage() {
 					</div>
 
 					<div
-						className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
+						className="flex shrink-0 flex-row border-l border-inferay-gray-border bg-inferay-black"
 						style={{ width: sidebarWidth }}
 					>
 						<div
@@ -702,7 +702,7 @@ export function EditorPage() {
 			) : (
 				/* ===== NORMAL MODE LAYOUT ===== */
 				<div className="grid min-h-0 flex-1 lg:grid-cols-[400px_minmax(0,1fr)]">
-					<section className="flex min-h-0 min-w-0 flex-col border-r border-inferay-border">
+					<section className="flex min-h-0 min-w-0 flex-col border-r border-inferay-gray-border">
 						<AgentChatView
 							key={session.paneId}
 							ref={chatRef}
@@ -723,7 +723,7 @@ export function EditorPage() {
 						/>
 					</section>
 
-					<aside className="min-h-0 min-w-0 bg-inferay-bg flex flex-col">
+					<aside className="min-h-0 min-w-0 bg-inferay-black flex flex-col">
 						<div className="flex min-h-0 flex-1 overflow-hidden">
 							<div className="min-h-0 min-w-0 flex-1 flex flex-col overflow-hidden">
 								<DiffViewerTopBar
@@ -762,7 +762,7 @@ export function EditorPage() {
 									) : // Graph View - full width, details show in sidebar
 									graphLoading ? (
 										<div className="flex items-center justify-center h-full">
-											<p className="text-[11px] text-inferay-text-3">
+											<p className="text-[11px] text-inferay-muted-gray">
 												Loading graph...
 											</p>
 										</div>
@@ -781,7 +781,7 @@ export function EditorPage() {
 							</div>
 
 							<div
-								className="flex shrink-0 flex-row border-l border-inferay-border bg-inferay-bg"
+								className="flex shrink-0 flex-row border-l border-inferay-gray-border bg-inferay-black"
 								style={{ width: sidebarWidth }}
 							>
 								<div
@@ -840,11 +840,11 @@ export function EditorPage() {
 function EmptyState() {
 	return (
 		<div className="flex flex-1 items-center justify-center px-6">
-			<div className="max-w-md border border-inferay-border bg-inferay-surface p-6 text-center">
-				<h2 className="text-[15px] font-semibold text-inferay-text">
+			<div className="max-w-md border border-inferay-gray-border bg-inferay-dark-gray p-6 text-center">
+				<h2 className="text-[15px] font-semibold text-inferay-white">
 					No saved agent sessions
 				</h2>
-				<p className="mt-2 text-[12px] leading-5 text-inferay-text-3">
+				<p className="mt-2 text-[12px] leading-5 text-inferay-muted-gray">
 					Open Claude or Codex in the terminal page, pick a project directory,
 					and it will appear here.
 				</p>
@@ -856,7 +856,7 @@ function EmptyState() {
 function Placeholder({ label }: { label: string }) {
 	return (
 		<div className="flex h-full items-center justify-center px-6">
-			<p className="max-w-xs text-center text-[12px] leading-5 text-inferay-text-3">
+			<p className="max-w-xs text-center text-[12px] leading-5 text-inferay-muted-gray">
 				{label}
 			</p>
 		</div>
@@ -953,16 +953,16 @@ function ZenModeInput({
 
 	return (
 		<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl px-4">
-			<div className="relative flex flex-col rounded-xl border border-inferay-border bg-inferay-surface/95 backdrop-blur-sm shadow-2xl overflow-visible">
+			<div className="relative flex flex-col rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/95 backdrop-blur-sm shadow-2xl overflow-visible">
 				{isLoading && (
 					<div
-						className="relative flex items-center justify-between gap-3 px-3 py-2 border-b border-inferay-border/50 rounded-t-xl"
+						className="relative flex items-center justify-between gap-3 px-3 py-2 border-b border-inferay-gray-border/50 rounded-t-xl"
 						onMouseEnter={() => setIsActivityHovered(true)}
 						onMouseLeave={() => setIsActivityHovered(false)}
 					>
 						{isActivityHovered && activityCount > 0 && (
-							<div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg overflow-hidden bg-inferay-surface shadow-lg border border-inferay-border z-50">
-								<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-inferay-border text-inferay-text-3">
+							<div className="absolute bottom-full left-0 right-0 mb-1 rounded-lg overflow-hidden bg-inferay-dark-gray shadow-lg border border-inferay-gray-border z-50">
+								<div className="flex items-center justify-between px-2.5 py-1.5 text-[9px] font-medium uppercase tracking-wider border-b border-inferay-gray-border text-inferay-muted-gray">
 									<span>Activity</span>
 									<span className="tabular-nums">{activityCount}</span>
 								</div>
@@ -972,14 +972,14 @@ function ZenModeInput({
 											key={activity.id}
 											className={`flex items-center gap-2 px-2.5 py-1.5 text-[10px] ${
 												idx < toolActivities.length - 1
-													? "border-b border-inferay-border/50"
+													? "border-b border-inferay-gray-border/50"
 													: ""
 											}`}
 										>
-											<span className="shrink-0 text-inferay-text-3">
+											<span className="shrink-0 text-inferay-muted-gray">
 												{getZenToolIcon(activity.toolName, false)}
 											</span>
-											<span className="flex-1 truncate text-inferay-text-2">
+											<span className="flex-1 truncate text-inferay-soft-white">
 												{activity.summary}
 											</span>
 											{activity.isStreaming && (
@@ -999,7 +999,7 @@ function ZenModeInput({
 										latestActivity.isStreaming
 									)}
 								</span>
-								<span className="text-[11px] text-inferay-text truncate">
+								<span className="text-[11px] text-inferay-white truncate">
 									{latestActivity.summary}
 								</span>
 								{activityCount > 1 && (
@@ -1011,7 +1011,7 @@ function ZenModeInput({
 						) : (
 							<div className="flex items-center gap-2">
 								<span className="h-1.5 w-1.5 rounded-full animate-pulse bg-inferay-accent" />
-								<span className="text-[11px] text-inferay-text-2">
+								<span className="text-[11px] text-inferay-soft-white">
 									Working...
 								</span>
 							</div>
@@ -1020,7 +1020,7 @@ function ZenModeInput({
 						<button
 							type="button"
 							onClick={handleStop}
-							className="shrink-0 flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-medium transition-all bg-inferay-surface-2 text-inferay-text-2 hover:bg-inferay-surface-3 border border-inferay-border"
+							className="shrink-0 flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-medium transition-all bg-inferay-gray text-inferay-soft-white hover:bg-inferay-light-gray border border-inferay-gray-border"
 						>
 							<IconStop className="w-3 h-3" />
 							Stop
@@ -1030,16 +1030,16 @@ function ZenModeInput({
 
 				{queuedMessages.length > 0 && (
 					<div
-						className="border-b border-inferay-border/50 overflow-y-auto"
+						className="border-b border-inferay-gray-border/50 overflow-y-auto"
 						style={{ maxHeight: "120px" }}
 					>
-						<div className="px-3 py-1 text-[9px] font-semibold tracking-wide uppercase text-inferay-text-3 border-b border-inferay-border/30">
+						<div className="px-3 py-1 text-[9px] font-semibold tracking-wide uppercase text-inferay-muted-gray border-b border-inferay-gray-border/30">
 							Queued messages
 						</div>
 						{queuedMessages.map((qm, idx) => (
 							<div
 								key={qm.id}
-								className="group flex items-start gap-2 px-3 py-1.5 hover:bg-inferay-text/5 transition-colors"
+								className="group flex items-start gap-2 px-3 py-1.5 hover:bg-inferay-white/5 transition-colors"
 								style={{
 									borderBottom:
 										idx < queuedMessages.length - 1
@@ -1047,7 +1047,7 @@ function ZenModeInput({
 											: undefined,
 								}}
 							>
-								<span className="shrink-0 mt-0.5 text-[9px] font-mono tabular-nums text-inferay-text-3">
+								<span className="shrink-0 mt-0.5 text-[9px] font-mono tabular-nums text-inferay-muted-gray">
 									{idx + 1}
 								</span>
 								{editingQueueId === qm.id ? (
@@ -1068,7 +1068,7 @@ function ZenModeInput({
 													setEditingQueueId(null);
 												}
 											}}
-											className="flex-1 bg-inferay-surface-2 text-[11px] outline-none border-none px-1 py-0.5 rounded text-inferay-text"
+											className="flex-1 bg-inferay-gray text-[11px] outline-none border-none px-1 py-0.5 rounded text-inferay-white"
 										/>
 										<button
 											type="button"
@@ -1087,7 +1087,7 @@ function ZenModeInput({
 										<button
 											type="button"
 											onClick={() => setEditingQueueId(null)}
-											className="shrink-0 p-0.5 rounded text-inferay-text-3"
+											className="shrink-0 p-0.5 rounded text-inferay-muted-gray"
 											title="Cancel"
 										>
 											<IconX size={12} />
@@ -1095,7 +1095,7 @@ function ZenModeInput({
 									</div>
 								) : (
 									<>
-										<span className="flex-1 text-[11px] truncate text-inferay-text">
+										<span className="flex-1 text-[11px] truncate text-inferay-white">
 											{qm.displayText}
 										</span>
 										<div className="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1105,7 +1105,7 @@ function ZenModeInput({
 													setEditingQueueId(qm.id);
 													setEditingQueueText(qm.text);
 												}}
-												className="p-0.5 rounded transition-colors hover:bg-white/10 text-inferay-text-3"
+												className="p-0.5 rounded transition-colors hover:bg-white/10 text-inferay-muted-gray"
 												title="Edit"
 											>
 												<IconPencil size={12} />
@@ -1129,13 +1129,13 @@ function ZenModeInput({
 				)}
 
 				{attachedImages.length > 0 && (
-					<div className="flex items-center gap-2 px-3 py-2 border-b border-inferay-border/50">
+					<div className="flex items-center gap-2 px-3 py-2 border-b border-inferay-gray-border/50">
 						{attachedImages.map((img) => (
 							<div key={img.path} className="relative group">
 								<img
 									src={img.previewUrl}
 									alt={img.name}
-									className="h-10 w-10 rounded-md object-cover border border-inferay-border"
+									className="h-10 w-10 rounded-md object-cover border border-inferay-gray-border"
 								/>
 								<button
 									type="button"
@@ -1169,7 +1169,7 @@ function ZenModeInput({
 					<button
 						type="button"
 						onClick={() => fileInputRef.current?.click()}
-						className="shrink-0 flex items-center justify-center w-7 h-7 rounded-md text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-text/10 transition-colors"
+						className="shrink-0 flex items-center justify-center w-7 h-7 rounded-md text-inferay-muted-gray hover:text-inferay-soft-white hover:bg-inferay-white/10 transition-colors"
 						title="Attach image"
 					>
 						<IconPlus size={16} />
@@ -1190,7 +1190,7 @@ function ZenModeInput({
 								? "Type to queue next message..."
 								: "Message... (Esc to exit)"
 						}
-						className="flex-1 bg-transparent text-[13px] text-inferay-text outline-none placeholder:text-inferay-text-3"
+						className="flex-1 bg-transparent text-[13px] text-inferay-white outline-none placeholder:text-inferay-muted-gray"
 					/>
 
 					{queuedMessages.length > 0 && (
@@ -1230,8 +1230,8 @@ function ToolbarButton({
 			title={title}
 			className={`flex h-full w-6 items-center justify-center transition-all ${
 				active
-					? "bg-inferay-text/10 text-inferay-text"
-					: "text-inferay-text-3 hover:text-inferay-text-2"
+					? "bg-inferay-white/10 text-inferay-white"
+					: "text-inferay-muted-gray hover:text-inferay-soft-white"
 			}`}
 		>
 			{icon}
@@ -1242,7 +1242,7 @@ function ToolbarButton({
 /* ── Top-bar components ─────────────────────────────────── */
 
 const TOPBAR_CLASS =
-	"shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-inferay-border";
+	"shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-inferay-gray-border";
 
 function DiffViewerTopBar({
 	mainViewMode,
@@ -1260,14 +1260,14 @@ function DiffViewerTopBar({
 	return (
 		<div className={TOPBAR_CLASS}>
 			{/* Left: Diff / Graph toggle */}
-			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-border bg-inferay-surface">
+			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-gray-border bg-inferay-dark-gray">
 				<button
 					type="button"
 					onClick={() => onMainViewModeChange("diff")}
 					className={`h-full px-2 text-[8px] font-medium transition-colors ${
 						mainViewMode === "diff"
-							? "bg-inferay-text/10 text-inferay-text"
-							: "text-inferay-text-3 hover:text-inferay-text-2"
+							? "bg-inferay-white/10 text-inferay-white"
+							: "text-inferay-muted-gray hover:text-inferay-soft-white"
 					}`}
 				>
 					Diff
@@ -1277,8 +1277,8 @@ function DiffViewerTopBar({
 					onClick={() => onMainViewModeChange("graph")}
 					className={`h-full px-2 text-[8px] font-medium transition-colors ${
 						mainViewMode === "graph"
-							? "bg-inferay-text/10 text-inferay-text"
-							: "text-inferay-text-3 hover:text-inferay-text-2"
+							? "bg-inferay-white/10 text-inferay-white"
+							: "text-inferay-muted-gray hover:text-inferay-soft-white"
 					}`}
 				>
 					Graph
@@ -1287,7 +1287,7 @@ function DiffViewerTopBar({
 
 			{/* Center: file path */}
 			{filePath && (
-				<span className="text-[9px] font-mono text-inferay-text-3 truncate min-w-0">
+				<span className="text-[9px] font-mono text-inferay-muted-gray truncate min-w-0">
 					{filePath}
 				</span>
 			)}
@@ -1295,7 +1295,7 @@ function DiffViewerTopBar({
 			<span className="flex-1" />
 
 			{/* Right: view mode icons */}
-			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-border bg-inferay-surface">
+			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-gray-border bg-inferay-dark-gray">
 				<ToolbarButton
 					active={diffViewMode === "split"}
 					title="Split diff"

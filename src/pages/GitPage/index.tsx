@@ -181,19 +181,19 @@ export function GitPage() {
 
 	if (dirs.length === 0 && !pickerOpen) {
 		return (
-			<div className="flex h-full items-center justify-center bg-inferay-bg">
+			<div className="flex h-full items-center justify-center bg-inferay-black">
 				<div className="text-center">
-					<div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-inferay-surface border border-inferay-border">
-						<IconGitBranch size={24} className="text-inferay-text-3" />
+					<div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-inferay-dark-gray border border-inferay-gray-border">
+						<IconGitBranch size={24} className="text-inferay-muted-gray" />
 					</div>
-					<p className="text-[12px] text-inferay-text mb-1">No repositories</p>
-					<p className="text-[10px] text-inferay-text-3 mb-4">
+					<p className="text-[12px] text-inferay-white mb-1">No repositories</p>
+					<p className="text-[10px] text-inferay-muted-gray mb-4">
 						Add a local git repo to get started
 					</p>
 					<button
 						type="button"
 						onClick={() => setPickerOpen(true)}
-						className="rounded-lg bg-inferay-surface border border-inferay-border px-3 py-1.5 text-[10px] text-inferay-text-2 hover:bg-inferay-surface-2 transition-colors"
+						className="rounded-lg bg-inferay-dark-gray border border-inferay-gray-border px-3 py-1.5 text-[10px] text-inferay-soft-white hover:bg-inferay-gray transition-colors"
 					>
 						Add Repository
 					</button>
@@ -204,7 +204,7 @@ export function GitPage() {
 
 	if (dirs.length === 0 && pickerOpen) {
 		return (
-			<div className="flex h-full items-center justify-center bg-inferay-bg">
+			<div className="flex h-full items-center justify-center bg-inferay-black">
 				<div>
 					{pickerError && (
 						<div className="mb-2 rounded-lg px-3 py-1.5 text-[10px] text-git-deleted bg-git-deleted/5 border border-git-deleted/20">
@@ -221,8 +221,8 @@ export function GitPage() {
 	}
 
 	return (
-		<div className="flex h-full flex-col bg-inferay-bg">
-			<div className="shrink-0 flex items-center gap-2 px-2 sm:gap-3 sm:px-3 h-12 border-b border-inferay-border bg-inferay-bg">
+		<div className="flex h-full flex-col bg-inferay-black">
+			<div className="shrink-0 flex items-center gap-2 px-2 sm:gap-3 sm:px-3 h-12 border-b border-inferay-gray-border bg-inferay-black">
 				<GroupTabs
 					items={tabs}
 					activeId={project?.cwd || null}
@@ -232,16 +232,19 @@ export function GitPage() {
 				<button
 					type="button"
 					onClick={() => setPickerOpen(true)}
-					className="flex items-center justify-center h-7 w-7 rounded-lg border border-inferay-border bg-inferay-surface text-inferay-text-3 hover:bg-inferay-text/[0.06] hover:text-inferay-text-2 transition-colors"
+					className="flex items-center justify-center h-7 w-7 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray text-inferay-muted-gray hover:bg-inferay-white/[0.06] hover:text-inferay-soft-white transition-colors"
 					title="Add repository"
 				>
 					<IconPlus size={10} />
 				</button>
 				{project && (
 					<>
-						<div className="w-px h-4 bg-inferay-border/40" />
-						<IconGitBranch size={11} className="text-inferay-text-3 shrink-0" />
-						<span className="text-[10px] text-inferay-text-3">
+						<div className="w-px h-4 bg-inferay-gray-border/40" />
+						<IconGitBranch
+							size={11}
+							className="text-inferay-muted-gray shrink-0"
+						/>
+						<span className="text-[10px] text-inferay-muted-gray">
 							{project.branch}
 						</span>
 						{project.ahead > 0 && (
@@ -259,7 +262,7 @@ export function GitPage() {
 				<span className="flex-1" />
 				{selFile && (
 					<span
-						className="text-[11px] font-mono text-inferay-text-3 truncate max-w-[400px]"
+						className="text-[11px] font-mono text-inferay-muted-gray truncate max-w-[400px]"
 						title={selFile.path}
 					>
 						{selFile.path}
@@ -286,8 +289,8 @@ export function GitPage() {
 					) : diffLoading ? (
 						<div className="flex h-full items-center justify-center">
 							<div className="flex items-center gap-2">
-								<div className="w-3 h-3 border border-inferay-text-3 border-t-transparent rounded-full animate-spin" />
-								<span className="text-[11px] text-inferay-text-3">
+								<div className="w-3 h-3 border border-inferay-muted-gray border-t-transparent rounded-full animate-spin" />
+								<span className="text-[11px] text-inferay-muted-gray">
 									Loading...
 								</span>
 							</div>
@@ -297,8 +300,8 @@ export function GitPage() {
 							fallback={
 								<div className="flex h-full items-center justify-center">
 									<div className="flex items-center gap-2">
-										<div className="w-3 h-3 border border-inferay-text-3 border-t-transparent rounded-full animate-spin" />
-										<span className="text-[11px] text-inferay-text-3">
+										<div className="w-3 h-3 border border-inferay-muted-gray border-t-transparent rounded-full animate-spin" />
+										<span className="text-[11px] text-inferay-muted-gray">
 											Loading diff viewer...
 										</span>
 									</div>
@@ -318,7 +321,7 @@ export function GitPage() {
 						</Suspense>
 					) : (
 						<div className="flex h-full items-center justify-center">
-							<p className="text-[11px] text-inferay-text-3/40">
+							<p className="text-[11px] text-inferay-muted-gray/40">
 								{project ? "Select a file to view changes" : "Add a repository"}
 							</p>
 						</div>
@@ -326,12 +329,12 @@ export function GitPage() {
 				</div>
 
 				{project && (
-					<div className="w-52 shrink-0 border-l border-inferay-border flex flex-col bg-inferay-bg">
+					<div className="w-52 shrink-0 border-l border-inferay-gray-border flex flex-col bg-inferay-black">
 						<div className="flex-1 overflow-y-auto">
 							<FileGroup
 								title="Unstaged"
 								files={[...modified, ...untracked]}
-								color="text-inferay-text-2"
+								color="text-inferay-soft-white"
 								selFile={selFile}
 								onSelect={(p) => selectFile(p, false)}
 							/>
@@ -344,12 +347,14 @@ export function GitPage() {
 							/>
 							{project.files.length === 0 && (
 								<div className="flex items-center justify-center h-full">
-									<p className="text-[10px] text-inferay-text-3/40">Clean</p>
+									<p className="text-[10px] text-inferay-muted-gray/40">
+										Clean
+									</p>
 								</div>
 							)}
 						</div>
 						{project.files.length > 0 && (
-							<div className="flex items-center gap-2.5 px-2.5 py-1.5 border-t border-inferay-border text-[8px] text-inferay-text-3/60 tabular-nums">
+							<div className="flex items-center gap-2.5 px-2.5 py-1.5 border-t border-inferay-gray-border text-[8px] text-inferay-muted-gray/60 tabular-nums">
 								{staged.length > 0 && (
 									<span className="flex items-center gap-1">
 										<span className="w-1 h-1 rounded-full bg-git-added" />
@@ -364,7 +369,7 @@ export function GitPage() {
 								)}
 								{untracked.length > 0 && (
 									<span className="flex items-center gap-1">
-										<span className="w-1 h-1 rounded-full bg-inferay-text-3/30" />
+										<span className="w-1 h-1 rounded-full bg-inferay-muted-gray/30" />
 										{untracked.length}
 									</span>
 								)}
@@ -393,13 +398,13 @@ function FileGroup({
 	if (files.length === 0) return null;
 	return (
 		<div>
-			<div className="sticky top-0 z-10 flex items-center justify-between px-2.5 h-6 border-b border-inferay-border/30 bg-inferay-bg">
+			<div className="sticky top-0 z-10 flex items-center justify-between px-2.5 h-6 border-b border-inferay-gray-border/30 bg-inferay-black">
 				<span
 					className={`text-[8px] font-medium uppercase tracking-[0.1em] ${color}`}
 				>
 					{title}
 				</span>
-				<span className="text-[8px] tabular-nums text-inferay-text-3/50">
+				<span className="text-[8px] tabular-nums text-inferay-muted-gray/50">
 					{files.length}
 				</span>
 			</div>
@@ -414,12 +419,12 @@ function FileGroup({
 						className={`w-full flex items-center px-2.5 h-[24px] text-left transition-colors ${
 							active
 								? "bg-inferay-accent/8 border-l-[2px] border-inferay-accent"
-								: "border-l-[2px] border-transparent hover:bg-inferay-text/[0.03]"
+								: "border-l-[2px] border-transparent hover:bg-inferay-white/[0.03]"
 						}`}
 						title={f.path}
 					>
 						<span
-							className={`truncate text-[10.5px] font-mono ${active ? "text-inferay-text" : "text-inferay-text-2/80"}`}
+							className={`truncate text-[10.5px] font-mono ${active ? "text-inferay-white" : "text-inferay-soft-white/80"}`}
 						>
 							{name}
 						</span>

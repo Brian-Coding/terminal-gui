@@ -92,7 +92,7 @@ export function EditorSidebar({
 					<FileGroup
 						title="Unstaged"
 						files={[...modified, ...untracked]}
-						color="text-inferay-text-2"
+						color="text-inferay-soft-white"
 						selected={selectedFile}
 						onSelect={onSelectFile}
 						actionLabel="Stage"
@@ -116,12 +116,12 @@ export function EditorSidebar({
 
 					{hasProject && !files.length && (
 						<div className="flex items-center justify-center py-6">
-							<p className="text-[10px] text-inferay-text-3/50">Clean</p>
+							<p className="text-[10px] text-inferay-muted-gray/50">Clean</p>
 						</div>
 					)}
 					{!hasProject && (
 						<div className="flex items-center justify-center py-6">
-							<p className="px-3 text-center text-[10px] text-inferay-text-3/50">
+							<p className="px-3 text-center text-[10px] text-inferay-muted-gray/50">
 								No repository
 							</p>
 						</div>
@@ -133,12 +133,12 @@ export function EditorSidebar({
 				<div className="flex-1 min-h-0 overflow-y-auto">
 					{selectedCommitHash === "wip" ? (
 						<>
-							<div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2 border-b border-inferay-border bg-inferay-bg">
+							<div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-2 border-b border-inferay-gray-border bg-inferay-black">
 								<div className="w-3 h-3 rounded-full border-2 border-dashed border-inferay-accent" />
-								<span className="text-[11px] font-medium text-inferay-text">
+								<span className="text-[11px] font-medium text-inferay-white">
 									WIP on {branch ?? "branch"}
 								</span>
-								<span className="ml-auto text-[9px] text-inferay-text-3">
+								<span className="ml-auto text-[9px] text-inferay-muted-gray">
 									{files.length} files
 								</span>
 							</div>
@@ -146,17 +146,17 @@ export function EditorSidebar({
 								{files.map((f, i) => (
 									<div
 										key={i}
-										className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-inferay-text/5"
+										className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-inferay-white/5"
 									>
 										<FileStatusIcon status={f.status} />
-										<span className="flex-1 truncate text-[10px] font-medium text-inferay-text-2">
+										<span className="flex-1 truncate text-[10px] font-medium text-inferay-soft-white">
 											{f.path}
 										</span>
 									</div>
 								))}
 								{files.length === 0 && (
 									<div className="flex items-center justify-center py-6">
-										<p className="text-[10px] text-inferay-text-3/50">
+										<p className="text-[10px] text-inferay-muted-gray/50">
 											No changes
 										</p>
 									</div>
@@ -166,18 +166,22 @@ export function EditorSidebar({
 					) : selectedCommitHash ? (
 						commitDetailsLoading ? (
 							<div className="flex items-center justify-center py-8">
-								<p className="text-[10px] text-inferay-text-3">Loading...</p>
+								<p className="text-[10px] text-inferay-muted-gray">
+									Loading...
+								</p>
 							</div>
 						) : commitDetails ? (
 							<CommitDetailsPanel details={commitDetails} />
 						) : (
 							<div className="flex items-center justify-center py-8">
-								<p className="text-[10px] text-inferay-text-3">No details</p>
+								<p className="text-[10px] text-inferay-muted-gray">
+									No details
+								</p>
 							</div>
 						)
 					) : (
 						<div className="flex items-center justify-center py-8">
-							<p className="text-[10px] text-inferay-text-3 px-4 text-center">
+							<p className="text-[10px] text-inferay-muted-gray px-4 text-center">
 								Select a commit to view details
 							</p>
 						</div>
@@ -210,18 +214,20 @@ function EditorSidebarHeader({
 	onFileViewModeChange: (mode: "path" | "tree") => void;
 }) {
 	return (
-		<div className="sticky top-0 z-20 flex items-center gap-1.5 border-b border-inferay-border/40 bg-inferay-bg px-2 py-1.5">
-			<span className="text-[9px] font-medium text-inferay-text-3">Files</span>
+		<div className="sticky top-0 z-20 flex items-center gap-1.5 border-b border-inferay-gray-border/40 bg-inferay-black px-2 py-1.5">
+			<span className="text-[9px] font-medium text-inferay-muted-gray">
+				Files
+			</span>
 			<span className="flex-1" />
-			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-border bg-inferay-surface">
+			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-gray-border bg-inferay-dark-gray">
 				<button
 					type="button"
 					onClick={() => onFileViewModeChange("path")}
 					title="Path view"
 					className={`h-full px-1.5 text-[8px] font-medium transition-colors ${
 						fileViewMode === "path"
-							? "bg-inferay-text/10 text-inferay-text"
-							: "text-inferay-text-3 hover:text-inferay-text-2"
+							? "bg-inferay-white/10 text-inferay-white"
+							: "text-inferay-muted-gray hover:text-inferay-soft-white"
 					}`}
 				>
 					Path
@@ -232,8 +238,8 @@ function EditorSidebarHeader({
 					title="Tree view"
 					className={`h-full px-1.5 text-[8px] font-medium transition-colors ${
 						fileViewMode === "tree"
-							? "bg-inferay-text/10 text-inferay-text"
-							: "text-inferay-text-3 hover:text-inferay-text-2"
+							? "bg-inferay-white/10 text-inferay-white"
+							: "text-inferay-muted-gray hover:text-inferay-soft-white"
 					}`}
 				>
 					Tree
@@ -264,34 +270,34 @@ function CommitSection({
 	const description = commitMessage.split("\n").slice(1).join("\n");
 
 	return (
-		<div className="shrink-0 border-t border-inferay-border">
+		<div className="shrink-0 border-t border-inferay-gray-border">
 			{/* Commit header */}
-			<div className="flex items-center justify-between px-2.5 h-8 border-b border-inferay-border/40">
+			<div className="flex items-center justify-between px-2.5 h-8 border-b border-inferay-gray-border/40">
 				<div className="flex items-center gap-1.5">
-					<IconGitCommit size={12} className="text-inferay-text-3" />
-					<span className="text-[9px] font-medium text-inferay-text-2">
+					<IconGitCommit size={12} className="text-inferay-muted-gray" />
+					<span className="text-[9px] font-medium text-inferay-soft-white">
 						Commit
 					</span>
 				</div>
 			</div>
 
 			{/* Amend toggle */}
-			<label className="flex items-center gap-1.5 px-2.5 py-1.5 cursor-pointer hover:bg-inferay-text/[0.03] transition-colors">
+			<label className="flex items-center gap-1.5 px-2.5 py-1.5 cursor-pointer hover:bg-inferay-white/[0.03] transition-colors">
 				<input
 					type="checkbox"
 					checked={amendMode}
 					onChange={(e) => onAmendModeChange(e.target.checked)}
-					className="w-3 h-3 rounded border-inferay-border accent-inferay-accent"
+					className="w-3 h-3 rounded border-inferay-gray-border accent-inferay-accent"
 				/>
-				<span className="text-[9px] text-inferay-text-3">
+				<span className="text-[9px] text-inferay-muted-gray">
 					Amend previous commit
 				</span>
 			</label>
 
 			{/* Commit form */}
 			<div className="px-2.5 pb-2.5 space-y-2">
-				<div className="rounded-lg border border-inferay-border bg-inferay-surface overflow-hidden focus-within:border-inferay-accent/50 transition-colors">
-					<div className="flex items-center border-b border-inferay-border/20">
+				<div className="rounded-lg border border-inferay-gray-border bg-inferay-dark-gray overflow-hidden focus-within:border-inferay-accent/50 transition-colors">
+					<div className="flex items-center border-b border-inferay-gray-border/20">
 						<input
 							type="text"
 							value={summary}
@@ -301,7 +307,7 @@ function CommitSection({
 								onCommitMessageChange(lines.join("\n"));
 							}}
 							placeholder="Commit summary"
-							className="flex-1 min-w-0 bg-transparent px-2.5 py-2 text-[11px] text-inferay-text placeholder:text-inferay-text-3/30 outline-none"
+							className="flex-1 min-w-0 bg-transparent px-2.5 py-2 text-[11px] text-inferay-white placeholder:text-inferay-muted-gray/30 outline-none"
 							onKeyDown={(e) => {
 								if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
 									e.preventDefault();
@@ -314,7 +320,7 @@ function CommitSection({
 								className={`shrink-0 pr-2.5 text-[9px] tabular-nums ${
 									summary.length > 72
 										? "text-amber-400"
-										: "text-inferay-text-3/40"
+										: "text-inferay-muted-gray/40"
 								}`}
 							>
 								{summary.length}
@@ -330,7 +336,7 @@ function CommitSection({
 							);
 						}}
 						placeholder="Description"
-						className="w-full resize-none bg-transparent px-2.5 py-2 text-[10px] text-inferay-text placeholder:text-inferay-text-3/30 outline-none"
+						className="w-full resize-none bg-transparent px-2.5 py-2 text-[10px] text-inferay-white placeholder:text-inferay-muted-gray/30 outline-none"
 						rows={4}
 					/>
 				</div>
@@ -371,26 +377,26 @@ function CommitDetailsPanel({
 }) {
 	return (
 		<div className="flex flex-col h-full">
-			<div className="shrink-0 border-b border-inferay-border p-3 space-y-2">
+			<div className="shrink-0 border-b border-inferay-gray-border p-3 space-y-2">
 				<div className="flex items-center gap-2">
 					<span className="font-mono text-[11px] text-inferay-accent font-medium">
 						{details.hash.slice(0, 7)}
 					</span>
-					<span className="text-[10px] text-inferay-text-3">
+					<span className="text-[10px] text-inferay-muted-gray">
 						{details.date}
 					</span>
 				</div>
-				<p className="text-[11px] text-inferay-text leading-relaxed">
+				<p className="text-[11px] text-inferay-white leading-relaxed">
 					{details.message}
 				</p>
-				<p className="text-[10px] text-inferay-text-2">{details.author}</p>
+				<p className="text-[10px] text-inferay-soft-white">{details.author}</p>
 			</div>
 
-			<div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-inferay-border/50 bg-inferay-text/[0.02]">
-				<span className="text-[9px] font-medium text-inferay-text-2">
+			<div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-inferay-gray-border/50 bg-inferay-white/[0.02]">
+				<span className="text-[9px] font-medium text-inferay-soft-white">
 					Files Changed
 				</span>
-				<span className="text-[9px] text-inferay-text-3">
+				<span className="text-[9px] text-inferay-muted-gray">
 					{details.files.length}
 				</span>
 			</div>
@@ -399,10 +405,10 @@ function CommitDetailsPanel({
 				{details.files.map((file, i) => (
 					<div
 						key={i}
-						className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-inferay-text/5 cursor-pointer"
+						className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-inferay-white/5 cursor-pointer"
 					>
 						<FileStatusIcon status={file.status} />
-						<span className="flex-1 truncate text-[10px] font-medium text-inferay-text-2">
+						<span className="flex-1 truncate text-[10px] font-medium text-inferay-soft-white">
 							{file.path.split("/").pop()}
 						</span>
 						<div className="shrink-0 flex items-center gap-1 text-[9px] tabular-nums">
@@ -417,7 +423,7 @@ function CommitDetailsPanel({
 				))}
 			</div>
 
-			<div className="shrink-0 flex items-center justify-center gap-3 px-3 py-2 border-t border-inferay-border text-[10px]">
+			<div className="shrink-0 flex items-center justify-center gap-3 px-3 py-2 border-t border-inferay-gray-border text-[10px]">
 				<span className="text-git-added">
 					+{details.files.reduce((sum, f) => sum + f.additions, 0)}
 				</span>
@@ -475,7 +481,7 @@ export function FileStatusIcon({ status }: { status: string }) {
 		default:
 			return (
 				<span
-					className={`${base} text-inferay-text-3 bg-inferay-text/8`}
+					className={`${base} text-inferay-muted-gray bg-inferay-white/8`}
 					title={status}
 				>
 					{status.charAt(0) || "•"}
@@ -574,7 +580,7 @@ function TreeNodeRow({
 				className={`group relative flex h-6 items-center gap-1 cursor-pointer transition-colors border-l-2 ${
 					active
 						? "border-inferay-accent bg-inferay-accent/8"
-						: "border-transparent hover:bg-inferay-text/[0.04]"
+						: "border-transparent hover:bg-inferay-white/[0.04]"
 				}`}
 				style={{ paddingLeft: `${5 + depth * 11}px`, paddingRight: 8 }}
 				onClick={() => {
@@ -589,13 +595,13 @@ function TreeNodeRow({
 					<>
 						<IconChevronRight
 							size={10}
-							className={`shrink-0 text-inferay-text-3 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+							className={`shrink-0 text-inferay-muted-gray transition-transform ${isExpanded ? "rotate-90" : ""}`}
 						/>
 						<IconFolderFill
 							size={12}
-							className={`shrink-0 transition-colors ${isExpanded ? "text-inferay-accent/60" : "text-inferay-text-3/70"}`}
+							className={`shrink-0 transition-colors ${isExpanded ? "text-inferay-accent/60" : "text-inferay-muted-gray/70"}`}
 						/>
-						<span className="truncate text-[9.5px] font-medium text-inferay-text-2">
+						<span className="truncate text-[9.5px] font-medium text-inferay-soft-white">
 							{node.name}
 						</span>
 					</>
@@ -606,8 +612,8 @@ function TreeNodeRow({
 						<span
 							className={`min-w-0 flex-1 truncate text-[9.5px] font-medium transition-colors ${
 								active
-									? "text-inferay-text"
-									: "text-inferay-text-2 group-hover:text-inferay-text"
+									? "text-inferay-white"
+									: "text-inferay-soft-white group-hover:text-inferay-white"
 							}`}
 						>
 							{node.name}
@@ -619,7 +625,7 @@ function TreeNodeRow({
 									e.stopPropagation();
 									onAction(file.path);
 								}}
-								className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-md border border-inferay-border/50 bg-inferay-surface px-1.5 py-0.5 text-[8px] text-inferay-text-3 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:text-inferay-text-2 hover:border-inferay-border transition-all"
+								className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-md border border-inferay-gray-border/50 bg-inferay-dark-gray px-1.5 py-0.5 text-[8px] text-inferay-muted-gray opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:text-inferay-soft-white hover:border-inferay-gray-border transition-all"
 							>
 								{actionLabel}
 							</button>
@@ -706,7 +712,7 @@ function FileGroup({
 			}}
 		>
 			{/* Section header */}
-			<div className="sticky top-0 z-10 flex h-8 shrink-0 items-center justify-between border-b border-inferay-border/40 bg-inferay-bg px-2.5">
+			<div className="sticky top-0 z-10 flex h-8 shrink-0 items-center justify-between border-b border-inferay-gray-border/40 bg-inferay-black px-2.5">
 				<button
 					type="button"
 					onClick={() => isCollapsible && setIsCollapsed(!isCollapsed)}
@@ -715,13 +721,13 @@ function FileGroup({
 					{isCollapsible && (
 						<IconChevronRight
 							size={10}
-							className={`text-inferay-text-3 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+							className={`text-inferay-muted-gray transition-transform ${isCollapsed ? "" : "rotate-90"}`}
 						/>
 					)}
-					<span className="text-[9px] font-medium text-inferay-text-2">
+					<span className="text-[9px] font-medium text-inferay-soft-white">
 						{title} Files
 					</span>
-					<span className="min-w-[16px] h-4 flex items-center justify-center rounded-full bg-inferay-text/[0.08] text-[8px] tabular-nums text-inferay-text-3 px-1">
+					<span className="min-w-[16px] h-4 flex items-center justify-center rounded-full bg-inferay-white/[0.08] text-[8px] tabular-nums text-inferay-muted-gray px-1">
 						{files.length}
 					</span>
 				</button>
@@ -729,7 +735,7 @@ function FileGroup({
 					<button
 						type="button"
 						onClick={onActionAll}
-						className="flex items-center gap-1 rounded-md border border-inferay-border/50 bg-inferay-surface px-2 py-0.5 text-[8px] font-medium text-inferay-text-3 hover:text-inferay-text-2 hover:border-inferay-border hover:bg-inferay-surface-2 transition-colors"
+						className="flex items-center gap-1 rounded-md border border-inferay-gray-border/50 bg-inferay-dark-gray px-2 py-0.5 text-[8px] font-medium text-inferay-muted-gray hover:text-inferay-soft-white hover:border-inferay-gray-border hover:bg-inferay-gray transition-colors"
 					>
 						{actionLabel} All
 					</button>
@@ -755,7 +761,7 @@ function FileGroup({
 									className={`group relative flex items-center gap-1.5 px-2 py-1 border-l-2 transition-colors ${
 										active
 											? "border-inferay-accent bg-inferay-accent/8"
-											: "border-transparent hover:bg-inferay-text/[0.04]"
+											: "border-transparent hover:bg-inferay-white/[0.04]"
 									}`}
 								>
 									<FileStatusIcon status={f.status} />
@@ -766,12 +772,12 @@ function FileGroup({
 										title={f.path}
 									>
 										<span
-											className={`truncate text-[10px] font-medium leading-tight transition-colors ${active ? "text-inferay-text" : "text-inferay-text-2 group-hover:text-inferay-text"}`}
+											className={`truncate text-[10px] font-medium leading-tight transition-colors ${active ? "text-inferay-white" : "text-inferay-soft-white group-hover:text-inferay-white"}`}
 										>
 											{name}
 										</span>
 										{dir && (
-											<span className="truncate text-[8px] leading-tight text-inferay-text-3/60">
+											<span className="truncate text-[8px] leading-tight text-inferay-muted-gray/60">
 												{dir}
 											</span>
 										)}
@@ -783,7 +789,7 @@ function FileGroup({
 												e.stopPropagation();
 												onAction(f.path);
 											}}
-											className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded px-1.5 py-0.5 text-[8px] text-inferay-text-3 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-inferay-text/10 hover:text-inferay-text transition-all"
+											className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded px-1.5 py-0.5 text-[8px] text-inferay-muted-gray opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto hover:bg-inferay-white/10 hover:text-inferay-white transition-all"
 											title={`${actionLabel} ${f.path}`}
 										>
 											{actionLabel}

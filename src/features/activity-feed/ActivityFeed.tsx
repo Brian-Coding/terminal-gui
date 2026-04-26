@@ -31,20 +31,20 @@ function getToolIcon(toolName: string, isActive: boolean): React.ReactNode {
 		case "write":
 			return <IconFilePlus className={`${baseClass} text-git-added`} />;
 		case "grep":
-			return <IconSearch className={`${baseClass} text-inferay-text-2`} />;
+			return <IconSearch className={`${baseClass} text-inferay-soft-white`} />;
 		case "glob":
-			return <IconWrench className={`${baseClass} text-inferay-text-2`} />;
+			return <IconWrench className={`${baseClass} text-inferay-soft-white`} />;
 		case "bash":
-			return <IconWrench className={`${baseClass} text-inferay-text-2`} />;
+			return <IconWrench className={`${baseClass} text-inferay-soft-white`} />;
 		case "task":
 			return <IconUsers className={`${baseClass} text-inferay-accent`} />;
 		case "todowrite":
-			return <IconWrench className={`${baseClass} text-inferay-text-3`} />;
+			return <IconWrench className={`${baseClass} text-inferay-muted-gray`} />;
 		case "webfetch":
 		case "websearch":
 			return <IconGlobe className={`${baseClass} text-inferay-accent`} />;
 		default:
-			return <IconWrench className={`${baseClass} text-inferay-text-3`} />;
+			return <IconWrench className={`${baseClass} text-inferay-muted-gray`} />;
 	}
 }
 
@@ -55,7 +55,7 @@ function getActivityIcon(
 	switch (type) {
 		case "thinking":
 			return (
-				<IconClock className="w-3 h-3 text-inferay-text-3 animate-pulse" />
+				<IconClock className="w-3 h-3 text-inferay-muted-gray animate-pulse" />
 			);
 		case "responding":
 			return (
@@ -72,7 +72,7 @@ function getActivityIcon(
 		case "error":
 			return <IconX className="w-3 h-3 text-git-removed" />;
 		default:
-			return <div className="w-1.5 h-1.5 rounded-full bg-inferay-text-3" />;
+			return <div className="w-1.5 h-1.5 rounded-full bg-inferay-muted-gray" />;
 	}
 }
 
@@ -135,7 +135,7 @@ export const ActivityFeed = memo(function ActivityFeed({
 	if (events.length === 0) {
 		return (
 			<div
-				className={`flex items-center justify-center text-inferay-text-3 text-[10px] ${className}`}
+				className={`flex items-center justify-center text-inferay-muted-gray text-[10px] ${className}`}
 			>
 				No activity yet
 			</div>
@@ -171,13 +171,13 @@ export const ActivityFeed = memo(function ActivityFeed({
 							<span
 								className={`
 									flex-1 truncate
-									${event.type === "error" ? "text-git-removed" : "text-inferay-text-2"}
+									${event.type === "error" ? "text-git-removed" : "text-inferay-soft-white"}
 								`}
 								title={event.message}
 							>
 								{getEventLabel(event)}
 							</span>
-							<span className="shrink-0 text-inferay-text-3 tabular-nums">
+							<span className="shrink-0 text-inferay-muted-gray tabular-nums">
 								{formatRelativeTime(event.timestamp)}
 							</span>
 						</div>
@@ -201,9 +201,9 @@ export const ActivityIndicator = memo(function ActivityIndicator({
 	if (!latestEvent) {
 		return (
 			<div
-				className={`flex items-center gap-1.5 text-inferay-text-3 ${className}`}
+				className={`flex items-center gap-1.5 text-inferay-muted-gray ${className}`}
 			>
-				<div className="w-1.5 h-1.5 rounded-full bg-inferay-text-3" />
+				<div className="w-1.5 h-1.5 rounded-full bg-inferay-muted-gray" />
 				<span className="text-[10px]">Idle</span>
 			</div>
 		);
@@ -216,7 +216,7 @@ export const ActivityIndicator = memo(function ActivityIndicator({
 
 	return (
 		<div
-			className={`flex items-center gap-1.5 ${isActive ? "text-inferay-accent" : "text-inferay-text-2"} ${className}`}
+			className={`flex items-center gap-1.5 ${isActive ? "text-inferay-accent" : "text-inferay-soft-white"} ${className}`}
 		>
 			{getActivityIcon(latestEvent.type, latestEvent.toolName)}
 			<span className="text-[10px] truncate max-w-[100px]">

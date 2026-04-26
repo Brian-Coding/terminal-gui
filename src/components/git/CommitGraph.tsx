@@ -169,7 +169,7 @@ function RefBadges({ refs, color }: { refs: string[]; color: string }) {
 				/>
 			))}
 			{extra > 0 && (
-				<span className="shrink-0 text-[8px] text-inferay-text-3">
+				<span className="shrink-0 text-[8px] text-inferay-muted-gray">
 					+{extra}
 				</span>
 			)}
@@ -193,7 +193,7 @@ function HeaderRow({
 	onToggleColumn: (key: keyof ColumnVisibility) => void;
 }) {
 	return (
-		<div className="sticky top-0 z-10 flex h-7 items-center border-b border-inferay-border bg-inferay-bg/95 text-[9px] font-semibold uppercase tracking-[0.16em] text-inferay-text-3 backdrop-blur">
+		<div className="sticky top-0 z-10 flex h-7 items-center border-b border-inferay-gray-border bg-inferay-black/95 text-[9px] font-semibold uppercase tracking-[0.16em] text-inferay-muted-gray backdrop-blur">
 			<div className="shrink-0 px-2 text-right" style={{ width: REF_WIDTH }}>
 				Refs
 			</div>
@@ -201,7 +201,7 @@ function HeaderRow({
 			<div className="min-w-0 flex-1 px-3">Description</div>
 			{columns.author && (
 				<div
-					className="shrink-0 border-l border-inferay-border px-3"
+					className="shrink-0 border-l border-inferay-gray-border px-3"
 					style={{ width: AUTHOR_WIDTH }}
 				>
 					Author
@@ -209,7 +209,7 @@ function HeaderRow({
 			)}
 			{columns.date && (
 				<div
-					className="shrink-0 border-l border-inferay-border px-3"
+					className="shrink-0 border-l border-inferay-gray-border px-3"
 					style={{ width: DATE_WIDTH }}
 				>
 					Date
@@ -217,22 +217,22 @@ function HeaderRow({
 			)}
 			{columns.sha && (
 				<div
-					className="shrink-0 border-l border-inferay-border px-3 text-right"
+					className="shrink-0 border-l border-inferay-gray-border px-3 text-right"
 					style={{ width: SHA_WIDTH }}
 				>
 					SHA
 				</div>
 			)}
-			<div className="relative shrink-0 border-l border-inferay-border px-2">
+			<div className="relative shrink-0 border-l border-inferay-gray-border px-2">
 				<button
 					type="button"
 					onClick={onToggleColumnsMenu}
-					className="rounded border border-inferay-border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.12em] text-inferay-text-3 hover:border-inferay-border-bold hover:text-inferay-text-2"
+					className="rounded border border-inferay-gray-border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.12em] text-inferay-muted-gray hover:border-inferay-gray-border-bold hover:text-inferay-soft-white"
 				>
 					Cols
 				</button>
 				{isColumnsOpen && (
-					<div className="absolute right-2 top-8 z-20 w-28 rounded-md border border-inferay-border bg-inferay-surface p-1 shadow-lg">
+					<div className="absolute right-2 top-8 z-20 w-28 rounded-md border border-inferay-gray-border bg-inferay-dark-gray p-1 shadow-lg">
 						{(
 							[
 								["author", "Author"],
@@ -244,10 +244,10 @@ function HeaderRow({
 								key={key}
 								type="button"
 								onClick={() => onToggleColumn(key)}
-								className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-[10px] text-inferay-text-2 hover:bg-inferay-surface-2"
+								className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-[10px] text-inferay-soft-white hover:bg-inferay-gray"
 							>
 								{label}
-								<span className="text-inferay-text-3">
+								<span className="text-inferay-muted-gray">
 									{columns[key] ? "On" : "Off"}
 								</span>
 							</button>
@@ -281,7 +281,7 @@ const WipRow = memo(function WipRow({
 
 	return (
 		<div
-			className="group relative flex cursor-pointer items-center transition-colors hover:bg-inferay-surface"
+			className="group relative flex cursor-pointer items-center transition-colors hover:bg-inferay-dark-gray"
 			style={{
 				height: ROW_HEIGHT,
 				backgroundColor: selected
@@ -312,7 +312,7 @@ const WipRow = memo(function WipRow({
 						width: AVATAR_SIZE,
 						height: AVATAR_SIZE,
 						borderColor: "#f97316",
-						backgroundColor: "var(--color-inferay-bg)",
+						backgroundColor: "var(--color-inferay-black)",
 						boxShadow: "0 0 6px rgba(249,115,22,0.2)",
 						zIndex: 3,
 					}}
@@ -326,17 +326,17 @@ const WipRow = memo(function WipRow({
 
 			{/* Message */}
 			<div className="flex min-w-0 flex-1 items-center gap-2 px-3">
-				<span className="truncate text-[11px] text-inferay-text-2">
+				<span className="truncate text-[11px] text-inferay-soft-white">
 					Uncommitted changes
 				</span>
-				<span className="shrink-0 text-[10px] text-inferay-text-3">
+				<span className="shrink-0 text-[10px] text-inferay-muted-gray">
 					{fileCount} file{fileCount === 1 ? "" : "s"}
 				</span>
 			</div>
 
 			{columns.author && (
 				<div
-					className="flex h-full shrink-0 items-center gap-2 border-l border-inferay-border px-3 text-[10px] text-inferay-text-3"
+					className="flex h-full shrink-0 items-center gap-2 border-l border-inferay-gray-border px-3 text-[10px] text-inferay-muted-gray"
 					style={{ width: AUTHOR_WIDTH }}
 				>
 					<div className="h-4 w-4 rounded-full border border-dashed border-orange-500/70" />
@@ -345,7 +345,7 @@ const WipRow = memo(function WipRow({
 			)}
 			{columns.date && (
 				<div
-					className="flex h-full shrink-0 items-center border-l border-inferay-border px-3 text-[10px] text-inferay-text-3"
+					className="flex h-full shrink-0 items-center border-l border-inferay-gray-border px-3 text-[10px] text-inferay-muted-gray"
 					style={{ width: DATE_WIDTH }}
 				>
 					Now
@@ -353,7 +353,7 @@ const WipRow = memo(function WipRow({
 			)}
 			{columns.sha && (
 				<div
-					className="flex h-full shrink-0 items-center justify-end border-l border-inferay-border px-3 text-[10px] font-mono text-inferay-text-3"
+					className="flex h-full shrink-0 items-center justify-end border-l border-inferay-gray-border px-3 text-[10px] font-mono text-inferay-muted-gray"
 					style={{ width: SHA_WIDTH }}
 				>
 					---
@@ -391,7 +391,7 @@ const CommitRow = memo(function CommitRow({
 
 	return (
 		<div
-			className="group relative flex cursor-pointer items-center transition-colors hover:bg-inferay-surface"
+			className="group relative flex cursor-pointer items-center transition-colors hover:bg-inferay-dark-gray"
 			style={{
 				height: ROW_HEIGHT,
 				backgroundColor: selected
@@ -430,7 +430,7 @@ const CommitRow = memo(function CommitRow({
 						width: AVATAR_SIZE,
 						height: AVATAR_SIZE,
 						border: `2.5px solid ${commit.color}`,
-						backgroundColor: "var(--color-inferay-bg)",
+						backgroundColor: "var(--color-inferay-black)",
 						boxShadow: `0 0 6px ${hexToRgba(commit.color, 0.25)}`,
 						zIndex: 3,
 					}}
@@ -439,14 +439,14 @@ const CommitRow = memo(function CommitRow({
 
 			{/* Commit message + author */}
 			<div className="flex min-w-0 flex-1 items-center gap-2 px-3">
-				<div className="min-w-0 truncate text-[11px] leading-none text-inferay-text-2 group-hover:text-inferay-text">
+				<div className="min-w-0 truncate text-[11px] leading-none text-inferay-soft-white group-hover:text-inferay-white">
 					{commit.message}
 				</div>
 			</div>
 
 			{columns.author && (
 				<div
-					className="flex h-full shrink-0 items-center gap-2 border-l border-inferay-border px-3"
+					className="flex h-full shrink-0 items-center gap-2 border-l border-inferay-gray-border px-3"
 					style={{ width: AUTHOR_WIDTH }}
 				>
 					<img
@@ -454,14 +454,14 @@ const CommitRow = memo(function CommitRow({
 						alt=""
 						className="h-4 w-4 shrink-0 rounded-full"
 					/>
-					<span className="truncate text-[10px] text-inferay-text-3">
+					<span className="truncate text-[10px] text-inferay-muted-gray">
 						{commit.author}
 					</span>
 				</div>
 			)}
 			{columns.date && (
 				<div
-					className="flex h-full shrink-0 items-center border-l border-inferay-border px-3 text-[10px] text-inferay-text-3"
+					className="flex h-full shrink-0 items-center border-l border-inferay-gray-border px-3 text-[10px] text-inferay-muted-gray"
 					style={{ width: DATE_WIDTH }}
 				>
 					{commit.date}
@@ -469,7 +469,7 @@ const CommitRow = memo(function CommitRow({
 			)}
 			{columns.sha && (
 				<div
-					className="flex h-full shrink-0 items-center justify-end border-l border-inferay-border px-3 text-[10px] font-mono text-inferay-text-3"
+					className="flex h-full shrink-0 items-center justify-end border-l border-inferay-gray-border px-3 text-[10px] font-mono text-inferay-muted-gray"
 					style={{ width: SHA_WIDTH }}
 				>
 					{commit.hash}
@@ -613,16 +613,16 @@ export const CommitGraph = memo(function CommitGraph({
 	if (!commits.length && !hasWip) {
 		return (
 			<div
-				className={`flex items-center justify-center rounded-md border border-inferay-border bg-inferay-bg py-8 ${className}`}
+				className={`flex items-center justify-center rounded-md border border-inferay-gray-border bg-inferay-black py-8 ${className}`}
 			>
-				<p className="text-[11px] text-inferay-text-3">No commits</p>
+				<p className="text-[11px] text-inferay-muted-gray">No commits</p>
 			</div>
 		);
 	}
 
 	return (
 		<div
-			className={`relative overflow-auto rounded-md border border-inferay-border bg-inferay-bg ${className}`}
+			className={`relative overflow-auto rounded-md border border-inferay-gray-border bg-inferay-black ${className}`}
 		>
 			<HeaderRow
 				graphWidth={graphWidth}

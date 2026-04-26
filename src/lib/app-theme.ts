@@ -6,21 +6,21 @@ import {
 import type { ThemeId } from "./terminal-utils.ts";
 
 export interface AppThemeColors {
-	readonly bg: string;
-	readonly surface: string;
-	readonly surface2: string;
-	readonly surface3: string;
-	readonly border: string;
-	readonly borderBold: string;
+	readonly black: string;
+	readonly darkGray: string;
+	readonly gray: string;
+	readonly lightGray: string;
+	readonly grayBorder: string;
+	readonly grayBorderBold: string;
 	readonly accent: string;
 	readonly accentHover: string;
 	readonly success: string;
 	readonly warning: string;
 	readonly error: string;
 	readonly info: string;
-	readonly text: string;
-	readonly text2: string;
-	readonly text3: string;
+	readonly white: string;
+	readonly softWhite: string;
+	readonly mutedGray: string;
 }
 
 export interface AppTheme {
@@ -48,26 +48,27 @@ const APP_THEME_IDS = {
 export type AppThemeId = (typeof APP_THEME_IDS)[keyof typeof APP_THEME_IDS];
 
 const CSS_VAR_MAP: Record<keyof AppThemeColors, string> = {
-	bg: "--color-inferay-bg",
-	surface: "--color-inferay-surface",
-	surface2: "--color-inferay-surface-2",
-	surface3: "--color-inferay-surface-3",
-	border: "--color-inferay-border",
-	borderBold: "--color-inferay-border-bold",
+	black: "--color-inferay-black",
+	darkGray: "--color-inferay-dark-gray",
+	gray: "--color-inferay-gray",
+	lightGray: "--color-inferay-light-gray",
+	grayBorder: "--color-inferay-gray-border",
+	grayBorderBold: "--color-inferay-gray-border-bold",
 	accent: "--color-inferay-accent",
 	accentHover: "--color-inferay-accent-hover",
 	success: "--color-inferay-success",
 	warning: "--color-inferay-warning",
 	error: "--color-inferay-error",
 	info: "--color-inferay-info",
-	text: "--color-inferay-text",
-	text2: "--color-inferay-text-2",
-	text3: "--color-inferay-text-3",
+	white: "--color-inferay-white",
+	softWhite: "--color-inferay-soft-white",
+	mutedGray: "--color-inferay-muted-gray",
 };
 
 const ACCENT_FOREGROUND_CSS_VAR = "--color-inferay-accent-foreground" as const;
 
-// Compact theme data: [id, name, bg, surface, surface2, surface3, border, borderBold, accent, accentHover, success, warning, error, info, text, text2, text3, light?]
+// Compact theme data:
+// [id, name, black, darkGray, gray, lightGray, grayBorder, grayBorderBold, accent, accentHover, success, warning, error, info, white, softWhite, mutedGray, light?]
 type ThemeTuple = [AppThemeId, string, ...string[]] & { length: 17 | 18 };
 
 function makeTheme(t: ThemeTuple): AppTheme {
@@ -76,21 +77,21 @@ function makeTheme(t: ThemeTuple): AppTheme {
 		name: t[1],
 		...(t.length === 18 ? { light: true } : {}),
 		colors: {
-			bg: t[2],
-			surface: t[3],
-			surface2: t[4],
-			surface3: t[5],
-			border: t[6],
-			borderBold: t[7],
+			black: t[2],
+			darkGray: t[3],
+			gray: t[4],
+			lightGray: t[5],
+			grayBorder: t[6],
+			grayBorderBold: t[7],
 			accent: t[8],
 			accentHover: t[9],
 			success: t[10],
 			warning: t[11],
 			error: t[12],
 			info: t[13],
-			text: t[14],
-			text2: t[15],
-			text3: t[16],
+			white: t[14],
+			softWhite: t[15],
+			mutedGray: t[16],
 		},
 	};
 }
@@ -359,7 +360,7 @@ function loadAppCustomTheme(): AppThemeColors {
 			APP_CUSTOM_THEME_KEY,
 			null
 		);
-		if (parsed && typeof parsed.bg === "string")
+		if (parsed && typeof parsed.black === "string")
 			return { ...DEFAULT_COLORS, ...parsed };
 	} catch {}
 	return { ...DEFAULT_COLORS };
@@ -395,10 +396,10 @@ export function applyAppTheme(id: AppThemeId): void {
 	);
 	const light =
 		id === "custom"
-			? isLightColor(theme.colors.bg)
+			? isLightColor(theme.colors.black)
 			: APP_THEMES.find((t) => t.id === id)?.light;
 	root.style.colorScheme = light ? "light" : "dark";
-	meta?.setAttribute("content", theme.colors.bg);
+	meta?.setAttribute("content", theme.colors.black);
 }
 
 function isLightColor(hex: string): boolean {

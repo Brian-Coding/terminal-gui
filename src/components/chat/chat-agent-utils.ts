@@ -13,6 +13,27 @@ export type ToolActivity = {
 	summary: string;
 };
 
+function basename(value: string): string {
+	return value.split("/").pop() || value;
+}
+
+function trimSummary(value: string, max = 40): string {
+	return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+export function normalizeToolName(toolName: string): string {
+	const name = toolName.trim().toLowerCase();
+	if (name.startsWith("mcp__")) {
+		const parts = name.split("__").filter(Boolean);
+		return parts[parts.length - 1] || "mcp_tool";
+	}
+	if (name === "exec_command") return "exec";
+	if (name === "websearch") return "web_search";
+	if (name === "read_file" || name === "view") return "read";
+	if (name === "apply_patch") return "patch";
+	return name;
+}
+
 export function findTriggerAtCursor(
 	value: string,
 	cursorPos: number,
@@ -41,14 +62,47 @@ export function extractToolSummary(content: string): string {
 	try {
 		const parsed = JSON.parse(content);
 		if (parsed.file_path) {
-			return parsed.file_path.split("/").pop() || parsed.file_path;
+			return basename(parsed.file_path);
+		}
+		if (parsed.path) {
+			return basename(parsed.path);
+		}
+		if (parsed.file) {
+			return basename(parsed.file);
+		}
+		if (Array.isArray(parsed.files) && parsed.files.length > 0) {
+			const first = String(parsed.files[0] ?? "");
+			return parsed.files.length === 1
+				? basename(first)
+				: `${basename(first)} +${parsed.files.length - 1}`;
+		}
+		if (Array.isArray(parsed.changes) && parsed.changes.length > 0) {
+			const first = parsed.changes[0];
+			const firstFile =
+				typeof first === "string"
+					? first
+					: (first?.file_path ?? first?.path ?? first?.file ?? "");
+			if (firstFile) {
+				return parsed.changes.length === 1
+					? basename(firstFile)
+					: `${basename(firstFile)} +${parsed.changes.length - 1}`;
+			}
+			return `${parsed.changes.length} changes`;
 		}
 		if (parsed.command) {
-			const command = parsed.command.slice(0, 40);
-			return `${command}${parsed.command.length > 40 ? "..." : ""}`;
+			return trimSummary(parsed.command);
+		}
+		if (parsed.cmd) {
+			return trimSummary(parsed.cmd);
 		}
 		if (parsed.pattern) return `/${parsed.pattern.slice(0, 30)}/`;
 		if (parsed.query) return parsed.query.slice(0, 40);
+		if (parsed.invocation?.tool) {
+			return normalizeToolName(parsed.invocation.tool);
+		}
+		if (parsed.tool) {
+			return normalizeToolName(parsed.tool);
+		}
 		if (parsed.url) {
 			try {
 				return new URL(parsed.url).hostname;
@@ -68,10 +122,11 @@ export function extractToolActivities(
 	const activities: ToolActivity[] = [];
 	for (const msg of messages) {
 		if (msg.role !== "tool" || !msg.toolName) continue;
-		const summary = extractToolSummary(msg.content) || msg.toolName;
+		const toolName = normalizeToolName(msg.toolName);
+		const summary = extractToolSummary(msg.content) || toolName;
 		activities.push({
 			id: msg.id,
-			toolName: msg.toolName,
+			toolName,
 			isStreaming: msg.isStreaming ?? false,
 			summary,
 		});
@@ -80,5 +135,5 @@ export function extractToolActivities(
 }
 
 export function getStatusToolName(status: string): string | null {
-	return status.startsWith("tool:") ? status.slice(5) : null;
+	return status.startsWith("tool:") ? normalizeToolName(status.slice(5)) : null;
 }

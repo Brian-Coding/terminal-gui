@@ -32,12 +32,12 @@ interface SideBySideDiffViewerProps {
 	) => void;
 }
 const DEFAULT_THEME = {
-	bg: "var(--color-inferay-surface)",
-	lineBg: "var(--color-inferay-surface)",
+	bg: "var(--color-inferay-dark-gray)",
+	lineBg: "var(--color-inferay-dark-gray)",
 	addedBg: "rgba(46, 160, 67, 0.15)",
 	removedBg: "rgba(248, 81, 73, 0.15)",
-	lineNumColor: "var(--color-inferay-text-2)",
-	textColor: "var(--color-inferay-text)",
+	lineNumColor: "var(--color-inferay-soft-white)",
+	textColor: "var(--color-inferay-white)",
 };
 
 const LINE_HEIGHT = 12;
@@ -181,12 +181,12 @@ const VirtualizedLine = memo(function VirtualizedLine({
 					type="button"
 					onClick={handleCopy}
 					className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
-					style={{ backgroundColor: "var(--color-inferay-surface-2)" }}
+					style={{ backgroundColor: "var(--color-inferay-gray)" }}
 					title="Copy line"
 				>
 					<IconCopy
 						size={12}
-						style={{ color: "var(--color-inferay-text-2)" }}
+						style={{ color: "var(--color-inferay-soft-white)" }}
 					/>
 				</button>
 			)}
@@ -306,7 +306,7 @@ const CopyFeedback = memo(function CopyFeedback({ show }: { show: boolean }) {
 			className="absolute top-2 right-2 px-2 py-1 rounded text-[10px] font-medium z-10 animate-pulse"
 			style={{
 				backgroundColor: "var(--color-inferay-accent)",
-				color: "var(--color-inferay-surface)",
+				color: "var(--color-inferay-dark-gray)",
 			}}
 		>
 			Copied!
@@ -449,21 +449,21 @@ export const SideBySideDiffViewer = memo(function SideBySideDiffViewer({
 			className="rounded-lg border overflow-hidden relative"
 			style={{
 				backgroundColor: theme.bg,
-				borderColor: "var(--color-inferay-border)",
+				borderColor: "var(--color-inferay-gray-border)",
 			}}
 		>
 			<CopyFeedback show={showCopyFeedback} />
 
 			<div
 				className="flex items-center border-b"
-				style={{ borderColor: "var(--color-inferay-border)" }}
+				style={{ borderColor: "var(--color-inferay-gray-border)" }}
 			>
 				<div
 					className="flex-1 flex items-center gap-2 px-3 py-1.5 text-[10px] font-medium"
 					style={{
-						backgroundColor: "var(--color-inferay-surface-2)",
-						color: "var(--color-inferay-text-2)",
-						borderRight: "1px solid var(--color-inferay-border)",
+						backgroundColor: "var(--color-inferay-gray)",
+						color: "var(--color-inferay-soft-white)",
+						borderRight: "1px solid var(--color-inferay-gray-border)",
 					}}
 				>
 					<span className="opacity-50">Before</span>
@@ -484,8 +484,8 @@ export const SideBySideDiffViewer = memo(function SideBySideDiffViewer({
 				<div
 					className="flex-1 flex items-center gap-2 px-3 py-1.5 text-[10px] font-medium"
 					style={{
-						backgroundColor: "var(--color-inferay-surface-2)",
-						color: "var(--color-inferay-text-2)",
+						backgroundColor: "var(--color-inferay-gray)",
+						color: "var(--color-inferay-soft-white)",
 					}}
 				>
 					<span className="opacity-50">After</span>
@@ -523,7 +523,7 @@ export const SideBySideDiffViewer = memo(function SideBySideDiffViewer({
 
 				<div
 					className="w-px shrink-0"
-					style={{ backgroundColor: "var(--color-inferay-border)" }}
+					style={{ backgroundColor: "var(--color-inferay-gray-border)" }}
 				/>
 
 				<VirtualizedPane
@@ -546,9 +546,9 @@ export const SideBySideDiffViewer = memo(function SideBySideDiffViewer({
 			<div
 				className="flex items-center justify-between px-3 py-1 text-[9px] border-t"
 				style={{
-					backgroundColor: "var(--color-inferay-surface-2)",
-					borderColor: "var(--color-inferay-border)",
-					color: "var(--color-inferay-text-3)",
+					backgroundColor: "var(--color-inferay-gray)",
+					borderColor: "var(--color-inferay-gray-border)",
+					color: "var(--color-inferay-muted-gray)",
 				}}
 			>
 				<span>
@@ -560,7 +560,7 @@ export const SideBySideDiffViewer = memo(function SideBySideDiffViewer({
 						<button
 							type="button"
 							onClick={goToPrevChange}
-							className="px-1.5 py-0.5 rounded hover:bg-inferay-surface-3 transition-colors"
+							className="px-1.5 py-0.5 rounded hover:bg-inferay-light-gray transition-colors"
 							title="Previous change (k/p)"
 						>
 							<IconChevronRight size={10} className="rotate-180" />
@@ -571,7 +571,7 @@ export const SideBySideDiffViewer = memo(function SideBySideDiffViewer({
 						<button
 							type="button"
 							onClick={goToNextChange}
-							className="px-1.5 py-0.5 rounded hover:bg-inferay-surface-3 transition-colors"
+							className="px-1.5 py-0.5 rounded hover:bg-inferay-light-gray transition-colors"
 							title="Next change (j/n)"
 						>
 							<IconChevronRight size={10} />

@@ -9,6 +9,7 @@ import { preloadPrompts } from "./hooks/usePrompts.ts";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
 import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
 import { GitPage } from "./pages/GitPage";
+import { ImagesPage } from "./pages/ImagesPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PromptsPage } from "./pages/PromptsPage";
 
@@ -62,8 +63,8 @@ const root = createRoot(rootElement);
 root.render(
 	<ErrorBoundary>
 		<HashRouter>
-			<div className="flex h-screen flex-col bg-inferay-bg">
-				<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-inferay-bg" />
+			<div className="flex h-screen flex-col bg-inferay-black">
+				<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-inferay-black" />
 				<div className="flex min-h-0 flex-1">
 					<Sidebar />
 					<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -78,6 +79,7 @@ root.render(
 									<Route path="/terminal" element={<TerminalPage />} />
 									<Route path="/git" element={<GitPage />} />
 									<Route path="/prompts" element={<PromptsPage />} />
+									<Route path="/images" element={<ImagesPage />} />
 									<Route path="/profile" element={<ProfilePage />} />
 								</Routes>
 							</Suspense>

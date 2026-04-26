@@ -3,20 +3,20 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { AgentKind } from "../../lib/agents.ts";
-import {
-	createClaudeEnv,
-	resolveInteractiveAgentCommand,
-} from "../../lib/terminal-command.ts";
 import { PROJECT_ROOT } from "../../lib/path-utils.ts";
-import { PidTracker } from "../services/pid-tracker.ts";
 import {
 	badRequest,
 	readJson,
 	tryRoute,
 	writeJson,
 } from "../../lib/route-helpers.ts";
-import { ChatService } from "../services/claude-chat.ts";
+import {
+	createClaudeEnv,
+	resolveInteractiveAgentCommand,
+} from "../../lib/terminal-command.ts";
+import { ChatService } from "../services/agent-chat.ts";
 import { ConfigManager } from "../services/config-manager.ts";
+import { PidTracker } from "../services/pid-tracker.ts";
 
 const configManager = new ConfigManager();
 

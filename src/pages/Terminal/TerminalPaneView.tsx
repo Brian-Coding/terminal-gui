@@ -227,7 +227,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 						backgroundColor: theme.bg,
 					}}
 				>
-					<span className="text-[9px] font-medium text-inferay-text-2">
+					<span className="text-[9px] font-medium text-inferay-soft-white">
 						New Session
 					</span>
 					<span className="flex-1" />
@@ -237,7 +237,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 							e.stopPropagation();
 							onClose(pane.id, true);
 						}}
-						className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+						className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-muted-gray hover:text-red-400 hover:bg-red-500/15"
 						title="Close pane"
 					>
 						<IconX size={8} />
@@ -246,7 +246,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				<div className="flex-1 flex flex-col">
 					<div className="flex-1 flex items-center justify-center">
 						<div className="flex flex-col items-center gap-4">
-							<p className="text-xs text-inferay-text-2">
+							<p className="text-xs text-inferay-soft-white">
 								Start a new terminal or agent session
 							</p>
 							<NewSessionButtons
@@ -312,21 +312,21 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				>
 					<span
 						className={
-							isSelected ? "text-inferay-accent" : "text-inferay-text-3"
+							isSelected ? "text-inferay-accent" : "text-inferay-muted-gray"
 						}
 					>
 						<IconTerminal size={10} />
 					</span>
 					<span
-						className={`font-medium ${isSelected ? "text-inferay-text-2" : "text-inferay-text-3"} text-[9px]`}
+						className={`font-medium ${isSelected ? "text-inferay-soft-white" : "text-inferay-muted-gray"} text-[9px]`}
 					>
 						{getAgentDefinition(pane.agentKind).label}
 					</span>
 					{pane.cwd && (
 						<>
-							<span className="text-[9px] text-inferay-text-3">›</span>
+							<span className="text-[9px] text-inferay-muted-gray">›</span>
 							<span
-								className={`font-medium ${isSelected ? "text-inferay-text" : "text-inferay-text-3"} text-[9px] truncate`}
+								className={`font-medium ${isSelected ? "text-inferay-white" : "text-inferay-muted-gray"} text-[9px] truncate`}
 								title={pane.cwd}
 							>
 								{pane.cwd.split("/").pop() || pane.cwd}
@@ -343,7 +343,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 							e.stopPropagation();
 							onClose(pane.id);
 						}}
-						className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+						className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-muted-gray hover:text-red-400 hover:bg-red-500/15"
 						title="Close pane"
 					>
 						<IconX size={8} />

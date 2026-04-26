@@ -75,6 +75,53 @@ function extractText(value: any): string {
 	return "";
 }
 
+function basename(value: string): string {
+	return value.split("/").pop() || value;
+}
+
+function trimSummary(value: string, max = 48): string {
+	return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function summarizeToolEvent(toolName: string, payload: any): string {
+	if (!payload) return toolName;
+	if (typeof payload.command === "string" && payload.command) {
+		return trimSummary(payload.command);
+	}
+	if (typeof payload.cmd === "string" && payload.cmd) {
+		return trimSummary(payload.cmd);
+	}
+	if (typeof payload.query === "string" && payload.query) {
+		return trimSummary(payload.query);
+	}
+	if (typeof payload.path === "string" && payload.path) {
+		return basename(payload.path);
+	}
+	if (typeof payload.file === "string" && payload.file) {
+		return basename(payload.file);
+	}
+	if (Array.isArray(payload.files) && payload.files.length > 0) {
+		const first = String(payload.files[0] ?? "");
+		return payload.files.length === 1
+			? basename(first)
+			: `${basename(first)} +${payload.files.length - 1}`;
+	}
+	if (Array.isArray(payload.changes) && payload.changes.length > 0) {
+		const first = payload.changes[0];
+		const firstFile =
+			typeof first === "string"
+				? first
+				: (first?.file_path ?? first?.path ?? first?.file ?? "");
+		if (firstFile) {
+			return payload.changes.length === 1
+				? basename(firstFile)
+				: `${basename(firstFile)} +${payload.changes.length - 1}`;
+		}
+		return `${payload.changes.length} changes`;
+	}
+	return toolName;
+}
+
 function handleCodexEvent(
 	event: any,
 	ctx: AgentRunContext,
@@ -141,11 +188,17 @@ function handleCodexEvent(
 			assistantDelta(content);
 		}
 	} else if (event?.type === "exec_command_begin") {
-		ctx.emitStatus("tool:exec", true);
-		startTool("exec", {
+		const payload = {
 			command: event.parsed_cmd ?? event.command ?? event.cmd ?? "",
 			cwd: event.cwd ?? ctx.cwd,
+		};
+		ctx.emitStatus("tool:exec", true);
+		ctx.emitActivity({
+			toolName: "exec",
+			summary: summarizeToolEvent("exec", payload),
+			isStreaming: true,
 		});
+		startTool("exec", payload);
 	} else if (event?.type === "exec_command_output_delta") {
 		const chunk =
 			typeof event.chunk === "string"
@@ -155,20 +208,38 @@ function handleCodexEvent(
 	} else if (event?.type === "exec_command_end") {
 		closeTool();
 	} else if (event?.type === "patch_apply_begin") {
+		const payload = { changes: event.changes ?? event.files ?? [] };
 		ctx.emitStatus("tool:patch", true);
-		startTool("patch", { changes: event.changes ?? event.files ?? [] });
+		ctx.emitActivity({
+			toolName: "patch",
+			summary: summarizeToolEvent("patch", payload),
+			isStreaming: true,
+		});
+		startTool("patch", payload);
 	} else if (event?.type === "patch_apply_end") {
 		closeTool();
 	} else if (event?.type === "web_search_begin") {
+		const payload = { query: event.query ?? "" };
 		ctx.emitStatus("tool:web_search", true);
-		startTool("web_search", { query: event.query ?? "" });
+		ctx.emitActivity({
+			toolName: "web_search",
+			summary: summarizeToolEvent("web_search", payload),
+			isStreaming: true,
+		});
+		startTool("web_search", payload);
 	} else if (event?.type === "web_search_end") {
 		if (event.query) toolDelta(event.query);
 		closeTool();
 	} else if (event?.type === "mcp_tool_call_begin") {
 		const toolName = event.invocation?.tool ?? event.tool ?? "mcp_tool";
+		const payload = event.invocation?.arguments ?? event.arguments ?? {};
 		ctx.emitStatus(`tool:${toolName}`, true);
-		startTool(toolName, event.invocation?.arguments ?? event.arguments ?? {});
+		ctx.emitActivity({
+			toolName,
+			summary: summarizeToolEvent(toolName, payload),
+			isStreaming: true,
+		});
+		startTool(toolName, payload);
 	} else if (event?.type === "mcp_tool_call_end") {
 		closeTool();
 	} else if (

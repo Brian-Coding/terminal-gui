@@ -4,12 +4,12 @@
 	/* Custom breakpoints */
 	--breakpoint-xs: 480px;
 
-	--color-inferay-bg: #000000;
-	--color-inferay-surface: #1c1c1e;
-	--color-inferay-surface-2: #2c2c2e;
-	--color-inferay-surface-3: #3a3a3c;
-	--color-inferay-border: rgba(255, 255, 255, 0.08);
-	--color-inferay-border-bold: rgba(255, 255, 255, 0.15);
+	--color-inferay-black: #000000;
+	--color-inferay-dark-gray: #1c1c1e;
+	--color-inferay-gray: #2c2c2e;
+	--color-inferay-light-gray: #3a3a3c;
+	--color-inferay-gray-border: rgba(255, 255, 255, 0.08);
+	--color-inferay-gray-border-bold: rgba(255, 255, 255, 0.15);
 
 	--color-inferay-accent: #e5e5e7;
 	--color-inferay-accent-hover: #ffffff;
@@ -19,9 +19,9 @@
 	--color-inferay-error: #ff453a;
 	--color-inferay-info: #64d2ff;
 
-	--color-inferay-text: #f5f5f7;
-	--color-inferay-text-2: rgba(255, 255, 255, 0.72);
-	--color-inferay-text-3: rgba(255, 255, 255, 0.45);
+	--color-inferay-white: #f5f5f7;
+	--color-inferay-soft-white: rgba(255, 255, 255, 0.72);
+	--color-inferay-muted-gray: rgba(255, 255, 255, 0.45);
 
 	/* Git status — muted, desaturated tones */
 	--color-git-added: #5a9e80;
@@ -105,8 +105,8 @@ select,
 
 /* Ensure placeholder is visible even with transparent text (for highlight overlays) */
 textarea::placeholder {
-	color: var(--color-inferay-text-3);
-	-webkit-text-fill-color: var(--color-inferay-text-3);
+	color: var(--color-inferay-muted-gray);
+	-webkit-text-fill-color: var(--color-inferay-muted-gray);
 	opacity: 1;
 }
 
@@ -166,7 +166,7 @@ textarea::placeholder {
 	left: 1rem;
 	right: 0;
 	height: 1px;
-	background: var(--color-inferay-border);
+	background: var(--color-inferay-gray-border);
 }
 
 /* Hide XTerm.js scrollbar completely */

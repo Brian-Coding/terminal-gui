@@ -12,6 +12,7 @@ import {
 	saveTerminalState,
 } from "../../lib/terminal-utils.ts";
 import {
+	IconCamera,
 	IconGitBranch,
 	IconLayers,
 	IconPlus,
@@ -30,6 +31,7 @@ interface NavItem {
 const navItems: NavItem[] = [
 	{ label: "Git", path: "/git", icon: IconGitBranch },
 	{ label: "Prompts", path: "/prompts", icon: IconSlash },
+	{ label: "Images", path: "/images", icon: IconCamera },
 ];
 
 const logoUrl = resolveServerUrl("/logo.png");
@@ -77,8 +79,8 @@ function WorkspaceItem({
 				onClick={onSelect}
 				className={`mx-1 mb-px flex h-8 w-full items-center justify-center rounded-md text-[10px] font-medium transition-colors ${
 					isActive
-						? "bg-inferay-text/[0.06] text-inferay-text"
-						: "text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2"
+						? "bg-inferay-white/[0.06] text-inferay-white"
+						: "text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white"
 				}`}
 				title={group.name}
 			>
@@ -91,8 +93,8 @@ function WorkspaceItem({
 		<div
 			className={`group mx-1 mb-px flex h-8 items-center rounded-md px-2 text-[11px] cursor-pointer transition-colors ${
 				isActive
-					? "bg-inferay-text/[0.06] text-inferay-text"
-					: "text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2"
+					? "bg-inferay-white/[0.06] text-inferay-white"
+					: "text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white"
 			}`}
 			onClick={onSelect}
 		>
@@ -108,7 +110,7 @@ function WorkspaceItem({
 							if (e.key === "Enter") commitRename();
 							if (e.key === "Escape") setEditing(false);
 						}}
-						className="w-full bg-transparent text-[11px] text-inferay-text outline-none border-b border-inferay-accent"
+						className="w-full bg-transparent text-[11px] text-inferay-white outline-none border-b border-inferay-accent"
 					/>
 				) : (
 					<div
@@ -123,7 +125,7 @@ function WorkspaceItem({
 					</div>
 				)}
 			</div>
-			<span className="ml-1 text-[9px] text-inferay-text-3 shrink-0">
+			<span className="ml-1 text-[9px] text-inferay-muted-gray shrink-0">
 				{group.panes.length}
 			</span>
 			{canDelete && !editing && (
@@ -133,7 +135,7 @@ function WorkspaceItem({
 						e.stopPropagation();
 						onDelete();
 					}}
-					className="ml-1 rounded p-0.5 text-inferay-text-3 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 shrink-0"
+					className="ml-1 rounded p-0.5 text-inferay-muted-gray opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 shrink-0"
 					title="Delete workspace"
 				>
 					<IconTrash size={10} />
@@ -259,11 +261,11 @@ export function Sidebar() {
 
 	return (
 		<aside
-			className={`relative flex flex-col border-r border-inferay-border bg-inferay-bg transition-all duration-200 ${
+			className={`relative flex flex-col border-r border-inferay-gray-border bg-inferay-black transition-all duration-200 ${
 				collapsed ? "w-12" : "w-48"
 			}`}
 		>
-			<div className="electrobun-webkit-app-region-drag flex h-12 items-center px-3 border-b border-inferay-border">
+			<div className="electrobun-webkit-app-region-drag flex h-12 items-center px-3 border-b border-inferay-gray-border">
 				<button
 					type="button"
 					onClick={() => setCollapsed(!collapsed)}
@@ -293,8 +295,8 @@ export function Sidebar() {
 							className={({ isActive }) =>
 								`mx-1 mb-px flex h-10 items-center gap-2 rounded-md px-2 text-[12px] transition-colors ${
 									isActive
-										? "bg-inferay-text/[0.06] text-inferay-text"
-										: "text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2"
+										? "bg-inferay-white/[0.06] text-inferay-white"
+										: "text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white"
 								} ${collapsed ? "justify-center !px-0" : ""}`
 							}
 							title={collapsed ? item.label : undefined}
@@ -308,7 +310,7 @@ export function Sidebar() {
 				})}
 
 				{/* Workspaces section */}
-				<div className="mt-2 border-t border-inferay-border pt-2">
+				<div className="mt-2 border-t border-inferay-gray-border pt-2">
 					<div
 						className={`mx-1 mb-1 flex items-center ${collapsed ? "justify-center" : "justify-between px-2"}`}
 					>
@@ -316,20 +318,20 @@ export function Sidebar() {
 							<button
 								type="button"
 								onClick={addWorkspace}
-								className="flex h-8 w-8 items-center justify-center rounded-md text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2"
+								className="flex h-8 w-8 items-center justify-center rounded-md text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white"
 								title="Workspaces"
 							>
 								<IconLayers size={15} />
 							</button>
 						) : (
 							<>
-								<span className="text-[10px] font-medium uppercase tracking-wider text-inferay-text-3">
+								<span className="text-[10px] font-medium uppercase tracking-wider text-inferay-muted-gray">
 									Workspaces
 								</span>
 								<button
 									type="button"
 									onClick={addWorkspace}
-									className="rounded p-0.5 text-inferay-text-3 transition-colors hover:bg-inferay-text/[0.06] hover:text-inferay-text-2"
+									className="rounded p-0.5 text-inferay-muted-gray transition-colors hover:bg-inferay-white/[0.06] hover:text-inferay-soft-white"
 									title="New workspace"
 								>
 									<IconPlus size={12} />
@@ -351,13 +353,13 @@ export function Sidebar() {
 					))}
 				</div>
 			</nav>
-			<div className="border-t border-inferay-border p-1.5">
+			<div className="border-t border-inferay-gray-border p-1.5">
 				<button
 					type="button"
 					onClick={() =>
 						window.dispatchEvent(new Event("terminal-open-theme-panel"))
 					}
-					className={`flex h-10 w-full items-center gap-2 rounded-md px-2 text-[12px] transition-colors text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2 ${collapsed ? "justify-center !px-0" : ""}`}
+					className={`flex h-10 w-full items-center gap-2 rounded-md px-2 text-[12px] transition-colors text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white ${collapsed ? "justify-center !px-0" : ""}`}
 					title={collapsed ? "Settings" : undefined}
 				>
 					<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md">
@@ -370,8 +372,8 @@ export function Sidebar() {
 					className={({ isActive }) =>
 						`flex h-10 items-center gap-2 rounded-md px-2 text-[12px] transition-colors ${
 							isActive
-								? "bg-inferay-text/[0.06] text-inferay-text"
-								: "text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2"
+								? "bg-inferay-white/[0.06] text-inferay-white"
+								: "text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white"
 						} ${collapsed ? "justify-center !px-0" : ""}`
 					}
 					title={collapsed ? "Profile" : undefined}

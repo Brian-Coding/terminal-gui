@@ -187,25 +187,25 @@ export function PromptsPage() {
 	});
 
 	return (
-		<div className="flex h-full flex-col bg-inferay-bg">
-			<div className="shrink-0 flex items-center gap-2 px-3 h-12 border-b border-inferay-border bg-inferay-bg">
+		<div className="flex h-full flex-col bg-inferay-black">
+			<div className="shrink-0 flex items-center gap-2 px-3 h-12 border-b border-inferay-gray-border bg-inferay-black">
 				<FilterDropdown filter={filter} onFilterChange={setFilter} />
 
 				<div className="relative">
 					<IconSearch
 						size={12}
-						className="absolute left-2 top-1/2 -translate-y-1/2 text-inferay-text-3 pointer-events-none"
+						className="absolute left-2 top-1/2 -translate-y-1/2 text-inferay-muted-gray pointer-events-none"
 					/>
 					<input
 						type="text"
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
 						placeholder="Search..."
-						className="h-7 w-44 rounded-lg border border-inferay-border bg-inferay-surface pl-7 pr-2 text-[11px] text-inferay-text placeholder-inferay-text-3 outline-none"
+						className="h-7 w-44 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray pl-7 pr-2 text-[11px] text-inferay-white placeholder-inferay-muted-gray outline-none"
 					/>
 				</div>
 
-				<span className="text-[9px] tabular-nums text-inferay-text-3">
+				<span className="text-[9px] tabular-nums text-inferay-muted-gray">
 					{filtered.length}
 				</span>
 
@@ -214,7 +214,7 @@ export function PromptsPage() {
 				<button
 					type="button"
 					onClick={startCreate}
-					className="flex items-center gap-1 h-7 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-[11px] text-inferay-text-2 hover:bg-inferay-surface-2 transition-colors"
+					className="flex items-center gap-1 h-7 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[11px] text-inferay-soft-white hover:bg-inferay-gray transition-colors"
 				>
 					<IconPlus size={10} />
 					New
@@ -226,10 +226,10 @@ export function PromptsPage() {
 					{filtered.length === 0 ? (
 						<div className="flex items-center justify-center h-full">
 							<div className="text-center">
-								<p className="text-[11px] text-inferay-text-3 mb-1">
+								<p className="text-[11px] text-inferay-muted-gray mb-1">
 									{search ? "No prompts found" : "No prompts yet"}
 								</p>
-								<p className="text-[9px] text-inferay-text-3/50">
+								<p className="text-[9px] text-inferay-muted-gray/50">
 									{search
 										? "Try a different search"
 										: "Create your first prompt"}
@@ -249,28 +249,28 @@ export function PromptsPage() {
 										onClick={() => selectPrompt(prompt)}
 										className={`text-left rounded-lg border p-3 transition-colors ${
 											isActive
-												? "border-inferay-accent/30 bg-inferay-text/[0.04]"
-												: "border-inferay-border hover:bg-inferay-text/[0.03] hover:border-inferay-border-bold"
+												? "border-inferay-accent/30 bg-inferay-white/[0.04]"
+												: "border-inferay-gray-border hover:bg-inferay-white/[0.03] hover:border-inferay-gray-border-bold"
 										}`}
 									>
 										<div className="flex items-center gap-2 mb-1.5">
-											<span className="text-[10px] font-mono font-medium text-inferay-text">
+											<span className="text-[10px] font-mono font-medium text-inferay-white">
 												/{prompt.command}
 											</span>
 											{prompt.isBuiltIn && (
-												<span className="text-[7px] text-inferay-text-3/50 bg-inferay-text/[0.04] px-1 py-0.5 rounded">
+												<span className="text-[7px] text-inferay-muted-gray/50 bg-inferay-white/[0.04] px-1 py-0.5 rounded">
 													built-in
 												</span>
 											)}
 										</div>
-										<p className="text-[10px] text-inferay-text-2 mb-1 truncate">
+										<p className="text-[10px] text-inferay-soft-white mb-1 truncate">
 											{prompt.name}
 										</p>
-										<p className="text-[9px] text-inferay-text-3 line-clamp-2 leading-relaxed">
+										<p className="text-[9px] text-inferay-muted-gray line-clamp-2 leading-relaxed">
 											{prompt.description}
 										</p>
 										{prompt.executionCount > 0 && (
-											<p className="mt-2 text-[8px] tabular-nums text-inferay-text-3/40">
+											<p className="mt-2 text-[8px] tabular-nums text-inferay-muted-gray/40">
 												{prompt.executionCount} uses
 											</p>
 										)}
@@ -282,7 +282,7 @@ export function PromptsPage() {
 				</div>
 
 				{(selectedPrompt || form.isCreating) && (
-					<div className="w-[420px] shrink-0 border-l border-inferay-border overflow-y-auto bg-inferay-bg">
+					<div className="w-[420px] shrink-0 border-l border-inferay-gray-border overflow-y-auto bg-inferay-black">
 						<PromptDetailPanel
 							selectedPrompt={selectedPrompt}
 							isCreatingNew={form.isCreating}
@@ -353,7 +353,7 @@ function FilterDropdown({
 			<button
 				type="button"
 				onClick={() => setOpen(!open)}
-				className="flex items-center gap-1.5 h-7 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-[11px] text-inferay-text-2 hover:bg-inferay-surface-2 transition-colors"
+				className="flex items-center gap-1.5 h-7 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[11px] text-inferay-soft-white hover:bg-inferay-gray transition-colors"
 			>
 				{activeLabel}
 				<IconChevronDown
@@ -362,7 +362,7 @@ function FilterDropdown({
 				/>
 			</button>
 			{open && (
-				<div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-inferay-border bg-inferay-surface p-1 shadow-2xl">
+				<div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] rounded-lg border border-inferay-gray-border bg-inferay-dark-gray p-1 shadow-2xl">
 					{FILTER_OPTIONS.map((opt) => (
 						<button
 							type="button"
@@ -373,8 +373,8 @@ function FilterDropdown({
 							}}
 							className={`w-full text-left rounded-md px-2.5 py-1.5 text-[10px] transition-colors ${
 								filter === opt.value
-									? "bg-inferay-text/[0.06] text-inferay-text"
-									: "text-inferay-text-3 hover:bg-inferay-text/[0.03] hover:text-inferay-text-2"
+									? "bg-inferay-white/[0.06] text-inferay-white"
+									: "text-inferay-muted-gray hover:bg-inferay-white/[0.03] hover:text-inferay-soft-white"
 							}`}
 						>
 							{opt.label}

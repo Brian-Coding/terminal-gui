@@ -22,9 +22,9 @@ export function Button({
 	const variants = {
 		primary: "bg-inferay-accent text-white hover:bg-inferay-accent-hover",
 		secondary:
-			"bg-inferay-surface-2 text-inferay-text-2 hover:bg-inferay-surface-3 border border-inferay-border",
+			"bg-inferay-gray text-inferay-soft-white hover:bg-inferay-light-gray border border-inferay-gray-border",
 		ghost:
-			"text-inferay-text-3 hover:text-inferay-text hover:bg-inferay-text/[0.08] backdrop-blur-sm",
+			"text-inferay-muted-gray hover:text-inferay-white hover:bg-inferay-white/[0.08] backdrop-blur-sm",
 		danger:
 			"bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20",
 	};

@@ -202,8 +202,8 @@ function EditDiffCard({
 		<div
 			className="rounded-lg border overflow-hidden text-[11px] font-diff"
 			style={{
-				backgroundColor: theme?.surface ?? "var(--color-inferay-surface)",
-				borderColor: theme?.border ?? "var(--color-inferay-border)",
+				backgroundColor: theme?.surface ?? "var(--color-inferay-dark-gray)",
+				borderColor: theme?.border ?? "var(--color-inferay-gray-border)",
 			}}
 		>
 			<button
@@ -211,10 +211,10 @@ function EditDiffCard({
 				onClick={() => setIsExpanded(!isExpanded)}
 				className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-left hover:opacity-80 transition-all"
 				style={{
-					color: theme?.fg ?? "var(--color-inferay-text-2)",
-					backgroundColor: theme?.surface ?? "var(--color-inferay-surface)",
+					color: theme?.fg ?? "var(--color-inferay-soft-white)",
+					backgroundColor: theme?.surface ?? "var(--color-inferay-dark-gray)",
 					borderBottom: isExpanded
-						? `1px solid ${theme?.border ?? "var(--color-inferay-border)"}`
+						? `1px solid ${theme?.border ?? "var(--color-inferay-gray-border)"}`
 						: "none",
 				}}
 			>
@@ -242,8 +242,9 @@ function EditDiffCard({
 					<span
 						className="text-[10px] px-1.5 py-px rounded opacity-60"
 						style={{
-							backgroundColor: theme?.surface ?? "var(--color-inferay-surface)",
-							color: theme?.fgDim ?? "var(--color-inferay-text-3)",
+							backgroundColor:
+								theme?.surface ?? "var(--color-inferay-dark-gray)",
+							color: theme?.fgDim ?? "var(--color-inferay-muted-gray)",
 						}}
 					>
 						{editCount}×
@@ -265,7 +266,7 @@ function EditDiffCard({
 										className="h-px my-0.5"
 										style={{
 											backgroundColor:
-												theme?.border ?? "var(--color-inferay-border)",
+												theme?.border ?? "var(--color-inferay-gray-border)",
 											opacity: 0.3,
 										}}
 									/>
@@ -309,7 +310,7 @@ function EditDiffCard({
 											<span
 												className="flex-1 whitespace-pre pr-2 text-[10px] shiki-line"
 												style={{
-													color: theme?.fg ?? "var(--color-inferay-text)",
+													color: theme?.fg ?? "var(--color-inferay-white)",
 												}}
 												dangerouslySetInnerHTML={
 													isReady && highlightedHtml

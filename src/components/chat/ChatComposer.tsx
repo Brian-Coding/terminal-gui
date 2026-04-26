@@ -2,8 +2,8 @@ import type React from "react";
 import { useMemo, useRef } from "react";
 import {
 	IconCheck,
-	IconPlus,
 	IconPencil,
+	IconPlus,
 	IconTrash,
 	IconX,
 } from "../ui/Icons.tsx";
@@ -202,7 +202,7 @@ export function ChatComposer({
 							key={img.path}
 							className="relative group h-14 w-14 shrink-0 overflow-hidden rounded-lg"
 							style={{
-								border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
+								border: `1px solid ${theme ? borderColor : "var(--color-inferay-gray-border)"}`,
 							}}
 						>
 							<img
@@ -237,7 +237,7 @@ export function ChatComposer({
 							<span
 								className="shrink-0 mt-0.5 text-[9px] font-mono tabular-nums"
 								style={{
-									color: theme ? fgDim : "var(--color-inferay-text-3)",
+									color: theme ? fgDim : "var(--color-inferay-muted-gray)",
 								}}
 							>
 								{idx + 1}
@@ -269,7 +269,7 @@ export function ChatComposer({
 										}}
 										className="flex-1 bg-transparent text-[11px] outline-none border-none px-1 py-0.5 rounded"
 										style={{
-											color: theme ? fgColor : "var(--color-inferay-text)",
+											color: theme ? fgColor : "var(--color-inferay-white)",
 											backgroundColor: theme
 												? surfaceColor
 												: "rgba(255,255,255,0.06)",
@@ -306,7 +306,7 @@ export function ChatComposer({
 										onClick={() => setEditingQueueId(null)}
 										className="shrink-0 p-0.5 rounded transition-colors"
 										style={{
-											color: theme ? fgDim : "var(--color-inferay-text-3)",
+											color: theme ? fgDim : "var(--color-inferay-muted-gray)",
 										}}
 										title="Cancel"
 									>
@@ -325,7 +325,7 @@ export function ChatComposer({
 									<span
 										className="flex-1 text-[11px] truncate"
 										style={{
-											color: theme ? fgColor : "var(--color-inferay-text)",
+											color: theme ? fgColor : "var(--color-inferay-white)",
 										}}
 									>
 										{qm.displayText}
@@ -339,7 +339,9 @@ export function ChatComposer({
 											}}
 											className="p-0.5 rounded transition-colors hover:bg-white/10"
 											style={{
-												color: theme ? fgDim : "var(--color-inferay-text-3)",
+												color: theme
+													? fgDim
+													: "var(--color-inferay-muted-gray)",
 											}}
 											title="Edit"
 										>
@@ -377,10 +379,8 @@ export function ChatComposer({
 						className="relative flex flex-col rounded-xl overflow-visible"
 						ref={inputContainerRef}
 						style={{
-							border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
-							backgroundColor: theme
-								? bgColor
-								: "var(--color-inferay-surface-2)",
+							border: "1px solid var(--color-inferay-gray-border)",
+							backgroundColor: "var(--color-inferay-dark-gray)",
 						}}
 					>
 						{fileMenu.show && fileResults.length > 0 && (
@@ -390,17 +390,17 @@ export function ChatComposer({
 									maxHeight: 300,
 									backgroundColor: theme
 										? surfaceColor
-										: "var(--color-inferay-surface)",
+										: "var(--color-inferay-dark-gray)",
 									borderColor: theme
 										? borderColor
-										: "var(--color-inferay-border)",
+										: "var(--color-inferay-gray-border)",
 								}}
 							>
 								<div
 									className="px-3 py-1.5 text-[9px] font-semibold tracking-wide"
 									style={{
-										color: theme ? fgDim : "var(--color-inferay-text-3)",
-										borderBottom: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
+										color: theme ? fgDim : "var(--color-inferay-muted-gray)",
+										borderBottom: `1px solid ${theme ? borderColor : "var(--color-inferay-gray-border)"}`,
 									}}
 								>
 									FILES
@@ -427,7 +427,9 @@ export function ChatComposer({
 										<span
 											className="shrink-0 text-[11px]"
 											style={{
-												color: theme ? fgDim : "var(--color-inferay-text-3)",
+												color: theme
+													? fgDim
+													: "var(--color-inferay-muted-gray)",
 											}}
 										>
 											{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
@@ -445,7 +447,9 @@ export function ChatComposer({
 										<span
 											className="flex-1 truncate text-right text-[9px]"
 											style={{
-												color: theme ? fgDim : "var(--color-inferay-text-3)",
+												color: theme
+													? fgDim
+													: "var(--color-inferay-muted-gray)",
 											}}
 										>
 											{file.path}
@@ -459,13 +463,13 @@ export function ChatComposer({
 								className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border shadow-2xl overflow-hidden z-[9999]"
 								style={{
 									maxHeight: 320,
-									backgroundColor: "#1a1a1a",
-									borderColor: "#333",
+									backgroundColor: "var(--color-inferay-dark-gray)",
+									borderColor: "var(--color-inferay-gray-border)",
 								}}
 							>
 								<div
 									className="px-3 py-2 text-[10px] font-medium tracking-wide uppercase"
-									style={{ color: "#888" }}
+									style={{ color: "var(--color-inferay-muted-gray)" }}
 								>
 									Skills
 								</div>
@@ -486,19 +490,24 @@ export function ChatComposer({
 												className="flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors"
 												style={{
 													backgroundColor: isSelected
-														? "#2a2a2a"
+														? "var(--color-inferay-gray)"
 														: "transparent",
 												}}
 											>
 												<span
 													className="font-mono text-[12px] font-medium"
 													style={{
-														color: isSelected ? "#f5a623" : "#e5e5e5",
+														color: isSelected
+															? "var(--color-inferay-accent)"
+															: "var(--color-inferay-white)",
 													}}
 												>
 													/{cmd.name}
 												</span>
-												<span className="text-[11px]" style={{ color: "#888" }}>
+												<span
+													className="text-[11px]"
+													style={{ color: "var(--color-inferay-muted-gray)" }}
+												>
 													{cmd.description}
 												</span>
 											</button>
@@ -514,7 +523,7 @@ export function ChatComposer({
 								onClick={() => fileInputRef.current?.click()}
 								className="shrink-0 flex items-center justify-center w-6 h-6 rounded-md transition-colors"
 								style={{
-									color: theme ? fgDim : "var(--color-inferay-text-3)",
+									color: theme ? fgDim : "var(--color-inferay-muted-gray)",
 								}}
 								title="Attach image"
 							>
@@ -573,7 +582,7 @@ export function ChatComposer({
 										color: "transparent",
 										caretColor: theme
 											? cursorColor
-											: "var(--color-inferay-text)",
+											: "var(--color-inferay-white)",
 										WebkitTextFillColor: "transparent",
 										lineHeight: "20px",
 										wordBreak: "break-word",
@@ -636,8 +645,10 @@ export function ChatComposer({
 					<div
 						className="relative w-[90%] max-w-2xl max-h-[80%] rounded-lg border overflow-hidden flex flex-col"
 						style={{
-							backgroundColor: theme ? bgColor : "var(--color-inferay-bg)",
-							borderColor: theme ? borderColor : "var(--color-inferay-border)",
+							backgroundColor: theme ? bgColor : "var(--color-inferay-black)",
+							borderColor: theme
+								? borderColor
+								: "var(--color-inferay-gray-border)",
 						}}
 						onClick={(e) => e.stopPropagation()}
 					>
@@ -646,13 +657,13 @@ export function ChatComposer({
 							style={{
 								borderColor: theme
 									? borderColor
-									: "var(--color-inferay-border)",
+									: "var(--color-inferay-gray-border)",
 							}}
 						>
 							<span
 								className="text-[11px] font-medium truncate"
 								style={{
-									color: theme ? fgColor : "var(--color-inferay-text)",
+									color: theme ? fgColor : "var(--color-inferay-white)",
 								}}
 							>
 								{mdPreview.path}
@@ -673,7 +684,7 @@ export function ChatComposer({
 								<IconX
 									className="w-3.5 h-3.5"
 									style={{
-										color: theme ? fgDim : "var(--color-inferay-text-3)",
+										color: theme ? fgDim : "var(--color-inferay-muted-gray)",
 									}}
 								/>
 							</button>
@@ -681,7 +692,7 @@ export function ChatComposer({
 						<div
 							className="flex-1 overflow-y-auto p-4 text-[12px]"
 							style={{
-								color: theme ? fgColor : "var(--color-inferay-text)",
+								color: theme ? fgColor : "var(--color-inferay-white)",
 							}}
 						>
 							{mdPreview.loading && (
@@ -689,7 +700,7 @@ export function ChatComposer({
 									<span
 										className="text-[10px]"
 										style={{
-											color: theme ? fgDim : "var(--color-inferay-text-3)",
+											color: theme ? fgDim : "var(--color-inferay-muted-gray)",
 										}}
 									>
 										Loading...

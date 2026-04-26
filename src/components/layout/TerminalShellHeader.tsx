@@ -59,8 +59,8 @@ function ViewTab({
 			onClick={onClick}
 			className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors ${
 				active
-					? "border-inferay-border bg-inferay-surface-2 text-inferay-text"
-					: "border-transparent text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2"
+					? "border-inferay-gray-border bg-inferay-gray text-inferay-white"
+					: "border-transparent text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 			}`}
 		>
 			{icon}
@@ -188,7 +188,7 @@ export function TerminalShellHeader() {
 	}, []);
 
 	return (
-		<div className="flex h-12 shrink-0 items-center gap-3 border-b border-inferay-border bg-inferay-bg px-3">
+		<div className="flex h-12 shrink-0 items-center gap-3 border-b border-inferay-gray-border bg-inferay-black px-3">
 			<div className="flex items-center gap-1 shrink-0">
 				<ViewTab
 					active={shellState.mainView === "editor"}
@@ -217,7 +217,7 @@ export function TerminalShellHeader() {
 							{layoutMode === "grid" && selectedGroup && (
 								<>
 									<div className="flex items-center gap-1.5 shrink-0">
-										<span className="text-[9px] text-inferay-text-3 sm:text-[10px]">
+										<span className="text-[9px] text-inferay-muted-gray sm:text-[10px]">
 											Col
 										</span>
 										<DropdownButton
@@ -233,7 +233,7 @@ export function TerminalShellHeader() {
 										/>
 									</div>
 									<div className="flex items-center gap-1.5 shrink-0">
-										<span className="text-[9px] text-inferay-text-3 sm:text-[10px]">
+										<span className="text-[9px] text-inferay-muted-gray sm:text-[10px]">
 											Row
 										</span>
 										<DropdownButton
@@ -250,11 +250,11 @@ export function TerminalShellHeader() {
 									</div>
 								</>
 							)}
-							<div className="flex items-center shrink-0 rounded-lg border border-inferay-border bg-inferay-surface overflow-hidden h-7">
+							<div className="flex items-center shrink-0 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray overflow-hidden h-7">
 								<button
 									type="button"
 									onClick={() => updateLayoutMode("grid")}
-									className={`flex items-center justify-center h-full w-7 transition-all ${layoutMode === "grid" ? "bg-inferay-text/10 text-inferay-text" : "text-inferay-text-3 hover:text-inferay-text-2"}`}
+									className={`flex items-center justify-center h-full w-7 transition-all ${layoutMode === "grid" ? "bg-inferay-white/10 text-inferay-white" : "text-inferay-muted-gray hover:text-inferay-soft-white"}`}
 									title="Grid layout"
 								>
 									<IconLayoutGrid size={13} />
@@ -262,7 +262,7 @@ export function TerminalShellHeader() {
 								<button
 									type="button"
 									onClick={() => updateLayoutMode("rows")}
-									className={`flex items-center justify-center h-full w-7 transition-all ${layoutMode === "rows" ? "bg-inferay-text/10 text-inferay-text" : "text-inferay-text-3 hover:text-inferay-text-2"}`}
+									className={`flex items-center justify-center h-full w-7 transition-all ${layoutMode === "rows" ? "bg-inferay-white/10 text-inferay-white" : "text-inferay-muted-gray hover:text-inferay-soft-white"}`}
 									title="Row layout"
 								>
 									<IconLayoutRows size={13} />
@@ -274,7 +274,7 @@ export function TerminalShellHeader() {
 						<button
 							type="button"
 							onClick={() => addPaneToSelectedGroup("terminal")}
-							className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-xs font-medium text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
+							className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-xs font-medium text-inferay-soft-white transition-colors hover:bg-inferay-gray"
 						>
 							<span>New</span>
 							<IconPlus size={10} />
@@ -287,10 +287,10 @@ export function TerminalShellHeader() {
 							title={
 								shellState.editorZenMode ? "Exit zen mode" : "Enter zen mode"
 							}
-							className={`flex h-7 w-7 items-center justify-center rounded-lg border border-inferay-border bg-inferay-surface transition-colors ${
+							className={`flex h-7 w-7 items-center justify-center rounded-lg border border-inferay-gray-border bg-inferay-dark-gray transition-colors ${
 								shellState.editorZenMode
-									? "bg-inferay-surface-2 text-inferay-text"
-									: "text-inferay-text-3 hover:bg-inferay-surface-2 hover:text-inferay-text-2"
+									? "bg-inferay-gray text-inferay-white"
+									: "text-inferay-muted-gray hover:bg-inferay-gray hover:text-inferay-soft-white"
 							}`}
 						>
 							{shellState.editorZenMode ? (

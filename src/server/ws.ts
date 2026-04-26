@@ -1,7 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import { TerminalService } from "./routes/terminal.ts";
+import { ChatService } from "./services/agent-chat.ts";
 import { CheckpointService } from "./services/checkpoint.ts";
-import { ChatService } from "./services/claude-chat.ts";
 
 interface WSData {
 	subscriptions: Set<string>;

@@ -75,18 +75,18 @@ export function ProfilePage() {
 	];
 
 	return (
-		<div className="flex h-full min-h-0 bg-inferay-bg">
-			<aside className="flex w-[220px] shrink-0 flex-col border-r border-inferay-border bg-inferay-bg">
-				<div className="border-b border-inferay-border px-4 py-4">
+		<div className="flex h-full min-h-0 bg-inferay-black">
+			<aside className="flex w-[220px] shrink-0 flex-col border-r border-inferay-gray-border bg-inferay-black">
+				<div className="border-b border-inferay-gray-border px-4 py-4">
 					<div className="flex items-center gap-3">
-						<div className="flex h-10 w-10 items-center justify-center rounded-full border border-inferay-border bg-inferay-surface-2">
-							<IconUser size={18} className="text-inferay-text-2" />
+						<div className="flex h-10 w-10 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-gray">
+							<IconUser size={18} className="text-inferay-soft-white" />
 						</div>
 						<div>
-							<p className="text-[11px] font-medium text-inferay-text">
+							<p className="text-[11px] font-medium text-inferay-white">
 								{displayName}
 							</p>
-							<p className="text-[8px] text-inferay-text-3">Pro Plan</p>
+							<p className="text-[8px] text-inferay-muted-gray">Pro Plan</p>
 						</div>
 					</div>
 				</div>
@@ -101,14 +101,14 @@ export function ProfilePage() {
 								onClick={() => setActiveTab(tab.id)}
 								className={`flex h-8 w-full items-center gap-2 rounded-lg border px-2.5 text-[10px] transition-colors ${
 									active
-										? "border-inferay-border bg-inferay-surface-2 text-inferay-text"
-										: "border-transparent text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2"
+										? "border-inferay-gray-border bg-inferay-gray text-inferay-white"
+										: "border-transparent text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 								}`}
 							>
-								<span className="text-inferay-text-3">{tab.icon}</span>
+								<span className="text-inferay-muted-gray">{tab.icon}</span>
 								<span>{tab.label}</span>
 								{tab.id === "keys" ? (
-									<span className="ml-auto text-[8px] tabular-nums text-inferay-text-3">
+									<span className="ml-auto text-[8px] tabular-nums text-inferay-muted-gray">
 										{connectedCount}/{keys.length}
 									</span>
 								) : null}
@@ -117,10 +117,10 @@ export function ProfilePage() {
 					})}
 				</nav>
 
-				<div className="border-t border-inferay-border p-3">
+				<div className="border-t border-inferay-gray-border p-3">
 					<button
 						type="button"
-						className="flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-inferay-border text-[10px] text-inferay-text-3 transition-colors hover:bg-inferay-surface hover:text-inferay-text-2"
+						className="flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-inferay-gray-border text-[10px] text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 					>
 						<IconLogOut size={13} />
 						<span>Sign Out</span>
@@ -132,33 +132,33 @@ export function ProfilePage() {
 				{activeTab === "profile" ? (
 					<div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-5">
 						<div>
-							<h1 className="text-[13px] font-medium text-inferay-text">
+							<h1 className="text-[13px] font-medium text-inferay-white">
 								Profile
 							</h1>
-							<p className="mt-1 text-[9px] text-inferay-text-3">
+							<p className="mt-1 text-[9px] text-inferay-muted-gray">
 								Manage your account information and preferences.
 							</p>
 						</div>
 
-						<div className="flex items-center gap-4 rounded-xl border border-inferay-border bg-inferay-surface/30 p-4">
-							<div className="flex h-16 w-16 items-center justify-center rounded-full border border-inferay-border bg-inferay-surface-2">
-								<IconUser size={24} className="text-inferay-text-2" />
+						<div className="flex items-center gap-4 rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/30 p-4">
+							<div className="flex h-16 w-16 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-gray">
+								<IconUser size={24} className="text-inferay-soft-white" />
 							</div>
 							<div className="flex-1">
-								<p className="text-[11px] font-medium text-inferay-text">
+								<p className="text-[11px] font-medium text-inferay-white">
 									Profile Photo
 								</p>
 								<div className="mt-2 flex items-center gap-2">
 									<button
 										type="button"
-										className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-[9px] text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
+										className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[9px] text-inferay-soft-white transition-colors hover:bg-inferay-gray"
 									>
 										<IconCamera size={12} />
 										<span>Upload</span>
 									</button>
 									<button
 										type="button"
-										className="h-7 rounded-lg border border-inferay-border px-2.5 text-[9px] text-inferay-text-3 transition-colors hover:bg-inferay-surface hover:text-inferay-text-2"
+										className="h-7 rounded-lg border border-inferay-gray-border px-2.5 text-[9px] text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 									>
 										Remove
 									</button>
@@ -167,11 +167,11 @@ export function ProfilePage() {
 						</div>
 
 						<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
-							<div className="space-y-3 rounded-xl border border-inferay-border bg-inferay-surface/20 p-4">
+							<div className="space-y-3 rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/20 p-4">
 								<div>
 									<label
 										htmlFor="profile-display-name"
-										className="text-[8px] font-medium uppercase tracking-wide text-inferay-text-3"
+										className="text-[8px] font-medium uppercase tracking-wide text-inferay-muted-gray"
 									>
 										Display Name
 									</label>
@@ -180,13 +180,13 @@ export function ProfilePage() {
 										type="text"
 										value={displayName}
 										onChange={(event) => setDisplayName(event.target.value)}
-										className="mt-1.5 h-9 w-full rounded-lg border border-inferay-border bg-inferay-surface px-3 text-[10px] text-inferay-text outline-none focus:border-inferay-accent/50"
+										className="mt-1.5 h-9 w-full rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-3 text-[10px] text-inferay-white outline-none focus:border-inferay-accent/50"
 									/>
 								</div>
 								<div>
 									<label
 										htmlFor="profile-email"
-										className="text-[8px] font-medium uppercase tracking-wide text-inferay-text-3"
+										className="text-[8px] font-medium uppercase tracking-wide text-inferay-muted-gray"
 									>
 										Email
 									</label>
@@ -195,27 +195,27 @@ export function ProfilePage() {
 										type="email"
 										value={email}
 										onChange={(event) => setEmail(event.target.value)}
-										className="mt-1.5 h-9 w-full rounded-lg border border-inferay-border bg-inferay-surface px-3 text-[10px] text-inferay-text outline-none focus:border-inferay-accent/50"
+										className="mt-1.5 h-9 w-full rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-3 text-[10px] text-inferay-white outline-none focus:border-inferay-accent/50"
 									/>
 								</div>
 								<button
 									type="button"
-									className="h-8 rounded-lg border border-inferay-border bg-inferay-surface-2 px-4 text-[10px] font-medium text-inferay-text transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
+									className="h-8 rounded-lg border border-inferay-gray-border bg-inferay-gray px-4 text-[10px] font-medium text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
 								>
 									Save Changes
 								</button>
 							</div>
 
-							<div className="rounded-xl border border-inferay-border bg-inferay-surface/30 p-4">
-								<p className="text-[10px] font-medium text-inferay-text">
+							<div className="rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/30 p-4">
+								<p className="text-[10px] font-medium text-inferay-white">
 									Pro Plan
 								</p>
-								<p className="mt-1 text-[8px] leading-relaxed text-inferay-text-3">
+								<p className="mt-1 text-[8px] leading-relaxed text-inferay-muted-gray">
 									Unlimited conversations, all models, priority support.
 								</p>
 								<button
 									type="button"
-									className="mt-4 h-8 rounded-lg border border-inferay-border bg-inferay-surface-2 px-3 text-[9px] font-medium text-inferay-text transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
+									className="mt-4 h-8 rounded-lg border border-inferay-gray-border bg-inferay-gray px-3 text-[9px] font-medium text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
 								>
 									Manage
 								</button>
@@ -227,27 +227,27 @@ export function ProfilePage() {
 				{activeTab === "keys" ? (
 					<div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-5">
 						<div>
-							<h1 className="text-[13px] font-medium text-inferay-text">
+							<h1 className="text-[13px] font-medium text-inferay-white">
 								API Keys
 							</h1>
-							<p className="mt-1 text-[9px] text-inferay-text-3">
+							<p className="mt-1 text-[9px] text-inferay-muted-gray">
 								Mock provider keys for now. The layout matches the landing page
 								and can be wired to real storage later.
 							</p>
 						</div>
 
-						<div className="overflow-hidden rounded-xl border border-inferay-border bg-inferay-surface/20">
+						<div className="overflow-hidden rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/20">
 							{keys.map((provider) => (
 								<div
 									key={provider.id}
-									className="flex items-center gap-3 border-b border-inferay-border px-4 py-3 last:border-b-0"
+									className="flex items-center gap-3 border-b border-inferay-gray-border px-4 py-3 last:border-b-0"
 								>
-									<div className="flex h-9 w-9 items-center justify-center rounded-lg border border-inferay-border bg-inferay-surface text-[10px] font-semibold text-inferay-text-2">
+									<div className="flex h-9 w-9 items-center justify-center rounded-lg border border-inferay-gray-border bg-inferay-dark-gray text-[10px] font-semibold text-inferay-soft-white">
 										{provider.provider.slice(0, 1)}
 									</div>
 									<div className="min-w-0 flex-1">
 										<div className="flex items-center gap-2">
-											<p className="text-[10px] font-medium text-inferay-text">
+											<p className="text-[10px] font-medium text-inferay-white">
 												{provider.provider}
 											</p>
 											{provider.connected ? (
@@ -256,18 +256,18 @@ export function ProfilePage() {
 												</span>
 											) : null}
 										</div>
-										<p className="text-[8px] text-inferay-text-3">
+										<p className="text-[8px] text-inferay-muted-gray">
 											{provider.label}
 										</p>
 									</div>
 									{provider.connected ? (
-										<span className="font-mono text-[9px] text-inferay-text-3">
+										<span className="font-mono text-[9px] text-inferay-muted-gray">
 											{provider.value}
 										</span>
 									) : (
 										<button
 											type="button"
-											className="h-7 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-[9px] text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
+											className="h-7 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[9px] text-inferay-soft-white transition-colors hover:bg-inferay-gray"
 										>
 											Add Key
 										</button>

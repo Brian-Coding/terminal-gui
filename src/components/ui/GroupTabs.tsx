@@ -49,7 +49,7 @@ export function GroupTabs({
 	return (
 		<div className="flex items-center gap-1.5">
 			<div
-				className={`flex items-center rounded-lg border border-inferay-border bg-inferay-surface overflow-hidden ${compact ? "h-6" : "h-7"}`}
+				className={`flex items-center rounded-lg border border-inferay-gray-border bg-inferay-dark-gray overflow-hidden ${compact ? "h-6" : "h-7"}`}
 			>
 				{items.map((item, index) => {
 					const isActive = item.id === activeId;
@@ -60,7 +60,7 @@ export function GroupTabs({
 						<div key={item.id} className="flex h-full items-center">
 							{showDivider && (
 								<div
-									className={`w-px bg-inferay-border/40 ${compact ? "h-3" : "h-3.5"}`}
+									className={`w-px bg-inferay-gray-border/40 ${compact ? "h-3" : "h-3.5"}`}
 								/>
 							)}
 							<div
@@ -75,8 +75,8 @@ export function GroupTabs({
 								}}
 								className={`group relative flex h-full cursor-pointer items-center gap-1 font-medium transition-all ${
 									isActive
-										? "bg-inferay-text/10 text-inferay-text"
-										: "text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-text/[0.04]"
+										? "bg-inferay-white/10 text-inferay-white"
+										: "text-inferay-muted-gray hover:text-inferay-soft-white hover:bg-inferay-white/[0.04]"
 								} ${compact ? "px-2 text-[10px]" : "px-2.5 text-xs gap-1.5"}`}
 							>
 								{item.activeIcon && item.icon
@@ -95,7 +95,7 @@ export function GroupTabs({
 											if (e.key === "Escape") setEditingId(null);
 										}}
 										onClick={(e) => e.stopPropagation()}
-										className="w-20 bg-transparent text-xs text-inferay-text outline-none ring-0 border-0 focus:outline-none focus:ring-0"
+										className="w-20 bg-transparent text-xs text-inferay-white outline-none ring-0 border-0 focus:outline-none focus:ring-0"
 									/>
 								) : (
 									<span
@@ -113,8 +113,8 @@ export function GroupTabs({
 									<span
 										className={`-ml-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${
 											isActive
-												? "bg-inferay-text/10 text-inferay-text"
-												: "bg-inferay-text/5 text-inferay-text-3"
+												? "bg-inferay-white/10 text-inferay-white"
+												: "bg-inferay-white/5 text-inferay-muted-gray"
 										}`}
 									>
 										{item.count}
@@ -127,7 +127,7 @@ export function GroupTabs({
 											e.stopPropagation();
 											onDelete(item.id);
 										}}
-										className="ml-0.5 rounded p-0.5 text-inferay-text-3 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+										className="ml-0.5 rounded p-0.5 text-inferay-muted-gray opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
 									>
 										<IconX size={8} />
 									</button>
@@ -141,14 +141,14 @@ export function GroupTabs({
 				<button
 					type="button"
 					onClick={() => setShowNew(true)}
-					className={`flex items-center justify-center rounded-lg border border-inferay-border bg-inferay-surface text-inferay-text-3 transition-colors hover:bg-inferay-text/[0.06] hover:text-inferay-text-2 ${compact ? "h-6 w-6" : "h-7 w-7"}`}
+					className={`flex items-center justify-center rounded-lg border border-inferay-gray-border bg-inferay-dark-gray text-inferay-muted-gray transition-colors hover:bg-inferay-white/[0.06] hover:text-inferay-soft-white ${compact ? "h-6 w-6" : "h-7 w-7"}`}
 				>
 					<IconPlus size={compact ? 8 : 10} />
 				</button>
 			)}
 			{showNew && (
 				<div
-					className={`flex items-center rounded-lg border border-inferay-border bg-inferay-text/10 overflow-hidden ${compact ? "h-6" : "h-7"}`}
+					className={`flex items-center rounded-lg border border-inferay-gray-border bg-inferay-white/10 overflow-hidden ${compact ? "h-6" : "h-7"}`}
 				>
 					<div
 						className={`flex h-full items-center gap-1.5 ${compact ? "px-1.5" : "px-2"}`}
@@ -173,7 +173,7 @@ export function GroupTabs({
 								}
 							}}
 							placeholder={addLabel}
-							className="w-20 appearance-none bg-transparent text-xs text-inferay-text caret-inferay-text placeholder-inferay-text-3 outline-none border-none shadow-none ring-0 ring-transparent focus:outline-none focus:border-none focus:shadow-none focus:ring-0 focus:ring-transparent"
+							className="w-20 appearance-none bg-transparent text-xs text-inferay-white caret-inferay-white placeholder-inferay-muted-gray outline-none border-none shadow-none ring-0 ring-transparent focus:outline-none focus:border-none focus:shadow-none focus:ring-0 focus:ring-transparent"
 						/>
 						<button
 							type="button"
@@ -181,7 +181,7 @@ export function GroupTabs({
 								setShowNew(false);
 								setNewName("");
 							}}
-							className="text-inferay-text-3 hover:text-inferay-text-2"
+							className="text-inferay-muted-gray hover:text-inferay-soft-white"
 						>
 							<IconX size={8} />
 						</button>

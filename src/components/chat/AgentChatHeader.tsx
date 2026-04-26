@@ -70,7 +70,7 @@ export function AgentChatHeader({
 
 	return (
 		<div
-			className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 border-b ${theme ? "" : "border-inferay-border"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} select-none`}
+			className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 border-b ${theme ? "" : "border-inferay-gray-border"} ${draggable ? "cursor-grab active:cursor-grabbing" : ""} select-none`}
 			style={theme ? { borderColor, backgroundColor: bgColor } : undefined}
 			draggable={draggable}
 			onDragStart={onDragStart}
@@ -91,14 +91,14 @@ export function AgentChatHeader({
 						</span>
 					}
 					minWidth={110}
-					buttonClassName="h-4 rounded-md border-transparent px-1 text-[9px] font-medium text-inferay-accent hover:bg-inferay-text/[0.06] gap-1"
+					buttonClassName="h-4 rounded-md border-transparent px-1 text-[9px] font-medium text-inferay-accent hover:bg-inferay-white/[0.06] gap-1"
 					labelClassName="text-[9px]"
 					renderOption={(opt, isOptionSelected) => (
 						<div
 							className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
 								isOptionSelected
-									? "bg-inferay-accent/15 text-inferay-text"
-									: "text-inferay-text-3 hover:bg-inferay-text/5 hover:text-inferay-text"
+									? "bg-inferay-accent/15 text-inferay-white"
+									: "text-inferay-muted-gray hover:bg-inferay-white/5 hover:text-inferay-white"
 							}`}
 						>
 							<span className="shrink-0">{opt.icon}</span>
@@ -118,7 +118,7 @@ export function AgentChatHeader({
 							options={sessionOptions}
 							onChange={onSelectSession}
 							minWidth={220}
-							buttonClassName="h-4 rounded-md border-transparent px-1.5 text-[9px] font-medium hover:bg-inferay-text/[0.06]"
+							buttonClassName="h-4 rounded-md border-transparent px-1.5 text-[9px] font-medium hover:bg-inferay-white/[0.06]"
 							labelClassName="max-w-[120px] truncate text-[9px]"
 						/>
 					) : (
@@ -137,9 +137,12 @@ export function AgentChatHeader({
 					<span className="text-[9px]" style={dimStyle}>
 						›
 					</span>
-					<IconGitBranch size={9} className="text-inferay-text-3 shrink-0" />
+					<IconGitBranch
+						size={9}
+						className="text-inferay-muted-gray shrink-0"
+					/>
 					<span
-						className="text-[9px] font-medium text-inferay-text-3 truncate max-w-[80px]"
+						className="text-[9px] font-medium text-inferay-muted-gray truncate max-w-[80px]"
 						title={gitBranch}
 					>
 						{gitBranch}
@@ -157,7 +160,7 @@ export function AgentChatHeader({
 						e.stopPropagation();
 						onClose(paneId);
 					}}
-					className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-text-3 hover:text-red-400 hover:bg-red-500/15"
+					className="flex items-center justify-center h-4 w-4 rounded transition-colors text-inferay-muted-gray hover:text-red-400 hover:bg-red-500/15"
 					title="Close"
 				>
 					<IconX size={8} />
