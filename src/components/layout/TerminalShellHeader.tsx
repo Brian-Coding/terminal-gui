@@ -276,8 +276,8 @@ export function TerminalShellHeader() {
 							onClick={() => addPaneToSelectedGroup("terminal")}
 							className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-border bg-inferay-surface px-2.5 text-xs font-medium text-inferay-text-2 transition-colors hover:bg-inferay-surface-2"
 						>
-							<IconPlus size={10} />
 							<span>New</span>
+							<IconPlus size={10} />
 						</button>
 					</div>
 					{shellState.mainView === "editor" && (

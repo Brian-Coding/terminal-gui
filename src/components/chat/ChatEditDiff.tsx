@@ -212,7 +212,7 @@ function EditDiffCard({
 				className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-left hover:opacity-80 transition-all"
 				style={{
 					color: theme?.fg ?? "var(--color-inferay-text-2)",
-					backgroundColor: theme?.bg ?? "var(--color-inferay-surface-2)",
+					backgroundColor: theme?.surface ?? "var(--color-inferay-surface)",
 					borderBottom: isExpanded
 						? `1px solid ${theme?.border ?? "var(--color-inferay-border)"}`
 						: "none",

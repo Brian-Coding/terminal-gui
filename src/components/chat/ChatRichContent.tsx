@@ -223,8 +223,9 @@ export function Markdown({
 							key={blockKey}
 							className="overflow-x-auto rounded border text-[10px]"
 							style={{
-								borderColor: theme?.border ?? "rgba(255,255,255,0.1)",
-								backgroundColor: theme?.surface ?? "rgba(255,255,255,0.03)",
+								borderColor: theme?.border ?? "var(--color-inferay-border)",
+								backgroundColor:
+									theme?.surface ?? "var(--color-inferay-surface)",
 							}}
 						>
 							<table className="w-full border-collapse">
@@ -235,8 +236,10 @@ export function Markdown({
 												key={hi}
 												className="px-2 py-1 text-left font-semibold whitespace-nowrap"
 												style={{
-													borderBottom: `1px solid ${theme?.border ?? "rgba(255,255,255,0.12)"}`,
+													borderBottom: `1px solid ${theme?.border ?? "var(--color-inferay-border)"}`,
 													color: theme?.fg ?? "#e5e5e5",
+													backgroundColor:
+														theme?.surface ?? "var(--color-inferay-surface)",
 												}}
 											>
 												{h}
@@ -254,7 +257,7 @@ export function Markdown({
 													style={{
 														borderBottom:
 															ri < b.rows.length - 1
-																? `1px solid ${theme?.border ?? "rgba(255,255,255,0.06)"}`
+																? `1px solid ${theme?.border ?? "var(--color-inferay-border)"}`
 																: "none",
 														color: theme?.fg ?? "#e5e5e5",
 													}}

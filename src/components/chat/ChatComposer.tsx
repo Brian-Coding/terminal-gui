@@ -379,8 +379,8 @@ export function ChatComposer({
 						style={{
 							border: `1px solid ${theme ? borderColor : "var(--color-inferay-border)"}`,
 							backgroundColor: theme
-								? surfaceColor
-								: "var(--color-inferay-surface)",
+								? bgColor
+								: "var(--color-inferay-surface-2)",
 						}}
 					>
 						{fileMenu.show && fileResults.length > 0 && (
