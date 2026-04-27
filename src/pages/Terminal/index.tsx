@@ -236,6 +236,8 @@ function groupsReducer(
 											...p,
 											agentKind: action.agentKind,
 											isClaude: action.agentKind === "claude",
+											paneType: action.agentKind,
+											title: getPaneTitle(action.agentKind, p.cwd),
 										} as TerminalPaneModel)
 									: p
 							),

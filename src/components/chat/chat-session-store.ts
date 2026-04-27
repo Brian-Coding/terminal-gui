@@ -3,6 +3,7 @@ const SESSION_KEY_PREFIX = "inferay-chat-session-";
 const INPUT_KEY_PREFIX = "inferay-chat-input-";
 const CHECKPOINT_KEY_PREFIX = "inferay-checkpoints-";
 const MODEL_KEY_PREFIX = "inferay-chat-model-";
+const REASONING_KEY_PREFIX = "inferay-chat-reasoning-";
 
 export function loadStoredMessages<T>(paneId: string): T[] {
 	try {
@@ -90,6 +91,23 @@ export function loadStoredModel(paneId: string): string | null {
 export function saveStoredModel(paneId: string, modelId: string) {
 	try {
 		localStorage.setItem(MODEL_KEY_PREFIX + paneId, modelId);
+	} catch {}
+}
+
+export function loadStoredReasoningLevel(paneId: string): string | null {
+	try {
+		return localStorage.getItem(REASONING_KEY_PREFIX + paneId);
+	} catch {
+		return null;
+	}
+}
+
+export function saveStoredReasoningLevel(
+	paneId: string,
+	reasoningLevel: string
+) {
+	try {
+		localStorage.setItem(REASONING_KEY_PREFIX + paneId, reasoningLevel);
 	} catch {}
 }
 

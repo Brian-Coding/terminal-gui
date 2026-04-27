@@ -78,12 +78,16 @@ export function createClaudeEnv(): Record<string, string> {
 }
 
 function getCodexPathCandidates(): string[] {
+	const nvmBin = process.env.NVM_BIN;
 	const candidates = [
 		process.env.CODEX_PATH,
+		nvmBin ? join(nvmBin, "codex") : null,
+		findInNvmVersions("codex"),
 		homeDir ? join(homeDir, ".npm-global", "bin", "codex") : null,
 		homeDir ? join(homeDir, ".local", "bin", "codex") : null,
-		"/usr/local/bin/codex",
+		homeDir ? join(homeDir, ".bun", "bin", "codex") : null,
 		"/opt/homebrew/bin/codex",
+		"/usr/local/bin/codex",
 	];
 
 	return candidates

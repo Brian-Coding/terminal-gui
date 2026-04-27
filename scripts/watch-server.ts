@@ -4,7 +4,7 @@
  */
 import { existsSync, watch } from "node:fs";
 import { resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 
 const ROOT = process.cwd();
 const ELECTROBUN =
@@ -20,34 +20,112 @@ const watchTargets = [
 
 let child: ReturnType<typeof spawn> | null = null;
 let debounce: ReturnType<typeof setTimeout> | null = null;
+let restarting = false;
 
-function startApp() {
-	if (child) {
-		child.kill("SIGTERM");
-		child = null;
+function execFileText(cmd: string, args: string[]): Promise<string> {
+	return new Promise((resolve) => {
+		execFile(cmd, args, (error, stdout) => {
+			resolve(error ? "" : stdout);
+		});
+	});
+}
+
+async function getDevAppPids(): Promise<number[]> {
+	if (process.platform !== "darwin") return [];
+	const outputs = await Promise.all([
+		execFileText("pgrep", ["-x", "inferay-dev"]),
+		execFileText("pgrep", ["-f", "inferay-dev.app/Contents/MacOS"]),
+	]);
+	const pids = new Set<number>();
+	for (const output of outputs) {
+		for (const line of output.split("\n")) {
+			const pid = Number.parseInt(line.trim(), 10);
+			if (Number.isFinite(pid) && pid > 0) pids.add(pid);
+		}
 	}
-	child = spawn(ELECTROBUN, ["dev"], {
-		stdio: "inherit",
-		env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
+	return [...pids].sort((a, b) => a - b);
+}
+
+async function keepMainDevAppOnly(): Promise<boolean> {
+	const pids = await getDevAppPids();
+	if (pids.length === 0) return false;
+	const [, ...duplicates] = pids;
+	for (const pid of duplicates) {
+		try {
+			process.kill(pid, "SIGTERM");
+		} catch {}
+	}
+	return true;
+}
+
+function runElectrobun(args: string[]): Promise<number> {
+	return new Promise((resolve) => {
+		const proc = spawn(ELECTROBUN, args, {
+			stdio: "inherit",
+			env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
+		});
+		proc.on("exit", (code) => resolve(code ?? 0));
+		proc.on("error", () => resolve(1));
 	});
-	child.on("exit", (code) => {
-		if (child?.killed) return;
-		child = null;
+}
+
+async function killChild(): Promise<void> {
+	if (!child) return;
+	const proc = child;
+	child = null;
+	return new Promise<void>((resolve) => {
+		const timeout = setTimeout(() => {
+			proc.kill("SIGKILL");
+		}, 5000);
+		proc.on("exit", () => {
+			clearTimeout(timeout);
+			resolve();
+		});
+		proc.kill("SIGTERM");
 	});
+}
+
+async function startApp() {
+	if (restarting) return;
+	restarting = true;
+	try {
+		await killChild();
+		if (await keepMainDevAppOnly()) {
+			await runElectrobun(["build", "--env=dev"]);
+			return;
+		}
+		// Brief pause to let ports and file locks release
+		await new Promise((r) => setTimeout(r, 200));
+		child = spawn(ELECTROBUN, ["dev"], {
+			stdio: "inherit",
+			env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
+		});
+		child.on("exit", (code) => {
+			if (child?.killed) return;
+			child = null;
+		});
+	} finally {
+		restarting = false;
+	}
 }
 
 for (const target of watchTargets) {
 	watch(target.path, { recursive: target.recursive }, (_event, filename) => {
 		if (!filename?.endsWith(".ts")) return;
 		if (debounce) clearTimeout(debounce);
-		debounce = setTimeout(startApp, 300);
+		debounce = setTimeout(startApp, 800);
 	});
 }
 
 startApp();
 
-process.on("SIGTERM", () => child?.kill("SIGTERM"));
-process.on("SIGINT", () => {
-	child?.kill("SIGTERM");
+process.on("SIGTERM", async () => {
+	await killChild();
+	await keepMainDevAppOnly();
+	process.exit(0);
+});
+process.on("SIGINT", async () => {
+	await killChild();
+	await keepMainDevAppOnly();
 	process.exit(0);
 });

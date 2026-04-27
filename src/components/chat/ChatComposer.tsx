@@ -1,5 +1,12 @@
 import type React from "react";
 import { useMemo, useRef } from "react";
+import { getAgentIcon } from "../../lib/agent-ui.tsx";
+import {
+	CODEX_REASONING_LEVELS,
+	getAgentDefinition,
+} from "../../lib/agents.ts";
+import type { AgentKind } from "../../lib/terminal-utils.ts";
+import { DropdownButton } from "../ui/DropdownButton.tsx";
 import {
 	IconCheck,
 	IconPencil,
@@ -34,8 +41,21 @@ type AttachedImageInfo = {
 	previewUrl: string;
 };
 
+type AgentOption = {
+	id: AgentKind;
+	label: string;
+	icon: React.ReactNode;
+};
+
 export function ChatComposer({
 	showInput,
+	agentKind,
+	agentKindOptions,
+	model,
+	reasoningLevel,
+	onAgentKindChange,
+	onModelChange,
+	onReasoningLevelChange,
 	input,
 	setInput,
 	isLoading,
@@ -71,6 +91,13 @@ export function ChatComposer({
 	statusBar,
 }: {
 	showInput: boolean;
+	agentKind: AgentKind;
+	agentKindOptions: AgentOption[];
+	model: string;
+	reasoningLevel: string;
+	onAgentKindChange: (agentKind: AgentKind) => void;
+	onModelChange: (model: string) => void;
+	onReasoningLevelChange: (reasoningLevel: string) => void;
 	input: string;
 	setInput: (value: string) => void;
 	isLoading: boolean;
@@ -141,6 +168,15 @@ export function ChatComposer({
 }) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const inputHighlights = useMemo(() => renderInputHighlights(input), [input]);
+	const agentDefinition = getAgentDefinition(agentKind);
+	const modelOptions = useMemo(
+		() =>
+			agentDefinition.models.map((option) => ({
+				...option,
+				icon: getAgentIcon(agentKind, 12),
+			})),
+		[agentDefinition.models, agentKind]
+	);
 
 	return (
 		<>
@@ -336,6 +372,56 @@ export function ChatComposer({
 
 			{showInput && (
 				<div className="shrink-0 px-3 pb-2 pt-1">
+					<div className="mb-1 flex items-center gap-1.5 overflow-x-auto px-1">
+						<DropdownButton
+							value={agentKind}
+							options={agentKindOptions}
+							onChange={(id) => onAgentKindChange(id as AgentKind)}
+							icon={
+								<span className="text-inferay-accent">
+									{getAgentIcon(agentKind, 10)}
+								</span>
+							}
+							minWidth={120}
+							menuPlacement="top"
+							buttonClassName="h-5 rounded-md border-transparent px-1 text-[10px] font-medium text-inferay-accent hover:bg-inferay-white/[0.06] gap-1"
+							labelClassName="text-[10px]"
+							renderOption={(opt, isOptionSelected) => (
+								<div
+									className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+										isOptionSelected
+											? "bg-inferay-white/[0.08] text-inferay-white"
+											: "text-inferay-muted-gray hover:bg-inferay-white/[0.06] hover:text-inferay-white"
+									}`}
+								>
+									<span className="shrink-0">{opt.icon}</span>
+									<span className="font-medium">{opt.label}</span>
+								</div>
+							)}
+						/>
+						{agentDefinition.models.length > 0 && (
+							<DropdownButton
+								value={model}
+								options={modelOptions}
+								onChange={onModelChange}
+								minWidth={190}
+								menuPlacement="top"
+								buttonClassName="h-5 rounded-md border-transparent px-1 text-[10px] font-medium text-inferay-muted-gray hover:bg-inferay-white/[0.06] gap-1"
+								labelClassName="max-w-[96px] truncate text-[10px]"
+							/>
+						)}
+						{agentKind === "codex" && (
+							<DropdownButton
+								value={reasoningLevel}
+								options={[...CODEX_REASONING_LEVELS]}
+								onChange={onReasoningLevelChange}
+								minWidth={150}
+								menuPlacement="top"
+								buttonClassName="h-5 rounded-md border-transparent px-1 text-[10px] font-medium text-inferay-muted-gray hover:bg-inferay-white/[0.06] gap-1"
+								labelClassName="max-w-[76px] truncate text-[10px]"
+							/>
+						)}
+					</div>
 					<div
 						className="relative flex flex-col rounded-xl overflow-visible"
 						ref={inputContainerRef}

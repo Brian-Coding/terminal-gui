@@ -323,7 +323,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 					baseArgs.push("--model", ctx.model);
 				}
 				if (ctx.reasoningLevel) {
-					baseArgs.push("-c", `reasoning_effort="${ctx.reasoningLevel}"`);
+					const reasoningEffort =
+						ctx.reasoningLevel === "extra_high" ? "xhigh" : ctx.reasoningLevel;
+					baseArgs.push("-c", `reasoning_effort="${reasoningEffort}"`);
 				}
 				const sessionId = ctx.getSessionId();
 				const args = sessionId

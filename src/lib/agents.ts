@@ -23,7 +23,7 @@ export const CODEX_REASONING_LEVELS: readonly ReasoningLevel[] = [
 	{ id: "low", label: "Low", detail: "Fast responses" },
 	{ id: "medium", label: "Medium", detail: "Balanced (default)" },
 	{ id: "high", label: "High", detail: "Greater depth" },
-	{ id: "extra_high", label: "Extra High", detail: "Maximum reasoning" },
+	{ id: "xhigh", label: "Extra High", detail: "Maximum reasoning" },
 ] as const;
 
 export interface AgentDefinition {

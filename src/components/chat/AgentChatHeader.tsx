@@ -1,47 +1,31 @@
-import type React from "react";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition } from "../../lib/agents.ts";
-import type { AgentKind } from "../../lib/terminal-utils.ts";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import { IconGitBranch, IconX } from "../ui/Icons.tsx";
 import type { AgentChatSession } from "./agent-chat-shared.ts";
 
-interface AgentOption {
-	id: AgentKind;
-	label: string;
-	icon: React.ReactNode;
-}
-
 interface AgentChatHeaderProps {
 	paneId: string;
 	cwd?: string;
-	agentKind: AgentKind;
-	agentKindOptions: AgentOption[];
 	gitBranch: string | null;
 	draggable?: boolean;
 	onDragStart?: (e: React.DragEvent) => void;
 	onDragEnd?: () => void;
-	isSelected?: boolean;
 	onClose?: (paneId: string) => void;
 	sessions?: AgentChatSession[];
 	onSelectSession?: (paneId: string) => void;
-	onAgentKindChange: (agentKind: AgentKind) => void;
 }
 
 export function AgentChatHeader({
 	paneId,
 	cwd,
-	agentKind,
-	agentKindOptions,
 	gitBranch,
 	draggable,
 	onDragStart,
 	onDragEnd,
-	isSelected,
 	onClose,
 	sessions,
 	onSelectSession,
-	onAgentKindChange,
 }: AgentChatHeaderProps) {
 	const dirName = cwd ? cwd.split("/").pop() || cwd : null;
 	const hasMultipleSessions =
@@ -63,41 +47,8 @@ export function AgentChatHeader({
 			onDragStart={onDragStart}
 			onDragEnd={onDragEnd}
 		>
-			<div
-				className="electrobun-webkit-app-region-no-drag"
-				draggable={false}
-				onMouseDown={(e) => e.stopPropagation()}
-				onDragStart={(e) => e.preventDefault()}
-			>
-				<DropdownButton
-					value={agentKind}
-					options={agentKindOptions}
-					onChange={(id) => onAgentKindChange(id as AgentKind)}
-					icon={
-						<span className="text-inferay-accent">
-							{getAgentIcon(agentKind, 10)}
-						</span>
-					}
-					minWidth={110}
-					buttonClassName="h-4 rounded-md border-transparent px-1 text-[9px] font-medium text-inferay-accent hover:bg-inferay-white/[0.06] gap-1"
-					labelClassName="text-[9px]"
-					renderOption={(opt, isOptionSelected) => (
-						<div
-							className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-								isOptionSelected
-									? "bg-inferay-accent/15 text-inferay-white"
-									: "text-inferay-muted-gray hover:bg-inferay-white/5 hover:text-inferay-white"
-							}`}
-						>
-							<span className="shrink-0">{opt.icon}</span>
-							<span className="font-medium">{opt.label}</span>
-						</div>
-					)}
-				/>
-			</div>
 			{dirName && (
 				<>
-					<span className="text-[9px] text-inferay-muted-gray">›</span>
 					{hasMultipleSessions ? (
 						<span className="electrobun-webkit-app-region-no-drag">
 							<DropdownButton
@@ -127,7 +78,7 @@ export function AgentChatHeader({
 						className="text-inferay-muted-gray shrink-0"
 					/>
 					<span
-						className="text-[9px] font-medium text-inferay-muted-gray truncate max-w-[80px]"
+						className="text-[9px] font-medium text-inferay-white truncate max-w-[80px]"
 						title={gitBranch}
 					>
 						{gitBranch}
@@ -135,9 +86,6 @@ export function AgentChatHeader({
 				</>
 			)}
 			<span className="flex-1" />
-			{isSelected && (
-				<div className="h-1.5 w-1.5 rounded-full bg-inferay-accent" />
-			)}
 			{onClose && (
 				<button
 					type="button"

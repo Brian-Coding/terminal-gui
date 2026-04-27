@@ -11,7 +11,10 @@ import {
 import { useGitStatus } from "../../hooks/useGitStatus.ts";
 import { usePrompts } from "../../hooks/usePrompts.ts";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
-import { getAgentDefinition } from "../../lib/agents.ts";
+import {
+	CODEX_REASONING_LEVELS,
+	getAgentDefinition,
+} from "../../lib/agents.ts";
 import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
 import {
 	type AgentKind,
@@ -52,10 +55,14 @@ import {
 	loadStoredCheckpoints,
 	loadStoredInput,
 	loadStoredMessages,
+	loadStoredModel,
+	loadStoredReasoningLevel,
 	loadStoredSessionId,
 	saveStoredCheckpoints,
 	saveStoredInput,
 	saveStoredMessages,
+	saveStoredModel,
+	saveStoredReasoningLevel,
 	saveStoredSessionId,
 } from "./chat-session-store.ts";
 import {
@@ -153,6 +160,23 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		);
 		const messagesRef = useRef(messages);
 		messagesRef.current = messages;
+		const getDefaultModel = useCallback(
+			(kind: AgentKind) => getAgentDefinition(kind).defaultModel,
+			[]
+		);
+		const [selectedModel, setSelectedModel] = useState(() => {
+			const stored = loadStoredModel(paneId);
+			const definition = getAgentDefinition(agentKind);
+			return definition.models.some((model) => model.id === stored)
+				? stored!
+				: definition.defaultModel;
+		});
+		const [selectedReasoningLevel, setSelectedReasoningLevel] = useState(() => {
+			const stored = loadStoredReasoningLevel(paneId);
+			return CODEX_REASONING_LEVELS.some((level) => level.id === stored)
+				? stored!
+				: "low";
+		});
 		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 		const scheduleMessageSave = useCallback(
 			(nextMessages: ChatMessage[]) => {
@@ -223,6 +247,14 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				clearStoredSessionId(paneId);
 			}
 		}, [agentKind, paneId]);
+		useEffect(() => {
+			const definition = getAgentDefinition(agentKind);
+			if (!definition.models.length) return;
+			if (definition.models.some((model) => model.id === selectedModel)) return;
+			const nextModel = definition.defaultModel;
+			setSelectedModel(nextModel);
+			saveStoredModel(paneId, nextModel);
+		}, [agentKind, paneId, selectedModel]);
 
 		const [chatUiState, setChatUiState] = useState<{
 			isLoading: boolean;
@@ -485,9 +517,21 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					cwd,
 					sessionId,
 					agentKind,
+					model: selectedModel || getDefaultModel(agentKind),
+					reasoningLevel:
+						agentKind === "codex" ? selectedReasoningLevel : undefined,
 				});
 			},
-			[paneId, cwd, referencePaths, agentKind, setLoadingState]
+			[
+				paneId,
+				cwd,
+				referencePaths,
+				agentKind,
+				selectedModel,
+				selectedReasoningLevel,
+				getDefaultModel,
+				setLoadingState,
+			]
 		);
 		const extractToolActivitiesForHandle = useCallback(
 			(): ToolActivity[] => extractToolActivities(messagesRef.current),
@@ -1314,6 +1358,29 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			(nextAgentKind: AgentKind) => {
 				changePaneAgentKind(paneId, nextAgentKind);
 				clearStoredSessionId(paneId);
+				const nextModel = getDefaultModel(nextAgentKind);
+				if (nextModel) {
+					setSelectedModel(nextModel);
+					saveStoredModel(paneId, nextModel);
+				}
+			},
+			[getDefaultModel, paneId]
+		);
+
+		const handleModelChange = useCallback(
+			(model: string) => {
+				setSelectedModel(model);
+				saveStoredModel(paneId, model);
+				clearStoredSessionId(paneId);
+			},
+			[paneId]
+		);
+
+		const handleReasoningLevelChange = useCallback(
+			(reasoningLevel: string) => {
+				setSelectedReasoningLevel(reasoningLevel);
+				saveStoredReasoningLevel(paneId, reasoningLevel);
+				clearStoredSessionId(paneId);
 			},
 			[paneId]
 		);
@@ -1333,17 +1400,13 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					<AgentChatHeader
 						paneId={paneId}
 						cwd={cwd}
-						agentKind={agentKind}
-						agentKindOptions={agentKindOptions}
 						gitBranch={gitBranch}
 						draggable={draggable}
 						onDragStart={onDragStart}
 						onDragEnd={onDragEnd}
-						isSelected={isSelected}
 						onClose={onClose}
 						sessions={sessions}
 						onSelectSession={onSelectSession}
-						onAgentKindChange={handleAgentKindChange}
 					/>
 				)}
 				<div className="relative flex-1 overflow-hidden">
@@ -1358,10 +1421,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							(onDirectoryChange || onAddPane) && (
 								<div className="absolute inset-0 z-10 flex flex-col">
 									<div className="flex-1 flex items-center justify-center">
-										<div className="flex flex-col items-center gap-4">
-											<p className="text-xs text-inferay-muted-gray">
-												Start a new session
-											</p>
+										<div className="flex flex-col items-center gap-2">
 											{onAddPane && <NewSessionButtons onAddPane={onAddPane} />}
 										</div>
 									</div>
@@ -1436,6 +1496,13 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 								/>
 							}
 							showInput={showInput}
+							agentKind={agentKind}
+							agentKindOptions={agentKindOptions}
+							model={selectedModel}
+							reasoningLevel={selectedReasoningLevel}
+							onAgentKindChange={handleAgentKindChange}
+							onModelChange={handleModelChange}
+							onReasoningLevelChange={handleReasoningLevelChange}
 							input={input}
 							setInput={setInput}
 							isLoading={isLoading}

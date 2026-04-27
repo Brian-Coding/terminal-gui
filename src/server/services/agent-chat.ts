@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { ChatAgentKind } from "../../lib/agents.ts";
+import { type ChatAgentKind, getAgentDefinition } from "../../lib/agents.ts";
 import {
 	createClaudeEnv,
 	resolveClaudeBinary,
@@ -254,6 +254,21 @@ function updateSessionId(
 	});
 }
 
+function resolveChatModel(
+	agentKind: ChatAgentKind,
+	requestedModel?: string
+): string | undefined {
+	const definition = getAgentDefinition(agentKind);
+	if (!definition.models.length) return undefined;
+	if (
+		requestedModel &&
+		definition.models.some((model) => model.id === requestedModel)
+	) {
+		return requestedModel;
+	}
+	return definition.defaultModel || definition.models[0]?.id;
+}
+
 async function drainStreamToString(
 	stream: ReadableStream<Uint8Array>,
 	maxChars = MAX_STDERR_CHARS
@@ -389,7 +404,7 @@ export const ChatService = {
 			session.sessionId = null; // clear when switching agent kinds
 		}
 		session.agentKind = agentKind;
-		if (model) session.model = model;
+		session.model = resolveChatModel(agentKind, model);
 		if (reasoningLevel !== undefined) session.reasoningLevel = reasoningLevel;
 		session.clients.add(ws);
 		if (cwd) session.cwd = cwd;

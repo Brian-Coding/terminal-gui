@@ -2,18 +2,29 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import type React from "react";
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useState, useRef } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
 import { AgentChatView } from "../../components/chat/AgentChatView.tsx";
+import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
 import { IconTerminal, IconX } from "../../components/ui/Icons.tsx";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
-import { getAgentDefinition, isChatAgentKind } from "../../lib/agents.ts";
+import {
+	CODEX_REASONING_LEVELS,
+	getAgentDefinition,
+	isChatAgentKind,
+} from "../../lib/agents.ts";
 import type {
 	AgentKind,
 	TerminalPaneModel,
 	TerminalTheme,
 } from "../../lib/terminal-utils.ts";
 import { wsClient } from "../../lib/websocket.ts";
+import {
+	loadStoredModel,
+	loadStoredReasoningLevel,
+	saveStoredModel,
+	saveStoredReasoningLevel,
+} from "../../components/chat/chat-session-store.ts";
 import { InlineDirectoryPicker } from "./InlineDirectoryPicker.tsx";
 import { NewSessionButtons } from "./NewSessionButtons.tsx";
 
@@ -65,6 +76,35 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	const chatHandleRef = useRef<AgentChatHandle | null>(null);
 	const isAgentChatPane = isChatAgentKind(pane.agentKind);
 	const paneLabel = getAgentDefinition(pane.agentKind).label;
+	const pendingAgentKind = isChatAgentKind(pane.agentKind)
+		? pane.agentKind
+		: "claude";
+	const pendingAgentDefinition = getAgentDefinition(pendingAgentKind);
+	const [pendingModel, setPendingModel] = useState(() => {
+		const stored = loadStoredModel(pane.id);
+		return pendingAgentDefinition.models.some((model) => model.id === stored)
+			? stored!
+			: pendingAgentDefinition.defaultModel;
+	});
+	const [pendingReasoningLevel, setPendingReasoningLevel] = useState(() => {
+		const stored = loadStoredReasoningLevel(pane.id);
+		return CODEX_REASONING_LEVELS.some((level) => level.id === stored)
+			? stored!
+			: "low";
+	});
+
+	useEffect(() => {
+		if (pane.pendingCwd && !isChatAgentKind(pane.agentKind)) {
+			onSetPaneAgentKind?.(pane.id, "claude");
+		}
+	}, [onSetPaneAgentKind, pane.agentKind, pane.id, pane.pendingCwd]);
+
+	useEffect(() => {
+		const definition = getAgentDefinition(pendingAgentKind);
+		if (definition.models.some((model) => model.id === pendingModel)) return;
+		setPendingModel(definition.defaultModel);
+		saveStoredModel(pane.id, definition.defaultModel);
+	}, [pendingAgentKind, pendingModel, pane.id]);
 
 	useEffect(() => {
 		if (isAgentChatPane || pane.pendingCwd || !containerRef.current) return;
@@ -244,22 +284,50 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					</button>
 				</div>
 				<div className="flex-1 flex flex-col">
-					<div className="flex-1 flex items-center justify-center">
-						<div className="flex flex-col items-center gap-4">
-							<p className="text-xs text-inferay-soft-white">
-								Start a new terminal or agent session
-							</p>
+					<div className="flex-1" />
+					<div className="shrink-0 px-3 pb-2">
+						<div className="mb-1 flex items-center gap-1.5 overflow-x-auto px-1">
 							<NewSessionButtons
-								selectedKind={pane.agentKind}
+								selectedKind={pendingAgentKind}
 								onAddPane={(kind) => {
 									if (onSetPaneAgentKind) {
 										onSetPaneAgentKind(pane.id, kind);
 									}
+									const nextModel = getAgentDefinition(kind).defaultModel;
+									setPendingModel(nextModel);
+									saveStoredModel(pane.id, nextModel);
 								}}
 							/>
+							<DropdownButton
+								value={pendingModel}
+								options={pendingAgentDefinition.models.map((option) => ({
+									...option,
+									icon: getAgentIcon(pendingAgentKind, 12),
+								}))}
+								onChange={(model) => {
+									setPendingModel(model);
+									saveStoredModel(pane.id, model);
+								}}
+								minWidth={190}
+								menuPlacement="top"
+								buttonClassName="h-5 rounded-md border-transparent px-1 text-[10px] font-medium text-inferay-muted-gray hover:bg-inferay-white/[0.06] gap-1"
+								labelClassName="max-w-[96px] truncate text-[10px]"
+							/>
+							{pendingAgentKind === "codex" && (
+								<DropdownButton
+									value={pendingReasoningLevel}
+									options={[...CODEX_REASONING_LEVELS]}
+									onChange={(reasoningLevel) => {
+										setPendingReasoningLevel(reasoningLevel);
+										saveStoredReasoningLevel(pane.id, reasoningLevel);
+									}}
+									minWidth={150}
+									menuPlacement="top"
+									buttonClassName="h-5 rounded-md border-transparent px-1 text-[10px] font-medium text-inferay-muted-gray hover:bg-inferay-white/[0.06] gap-1"
+									labelClassName="max-w-[76px] truncate text-[10px]"
+								/>
+							)}
 						</div>
-					</div>
-					<div className="shrink-0 px-3 pb-2">
 						<InlineDirectoryPicker
 							onSelect={(path) => onDirectorySelect?.(pane.id, path)}
 							onCancel={() => onDirectoryCancel?.(pane.id)}

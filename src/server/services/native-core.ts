@@ -25,13 +25,13 @@ export async function runNativeCore<TRequest, TResponse>(
 	const binary = resolveNativeCoreBinary();
 	if (!binary) return null;
 
-	const proc = Bun.spawn([binary], {
-		stdin: new Blob([JSON.stringify(payload)]),
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-
 	try {
+		const proc = Bun.spawn([binary], {
+			stdin: new Blob([JSON.stringify(payload)]),
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+
 		const [stdout, stderr, exitCode] = await Promise.all([
 			new Response(proc.stdout).text(),
 			new Response(proc.stderr).text(),
