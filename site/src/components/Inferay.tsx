@@ -199,7 +199,7 @@ export function Inferay() {
 								<img
 									src="/app-icon.png"
 									alt="inferay"
-									className="h-5 w-5 rounded-md"
+									className="h-5 w-5 rounded-md object-cover"
 								/>
 							</div>
 							<nav className="flex-1 py-2 flex flex-col items-center gap-2">

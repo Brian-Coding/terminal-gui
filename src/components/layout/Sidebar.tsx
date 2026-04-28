@@ -288,7 +288,7 @@ export function Sidebar() {
 						<img
 							src={logoUrl}
 							alt=""
-							className="h-7 w-7 rounded-md"
+							className="h-7 w-7 rounded-md object-cover"
 							style={logoImageStyle}
 						/>
 					</span>

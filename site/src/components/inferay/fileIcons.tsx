@@ -13,7 +13,7 @@ export type FileIconType =
 	| "default";
 
 // Get icon type from filename
-function getFileIconType(filename: string): FileIconType {
+export function getFileIconType(filename: string): FileIconType {
 	const ext = filename.split(".").pop()?.toLowerCase() || "";
 	const name = filename.toLowerCase();
 
@@ -66,7 +66,7 @@ function getFileIconType(filename: string): FileIconType {
 }
 
 // Icon colors by type
-const fileIconColors: Record<FileIconType, string> = {
+export const fileIconColors: Record<FileIconType, string> = {
 	react: "text-cyan-400",
 	typescript: "text-blue-400",
 	javascript: "text-yellow-400",
@@ -78,7 +78,7 @@ const fileIconColors: Record<FileIconType, string> = {
 };
 
 // File icon component
-function FileIcon({
+export function FileIcon({
 	filename,
 	className = "",
 }: {
