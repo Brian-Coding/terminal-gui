@@ -83,6 +83,13 @@ const CODEX_MODELS: readonly ModelOption[] = [
 	{ id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", detail: "Cheapest" },
 ] as const;
 
+const CODEX_NATIVE_COMMANDS = [
+	{
+		name: "goal",
+		description: "Keep Codex working toward an objective until done or paused",
+	},
+] as const satisfies readonly NativeSlashCommand[];
+
 const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
 	terminal: {
 		kind: "terminal",
@@ -119,7 +126,7 @@ const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
 		supportsChat: true,
 		supportsInteractiveTerminal: true,
 		supportsResume: true,
-		nativeSlashCommands: [],
+		nativeSlashCommands: CODEX_NATIVE_COMMANDS,
 		models: CODEX_MODELS,
 		defaultModel: "gpt-5.5",
 	},

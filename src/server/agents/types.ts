@@ -20,9 +20,13 @@ export interface AgentRunContext {
 }
 
 export interface AgentHandle {
-	run(): Promise<void>;
+	run(): Promise<AgentRunResult | void>;
 	stop(): void;
 	kill(): void;
+}
+
+export interface AgentRunResult {
+	lastAssistantMessage?: string;
 }
 
 export interface AgentAdapter<State = unknown> {

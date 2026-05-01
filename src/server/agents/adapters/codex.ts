@@ -14,6 +14,7 @@ interface CodexRunState {
 	toolOpen: boolean;
 	sawAssistantStream: boolean;
 	hasFinalAssistantMessage: boolean;
+	lastAssistantMessage: string;
 }
 
 const MAX_STDERR_CHARS = 64_000;
@@ -303,6 +304,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 			toolOpen: false,
 			sawAssistantStream: false,
 			hasFinalAssistantMessage: false,
+			lastAssistantMessage: "",
 		};
 	},
 
@@ -377,6 +379,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				try {
 					if (await outputFile.exists()) {
 						assistantText = (await outputFile.text()).trim();
+						state.lastAssistantMessage = assistantText;
 					}
 				} finally {
 					await unlink(state.outputPath).catch(() => {});
@@ -415,6 +418,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				} else if (exitCode !== 0 && stderrText) {
 					ctx.emitSystemMessage(stderrText);
 				}
+
+				return { lastAssistantMessage: state.lastAssistantMessage };
 			},
 
 			stop() {

@@ -187,6 +187,14 @@ interface ChatSession {
 	cwd: string;
 	messageBuffer: ChatMessageBuffer;
 	cleanupTimer: ReturnType<typeof setTimeout> | null;
+	goal: GoalState | null;
+}
+
+interface GoalState {
+	objective: string;
+	status: "active" | "paused";
+	turns: number;
+	startedAt: number;
 }
 
 interface AgentSessionInfo {
@@ -329,7 +337,24 @@ async function finalizeCheckpoint(
 	}
 }
 
-async function runAgent(session: ChatSession, paneId: string, text: string) {
+function finalizeChatTurn(session: ChatSession, paneId: string) {
+	session.messageBuffer.finalize();
+	broadcast(session, {
+		type: "chat:sync",
+		paneId,
+		messages: session.messageBuffer.getMessages(),
+		isStreaming: false,
+	});
+	broadcast(session, { type: "chat:done", paneId });
+	scheduleSessionCleanup(session);
+}
+
+async function runAgent(
+	session: ChatSession,
+	paneId: string,
+	text: string,
+	emitDone = true
+) {
 	const adapter = getAgentAdapter(session.agentKind);
 	const ctx: AgentRunContext = {
 		paneId,
@@ -357,19 +382,116 @@ async function runAgent(session: ChatSession, paneId: string, text: string) {
 	session.currentHandle = handle;
 
 	try {
-		await handle.run();
+		return await handle.run();
 	} finally {
 		session.currentHandle = null;
-		session.messageBuffer.finalize();
-		broadcast(session, {
-			type: "chat:sync",
-			paneId,
-			messages: session.messageBuffer.getMessages(),
-			isStreaming: false,
-		});
-		broadcast(session, { type: "chat:done", paneId });
-		scheduleSessionCleanup(session);
+		if (emitDone) finalizeChatTurn(session, paneId);
 	}
+}
+
+const GOAL_MAX_TURNS = 20;
+const GOAL_COMPLETE_MARKER = "[[GOAL_COMPLETE]]";
+const GOAL_NEEDS_INPUT_MARKER = "[[GOAL_NEEDS_INPUT]]";
+
+function parseGoalCommand(
+	text: string
+):
+	| { action: "start"; objective: string }
+	| { action: "pause" | "resume" | "clear" | "status" }
+	| null {
+	const match = text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/i);
+	if (!match) return null;
+	const args = (match[1] ?? "").trim();
+	const subcommand = args.toLowerCase();
+	if (subcommand === "pause") return { action: "pause" };
+	if (subcommand === "resume") return { action: "resume" };
+	if (subcommand === "clear" || subcommand === "stop")
+		return { action: "clear" };
+	if (subcommand === "status" || !args) return { action: "status" };
+	return { action: "start", objective: args };
+}
+
+function createGoalPrompt(objective: string) {
+	return `Start pursuing this goal until it is genuinely complete:\n\n${objective}\n\nWork autonomously. When the goal is fully achieved, include ${GOAL_COMPLETE_MARKER} in your final response. If you are blocked and need user input, include ${GOAL_NEEDS_INPUT_MARKER}.`;
+}
+
+function createGoalContinuationPrompt(goal: GoalState) {
+	return `<goal-continuation>
+Objective: ${goal.objective}
+Turns used: ${goal.turns}
+Elapsed milliseconds: ${Date.now() - goal.startedAt}
+
+Continue working toward the objective. Do not ask for confirmation unless you are blocked. When the goal is fully achieved, include ${GOAL_COMPLETE_MARKER} in your final response. If you need user input to proceed, include ${GOAL_NEEDS_INPUT_MARKER}.
+</goal-continuation>`;
+}
+
+function goalResultStatus(text?: string): "complete" | "paused" | "active" {
+	if (!text) return "active";
+	if (text.includes(GOAL_COMPLETE_MARKER)) return "complete";
+	if (text.includes(GOAL_NEEDS_INPUT_MARKER)) return "paused";
+	return "active";
+}
+
+function getLastAssistantMessage(result: Awaited<ReturnType<typeof runAgent>>) {
+	return result && typeof result === "object"
+		? result.lastAssistantMessage
+		: undefined;
+}
+
+async function handleGoalCommand(
+	session: ChatSession,
+	paneId: string,
+	command: NonNullable<ReturnType<typeof parseGoalCommand>>
+) {
+	if (command.action === "start") {
+		session.goal = {
+			objective: command.objective,
+			status: "active",
+			turns: 0,
+			startedAt: Date.now(),
+		};
+		session.messageBuffer.pushSystem(`Goal started: ${command.objective}`);
+		broadcast(session, {
+			type: "chat:system",
+			paneId,
+			message: `Goal started: ${command.objective}`,
+		});
+		return createGoalPrompt(command.objective);
+	}
+
+	if (command.action === "pause") {
+		if (session.goal) session.goal.status = "paused";
+		const message = session.goal ? "Goal paused" : "No active goal";
+		session.messageBuffer.pushSystem(message);
+		broadcast(session, { type: "chat:system", paneId, message });
+		return null;
+	}
+
+	if (command.action === "resume") {
+		if (!session.goal) {
+			const message = "No goal to resume";
+			session.messageBuffer.pushSystem(message);
+			broadcast(session, { type: "chat:system", paneId, message });
+			return null;
+		}
+		session.goal.status = "active";
+		return createGoalContinuationPrompt(session.goal);
+	}
+
+	if (command.action === "clear") {
+		session.goal = null;
+		const message = "Goal cleared";
+		session.messageBuffer.pushSystem(message);
+		broadcast(session, { type: "chat:system", paneId, message });
+		return null;
+	}
+
+	const message = session.goal
+		? `Goal ${session.goal.status}: ${session.goal.objective} (${session.goal.turns} turns)`
+		: "No active goal";
+	session.messageBuffer.pushSystem(message);
+	broadcast(session, { type: "chat:system", paneId, message });
+	return null;
 }
 
 export const ChatService = {
@@ -396,6 +518,7 @@ export const ChatService = {
 				cwd: cwd || process.cwd(),
 				messageBuffer: new ChatMessageBuffer(),
 				cleanupTimer: null,
+				goal: null,
 			};
 			sessions.set(paneId, session);
 		}
@@ -423,6 +546,17 @@ export const ChatService = {
 			return;
 		}
 
+		const goalCommand = agentKind === "codex" ? parseGoalCommand(text) : null;
+		let prompt = text;
+		if (goalCommand) {
+			const goalPrompt = await handleGoalCommand(session, paneId, goalCommand);
+			if (!goalPrompt) {
+				finalizeChatTurn(session, paneId);
+				return;
+			}
+			prompt = goalPrompt;
+		}
+
 		let checkpointId: string | null = null;
 		try {
 			checkpointId = await CheckpointService.createCheckpoint(
@@ -436,7 +570,40 @@ export const ChatService = {
 		}
 
 		try {
-			await runAgent(session, paneId, text);
+			const isGoalRun = session.goal?.status === "active";
+			let result = await runAgent(session, paneId, prompt, !isGoalRun);
+			if (isGoalRun && session.goal?.status === "active") {
+				session.goal.turns += 1;
+				let resultStatus = goalResultStatus(getLastAssistantMessage(result));
+				while (
+					session.goal?.status === "active" &&
+					resultStatus === "active" &&
+					session.goal.turns < GOAL_MAX_TURNS
+				) {
+					const nextPrompt = createGoalContinuationPrompt(session.goal);
+					result = await runAgent(session, paneId, nextPrompt, false);
+					session.goal.turns += 1;
+					resultStatus = goalResultStatus(getLastAssistantMessage(result));
+				}
+
+				if (session.goal && resultStatus === "complete") {
+					const message = `Goal achieved after ${session.goal.turns} turns`;
+					session.goal = null;
+					session.messageBuffer.pushSystem(message);
+					broadcast(session, { type: "chat:system", paneId, message });
+				} else if (session.goal && resultStatus === "paused") {
+					session.goal.status = "paused";
+					const message = "Goal paused because Codex needs user input";
+					session.messageBuffer.pushSystem(message);
+					broadcast(session, { type: "chat:system", paneId, message });
+				} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
+					session.goal.status = "paused";
+					const message = `Goal paused after ${GOAL_MAX_TURNS} turns`;
+					session.messageBuffer.pushSystem(message);
+					broadcast(session, { type: "chat:system", paneId, message });
+				}
+				finalizeChatTurn(session, paneId);
+			}
 			await finalizeCheckpoint(session, paneId, checkpointId);
 		} catch (e) {
 			session.currentHandle = null;
