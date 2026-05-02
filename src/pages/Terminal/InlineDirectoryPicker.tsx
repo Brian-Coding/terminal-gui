@@ -20,6 +20,7 @@ interface InlineDirectoryPickerProps {
 	multiSelect?: boolean;
 	onMultiSelect?: (paths: string[]) => void;
 	hideInput?: boolean;
+	onSelectionChange?: (paths: string[]) => void;
 }
 
 interface SearchState {
@@ -71,6 +72,7 @@ export function InlineDirectoryPicker({
 	multiSelect,
 	onMultiSelect,
 	hideInput,
+	onSelectionChange,
 }: InlineDirectoryPickerProps) {
 	const [query, setQuery] = useState("");
 	const [pickerData, setPickerData] = useState<{
@@ -157,9 +159,13 @@ export function InlineDirectoryPicker({
 	}, [query]);
 
 	const togglePath = (path: string) => {
-		setSelectedPaths((prev) =>
-			prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]
-		);
+		setSelectedPaths((prev) => {
+			const next = prev.includes(path)
+				? prev.filter((p) => p !== path)
+				: [...prev, path];
+			onSelectionChange?.(next);
+			return next;
+		});
 	};
 
 	const handleItemClick = (path: string) => {
@@ -255,36 +261,27 @@ export function InlineDirectoryPicker({
 					))}
 				</div>
 				{multiSelect && selectedPaths.length > 0 && (
-					<div className="flex items-center gap-2 border-t border-inferay-gray-border/60 px-3 py-2">
-						<div className="flex min-w-0 flex-1 flex-wrap gap-1 overflow-hidden">
-							{selectedPaths.slice(0, 3).map((p) => (
-								<span
-									key={p}
-									className="inline-flex max-w-[140px] items-center gap-1 rounded-md bg-inferay-white/[0.05] px-1.5 py-0.5 text-[9px] font-medium text-inferay-soft-white"
+					<div className="flex min-w-0 flex-wrap gap-1 overflow-hidden border-t border-inferay-gray-border/60 px-3 py-2">
+						{selectedPaths.slice(0, 4).map((p) => (
+							<span
+								key={p}
+								className="inline-flex max-w-[140px] items-center gap-1 rounded-md bg-inferay-white/[0.05] px-1.5 py-0.5 text-[9px] font-medium text-inferay-soft-white"
+							>
+								<span className="truncate">{nameFromPath(p)}</span>
+								<button
+									type="button"
+									onClick={() => togglePath(p)}
+									className="shrink-0 text-inferay-muted-gray hover:text-inferay-white"
 								>
-									<span className="truncate">{nameFromPath(p)}</span>
-									<button
-										type="button"
-										onClick={() => togglePath(p)}
-										className="shrink-0 text-inferay-muted-gray hover:text-inferay-white"
-									>
-										<IconX size={8} />
-									</button>
-								</span>
-							))}
-							{selectedPaths.length > 3 && (
-								<span className="text-[9px] text-inferay-muted-gray">
-									+{selectedPaths.length - 3}
-								</span>
-							)}
-						</div>
-						<button
-							type="button"
-							onClick={handleStart}
-							className="shrink-0 rounded-md border border-inferay-gray-border bg-inferay-gray px-2 py-1 text-[10px] font-medium text-inferay-soft-white transition-colors hover:bg-inferay-light-gray"
-						>
-							Start
-						</button>
+									<IconX size={8} />
+								</button>
+							</span>
+						))}
+						{selectedPaths.length > 4 && (
+							<span className="text-[9px] text-inferay-muted-gray">
+								+{selectedPaths.length - 4}
+							</span>
+						)}
 					</div>
 				)}
 			</div>

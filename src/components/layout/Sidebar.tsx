@@ -411,6 +411,8 @@ export function Sidebar() {
 				),
 			});
 			setWorkspaces(loadWorkspaces);
+			// When on editor view, also update the editor's selected pane
+			writeStoredValue("editor-selected-pane", paneId);
 			window.dispatchEvent(new Event("terminal-shell-change"));
 			if (window.location.hash !== "#/terminal") {
 				navigate("/terminal");

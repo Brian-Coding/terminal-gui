@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { getAgentDefinition } from "../../lib/agents.ts";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import { IconGitBranch, IconX } from "../ui/Icons.tsx";
 import type { AgentChatSession } from "./agent-chat-shared.ts";
-import { loadStoredSummary } from "./chat-session-store.ts";
 
 interface AgentChatHeaderProps {
 	paneId: string;
@@ -29,31 +27,18 @@ export function AgentChatHeader({
 	sessions,
 	onSelectSession,
 }: AgentChatHeaderProps) {
-	const [summary, setSummary] = useState(() => loadStoredSummary(paneId));
 	const dirName = cwd ? cwd.split("/").pop() || cwd : null;
-	const title = summary;
-	const detail = dirName && dirName !== title ? dirName : null;
 	const hasMultipleSessions =
 		sessions && sessions.length > 1 && onSelectSession;
 	const sessionOptions = hasMultipleSessions
 		? sessions.map((session) => ({
 				id: session.paneId,
 				label:
-					loadStoredSummary(session.paneId) ||
-					(session.cwd ?? "").split("/").pop() ||
-					session.cwd ||
-					"No directory",
+					(session.cwd ?? "").split("/").pop() || session.cwd || "No directory",
 				detail: getAgentDefinition(session.agentKind).label,
 				icon: getAgentIcon(session.agentKind, 12),
 			}))
 		: [];
-
-	useEffect(() => {
-		const refresh = () => setSummary(loadStoredSummary(paneId));
-		refresh();
-		window.addEventListener("terminal-shell-change", refresh);
-		return () => window.removeEventListener("terminal-shell-change", refresh);
-	}, [paneId]);
 
 	return (
 		<div
@@ -62,7 +47,7 @@ export function AgentChatHeader({
 			onDragStart={onDragStart}
 			onDragEnd={onDragEnd}
 		>
-			{title &&
+			{dirName &&
 				(hasMultipleSessions ? (
 					<span className="electrobun-webkit-app-region-no-drag">
 						<DropdownButton
@@ -77,22 +62,11 @@ export function AgentChatHeader({
 				) : (
 					<span
 						className="text-[9px] font-medium text-inferay-white truncate"
-						title={summary ?? undefined}
-					>
-						{title}
-					</span>
-				))}
-			{detail && (
-				<>
-					<span className="text-[9px] text-inferay-muted-gray">›</span>
-					<span
-						className="max-w-[120px] truncate text-[9px] font-medium text-inferay-muted-gray"
 						title={cwd}
 					>
-						{detail}
+						{dirName}
 					</span>
-				</>
-			)}
+				))}
 			{gitBranch && (
 				<>
 					<span className="text-[9px] text-inferay-muted-gray">›</span>

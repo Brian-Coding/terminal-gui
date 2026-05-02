@@ -297,6 +297,9 @@ export function EditorPage() {
 		const syncEditorShellState = () => {
 			setZenMode(loadZenMode());
 			setSessionVersion((v) => v + 1);
+			// Re-read selected pane (sidebar may have changed it)
+			const storedPane = readStoredValue("editor-selected-pane");
+			if (storedPane) setSelectedPaneId(storedPane);
 		};
 		window.addEventListener("terminal-shell-change", syncEditorShellState);
 		return () =>
@@ -356,23 +359,6 @@ export function EditorPage() {
 		}
 	}, [clearDiff, files, loadDiff, session]);
 
-	const cycleSession = useCallback(
-		(dir: -1 | 1) => {
-			if (!sessions.length) return;
-			const idx = sessionIdx >= 0 ? sessionIdx : 0;
-			const next =
-				dir === 1
-					? idx >= sessions.length - 1
-						? 0
-						: idx + 1
-					: idx <= 0
-						? sessions.length - 1
-						: idx - 1;
-			setSelectedPaneId(sessions[next]?.paneId ?? null);
-		},
-		[sessionIdx, sessions]
-	);
-
 	const cycleFile = useCallback(
 		(dir: -1 | 1) => {
 			if (!session?.cwd || !files.length) return;
@@ -409,11 +395,7 @@ export function EditorPage() {
 				target.isContentEditable;
 			if (isEditable) return;
 
-			if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-				e.preventDefault();
-				cycleSession(e.key === "ArrowLeft" ? -1 : 1);
-				setTimeout(() => chatRef.current?.focusInput(true), 50);
-			} else if (e.key === "ArrowDown") {
+			if (e.key === "ArrowDown") {
 				e.preventDefault();
 				cycleFile(1);
 			} else if (e.key === "ArrowUp") {
@@ -423,7 +405,7 @@ export function EditorPage() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [cycleFile, cycleSession]);
+	}, [cycleFile]);
 
 	const closePane = useCallback(
 		(paneId: string) => {

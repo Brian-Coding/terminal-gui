@@ -183,6 +183,9 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 		const summaryRef = useRef<string | null>(loadStoredSummary(paneId));
 		const titleRequestedRef = useRef(false);
+		const [pendingWorkspacePaths, setPendingWorkspacePaths] = useState<
+			string[]
+		>([]);
 		const scheduleMessageSave = useCallback(
 			(nextMessages: ChatMessage[]) => {
 				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -521,7 +524,10 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			containerRef,
 		});
 		const sendToServer = useCallback(
-			(text: string) => {
+			(
+				text: string,
+				workspaceOverride?: { cwd?: string; referencePaths?: string[] }
+			) => {
 				autoFollowRef.current = true;
 				setLoadingState({
 					isLoading: true,
@@ -532,16 +538,22 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 
 				let prompt = text;
 				const sessionId = loadStoredSessionId(paneId);
-				if (!sessionId && (cwd || (referencePaths?.length ?? 0) > 0)) {
+				const effectiveCwd = workspaceOverride?.cwd ?? cwd;
+				const effectiveReferencePaths =
+					workspaceOverride?.referencePaths ?? referencePaths;
+				if (
+					!sessionId &&
+					(effectiveCwd || (effectiveReferencePaths?.length ?? 0) > 0)
+				) {
 					const workspaceLines = [
 						"You are working in a multi-directory workspace.",
-						cwd
-							? `Primary working directory (use this as the execution root unless the user says otherwise): ${cwd}`
+						effectiveCwd
+							? `Primary working directory (use this as the execution root unless the user says otherwise): ${effectiveCwd}`
 							: null,
-						referencePaths?.length
-							? `Additional reference directories available in this workspace:\n${referencePaths.map((path) => `- ${path}`).join("\n")}`
+						effectiveReferencePaths?.length
+							? `Additional reference directories available in this workspace:\n${effectiveReferencePaths.map((path) => `- ${path}`).join("\n")}`
 							: null,
-						referencePaths?.length
+						effectiveReferencePaths?.length
 							? "The additional directories are supporting context. Read and reference them when relevant, but treat the primary working directory as the default root."
 							: null,
 					]
@@ -574,7 +586,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					type: "chat:send",
 					paneId,
 					text: prompt,
-					cwd,
+					cwd: effectiveCwd,
 					sessionId,
 					agentKind,
 					model: selectedModel || getDefaultModel(agentKind),
@@ -1418,11 +1430,35 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				if (isLoading) {
 					queueMessage(text.trim(), text.trim());
 				} else {
+					const selectedWorkspace =
+						!cwd && pendingWorkspacePaths.length > 0
+							? {
+									cwd: pendingWorkspacePaths[0],
+									referencePaths: pendingWorkspacePaths.slice(1),
+								}
+							: undefined;
+					if (selectedWorkspace?.cwd) {
+						onDirectoryChange?.(
+							paneId,
+							selectedWorkspace.cwd,
+							selectedWorkspace.referencePaths
+						);
+						setPendingWorkspacePaths([]);
+					}
 					appendLocalMessages([{ role: "user", content: text.trim() }]);
-					sendToServer(text.trim());
+					sendToServer(text.trim(), selectedWorkspace);
 				}
 			},
-			[appendLocalMessages, isLoading, queueMessage, sendToServer]
+			[
+				appendLocalMessages,
+				cwd,
+				isLoading,
+				onDirectoryChange,
+				paneId,
+				pendingWorkspacePaths,
+				queueMessage,
+				sendToServer,
+			]
 		);
 
 		const handleAgentKindChange = useCallback(
@@ -1499,6 +1535,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 											onCancel={() => {}}
 											multiSelect
 											hideInput
+											onSelectionChange={setPendingWorkspacePaths}
 											onMultiSelect={(paths) => {
 												if (paths.length > 0) {
 													onDirectoryChange(paneId, paths[0]!, paths.slice(1));
