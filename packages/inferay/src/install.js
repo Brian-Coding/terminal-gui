@@ -1,6 +1,8 @@
-import { cp, mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { getChannel } from "./config.js";
 import {
 	defaultInstallPath,
@@ -10,16 +12,60 @@ import {
 import { downloadAsset, fetchRelease, findAsset } from "./releases.js";
 import { openFile } from "./launch.js";
 
+const execFileAsync = promisify(execFile);
+
 async function copyAppBundle(source, destination = defaultInstallPath()) {
 	if (!source.endsWith(".app")) {
 		throw new Error("local install source must be a .app bundle");
 	}
 	await mkdir(dirname(destination), { recursive: true });
+	await rm(destination, { recursive: true, force: true });
 	await cp(source, destination, { recursive: true, force: true });
 	return destination;
 }
 
-export async function install({ local, launch = true } = {}) {
+function parseMountPoint(output) {
+	return output
+		.split("\n")
+		.map((line) => line.trim().split(/\s+/).at(-1))
+		.find((part) => part?.startsWith("/Volumes/"));
+}
+
+async function findAppBundle(directory) {
+	const entries = await readdir(directory, { withFileTypes: true });
+	const app = entries.find(
+		(entry) => entry.isDirectory() && entry.name.endsWith(".app")
+	);
+	if (!app) {
+		throw new Error(`no .app bundle found in ${directory}`);
+	}
+	return join(directory, app.name);
+}
+
+async function installDmg(dmgPath, { launch = true } = {}) {
+	const { stdout } = await execFileAsync("hdiutil", [
+		"attach",
+		"-nobrowse",
+		"-readonly",
+		dmgPath,
+	]);
+	const mountPoint = parseMountPoint(stdout);
+	if (!mountPoint) {
+		throw new Error("could not determine mounted DMG path");
+	}
+	try {
+		const appBundle = await findAppBundle(mountPoint);
+		const destination = await copyAppBundle(appBundle);
+		if (launch) {
+			await openFile(destination);
+		}
+		return destination;
+	} finally {
+		await execFileAsync("hdiutil", ["detach", mountPoint]).catch(() => {});
+	}
+}
+
+export async function install({ local, launch = true, force = false } = {}) {
 	const platform = platformInfo();
 	if (!platform.supported) {
 		throw new Error(`unsupported platform ${platform.os}-${platform.cpu}`);
@@ -40,11 +86,13 @@ export async function install({ local, launch = true } = {}) {
 
 	const existing = findExistingApp();
 	if (existing) {
-		return {
-			kind: "already-installed",
-			message: `Inferay is already available at ${existing}`,
-			installedPath: existing,
-		};
+		if (!force) {
+			return {
+				kind: "already-installed",
+				message: `Inferay is already available at ${existing}`,
+				installedPath: existing,
+			};
+		}
 	}
 
 	const channel = await getChannel();
@@ -58,13 +106,12 @@ export async function install({ local, launch = true } = {}) {
 
 	const downloadedPath = await downloadAsset(asset);
 	if (downloadedPath.endsWith(".dmg")) {
-		if (launch) {
-			await openFile(downloadedPath);
-		}
+		const installedPath = await installDmg(downloadedPath, { launch });
 		return {
-			kind: "dmg",
-			message: `Downloaded ${asset.name}. Drag Inferay to Applications from the opened DMG.`,
+			kind: "dmg-installed",
+			message: `Installed ${asset.name} to ${installedPath}`,
 			downloadedPath,
+			installedPath,
 		};
 	}
 

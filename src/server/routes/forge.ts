@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { basename, resolve } from "node:path";
@@ -10,6 +11,19 @@ const execFileAsync = promisify(execFile);
 const configManager = new ConfigManager();
 const ACCOUNTS_CACHE_TTL_MS = 30_000;
 const REPOS_CACHE_TTL_MS = 120_000;
+const TOOL_PATHS = [
+	"/opt/homebrew/bin",
+	"/usr/local/bin",
+	"/usr/bin",
+	"/bin",
+	"/usr/sbin",
+	"/sbin",
+];
+const GH_CANDIDATES = [
+	...TOOL_PATHS.map((path) => `${path}/gh`),
+	"/opt/homebrew/bin/gh",
+	"/usr/local/bin/gh",
+];
 
 let accountsCache: { value: ForgeAccount[]; cachedAt: number } | null = null;
 let reposCache: {
@@ -45,11 +59,24 @@ interface GithubUser {
 	email?: string | null;
 }
 
+function toolEnv() {
+	const existingPath = process.env.PATH ?? "";
+	return {
+		...process.env,
+		PATH: [...TOOL_PATHS, existingPath].filter(Boolean).join(":"),
+	};
+}
+
+function resolveGhBinary() {
+	return GH_CANDIDATES.find((candidate) => existsSync(candidate)) ?? "gh";
+}
+
 async function runGh(args: string[], timeout = 15000) {
-	return execFileAsync("gh", args, {
+	return execFileAsync(resolveGhBinary(), args, {
 		encoding: "utf-8",
 		timeout,
 		maxBuffer: 1024 * 1024,
+		env: toolEnv(),
 	});
 }
 
@@ -59,6 +86,7 @@ async function runGit(args: string[], cwd?: string, timeout = 120000) {
 		encoding: "utf-8",
 		timeout,
 		maxBuffer: 1024 * 1024,
+		env: toolEnv(),
 	});
 }
 
@@ -159,10 +187,11 @@ async function openGithubLogin() {
 	accountsCache = null;
 	reposCache = null;
 	if (platform() === "darwin") {
+		const gh = resolveGhBinary();
 		const script = [
 			'tell application "Terminal"',
 			"activate",
-			`do script "${quoteAppleScript("gh auth login")} "`,
+			`do script "${quoteAppleScript(`${gh} auth login`)} "`,
 			"end tell",
 		].join("\n");
 		await execFileAsync("osascript", ["-e", script], { timeout: 10000 });

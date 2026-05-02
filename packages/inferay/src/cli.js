@@ -2,10 +2,8 @@ import { install } from "./install.js";
 import { launchApp } from "./launch.js";
 import { doctor } from "./doctor.js";
 import { getChannel, setChannel } from "./config.js";
-import { fetchRelease, findAsset } from "./releases.js";
-import { platformInfo } from "./platform.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.2";
 
 function printHelp() {
 	console.log(`inferay ${VERSION}
@@ -43,19 +41,8 @@ async function printDoctor(args) {
 }
 
 async function update() {
-	const channel = await getChannel();
-	const release = await fetchRelease(channel);
-	const asset = findAsset(release, platformInfo());
-	if (!asset) {
-		throw new Error(
-			`no installable asset found for ${release.tag_name || channel}`
-		);
-	}
-	console.log(
-		`Latest ${channel}: ${release.tag_name || release.name || "unknown"}`
-	);
-	console.log(`Asset: ${asset.name}`);
-	console.log("Run `inferay install` to download and open the installer.");
+	const result = await install({ force: true });
+	console.log(result.message);
 }
 
 async function installAndReport(args) {
