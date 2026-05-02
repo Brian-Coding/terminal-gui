@@ -15,6 +15,7 @@ import { ImagesPage } from "./pages/ImagesPage";
 import { ONBOARDING_DONE_KEY, OnboardingPage } from "./pages/OnboardingPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PromptsPage } from "./pages/PromptsPage";
+import { SimulatorsPage } from "./pages/SimulatorsPage";
 import {
 	colorTheme,
 	controlSizeTheme,
@@ -103,6 +104,7 @@ function AppShell() {
 								<Route path="/git" element={<GitPage />} />
 								<Route path="/prompts" element={<PromptsPage />} />
 								<Route path="/images" element={<ImagesPage />} />
+								<Route path="/simulators" element={<SimulatorsPage />} />
 								<Route path="/profile" element={<ProfilePage />} />
 							</Routes>
 						</Suspense>

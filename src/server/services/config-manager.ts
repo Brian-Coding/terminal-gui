@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import YAML from "yaml";
 
 const CONFIG_PATH = resolve(import.meta.dir, "../../scripts/config.yaml");
@@ -65,7 +66,11 @@ export class ConfigManager {
 	async update(
 		updates: Record<string, unknown>
 	): Promise<Record<string, unknown>> {
-		const localOnlyKeys = new Set(["build_agent", "search_folders"]);
+		const localOnlyKeys = new Set([
+			"build_agent",
+			"search_folders",
+			"simulator_project_folders",
+		]);
 		const baseUpdates: Record<string, unknown> = {};
 		const localUpdates: Record<string, unknown> = {};
 
@@ -80,6 +85,7 @@ export class ConfigManager {
 		const current = await this.load();
 
 		if (Object.keys(baseUpdates).length > 0) {
+			await mkdir(dirname(CONFIG_PATH), { recursive: true });
 			const baseFile = Bun.file(CONFIG_PATH);
 			const baseCurrent = (await baseFile.exists())
 				? (YAML.parse(await baseFile.text()) ?? {})
@@ -92,6 +98,7 @@ export class ConfigManager {
 		}
 
 		if (Object.keys(localUpdates).length > 0) {
+			await mkdir(dirname(LOCAL_CONFIG_PATH), { recursive: true });
 			const localFile = Bun.file(LOCAL_CONFIG_PATH);
 			const localCurrent = (await localFile.exists())
 				? (YAML.parse(await localFile.text()) ?? {})

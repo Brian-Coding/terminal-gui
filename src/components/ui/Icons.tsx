@@ -58,6 +58,66 @@ export const IconSparkles = iconMulti([
 
 export const IconTerminal = iconMulti(["M4 17l6-6-6-6", "M12 19h8"]);
 
+export const IconSimulator = iconMulti([
+	"M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z",
+	"M11 18h2",
+]);
+
+export const IconIPhone = iconMulti([
+	"M9 2h6a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z",
+	"M11 5h2",
+	"M11 18h2",
+]);
+
+export const IconIPhonePro = iconMulti([
+	"M8.5 2h7a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z",
+	"M10 5h4",
+	"M10.5 17.5h3",
+]);
+
+export const IconIPhoneProMax = iconMulti([
+	"M8 1.75h8a2 2 0 0 1 2 2v16.5a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V3.75a2 2 0 0 1 2-2Z",
+	"M10.5 5h3",
+	"M10.5 18.5h3",
+]);
+
+export const IconIPhoneAir = iconMulti([
+	"M10 2h4a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z",
+	"M11 18h2",
+]);
+
+export const IconIPad = iconMulti([
+	"M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+	"M11 18h2",
+]);
+
+export const IconIPadPro = iconMulti([
+	"M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+	"M10.5 18h3",
+]);
+
+export const IconIPadAir = iconMulti([
+	"M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+	"M11 18h2",
+]);
+
+export const IconIPadMini = iconMulti([
+	"M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z",
+	"M11 18h2",
+]);
+
+export const IconReactNative = iconMulti([
+	"M12 12m-2.1 0a2.1 2.1 0 1 0 4.2 0a2.1 2.1 0 1 0-4.2 0",
+	"M12 12c5.25 0 9.5-1.57 9.5-3.5S17.25 5 12 5 2.5 6.57 2.5 8.5 6.75 12 12 12z",
+	"M12 12c4.55 2.63 9.08 3.4 10.04 1.72.97-1.67-1.98-5.12-6.53-7.75S6.43 2.57 5.46 4.25 7.45 9.37 12 12z",
+	"M12 12c-4.55 2.63-7.5 6.08-6.54 7.75.97 1.68 5.5.91 10.05-1.72s7.5-6.08 6.53-7.75C21.08 8.6 16.55 9.37 12 12z",
+]);
+
+export const IconSwift = iconMulti([
+	"M4 5c2.1 2.8 4.9 5.15 8.4 7.05-2.9.3-5.45-.45-7.65-2.25 1.45 2.45 3.7 4.35 6.75 5.7-2.25.9-4.65.75-7.2-.45 2.4 3.25 6.05 4.9 10.95 4.95 2.5 0 4.35-.75 5.55-2.25.8 1.15 1.2 2.23 1.2 3.25-1-1.75-2.5-2.8-4.5-3.15",
+	"M18.7 15.85C20.25 12.55 18.65 8.6 14 4c1.2 3.05 1.3 5.7.3 7.95",
+]);
+
 export const IconX = icon("M18 6L6 18M6 6l12 12");
 
 export const IconPlus = icon("M12 5v14M5 12h14");
@@ -615,7 +675,7 @@ export const IconCollapse = iconMulti([
 export const IconCircle = icon(
 	"M12 22c5.52 0 10-4.48 10-10S17.52 2 12 2 2 6.48 2 12s4.48 10 10 10z"
 );
-const IconLoader = iconMulti([
+export const IconLoader = iconMulti([
 	"M12 2v4",
 	"M12 18v4",
 	"M4.93 4.93l2.83 2.83",

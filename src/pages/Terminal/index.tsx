@@ -64,6 +64,7 @@ import {
 	POPOUT_CHANNEL,
 	saveTerminalState,
 	type TerminalGroupModel,
+	type TerminalPaneModel,
 	type ThemeId,
 } from "../../lib/terminal-utils.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";

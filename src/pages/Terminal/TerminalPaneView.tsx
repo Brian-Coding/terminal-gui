@@ -59,6 +59,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	onHeaderDragStart,
 	onHeaderDragEnd,
 	onAddPane,
+	onSetPaneAgentKind,
 }: TerminalPaneViewProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const termRef = useRef<Terminal | null>(null);
@@ -100,7 +101,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 			if (viewport instanceof HTMLElement) {
 				viewport.style.overflow = "hidden";
 				viewport.style.scrollbarWidth = "none";
-				viewport.style.msOverflowStyle = "none";
+				viewport.style.setProperty("-ms-overflow-style", "none");
 			}
 			// Also hide scrollbar on the terminal element itself
 			const xtermElement = containerRef.current?.querySelector(".xterm");

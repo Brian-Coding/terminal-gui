@@ -12,6 +12,7 @@ import {
 	IconRefreshCw,
 	IconTerminal,
 	IconUser,
+	IconX,
 } from "../../components/ui/Icons.tsx";
 import { Notice, Panel, PanelHeader } from "../../components/ui/Surface.tsx";
 import { TextInput } from "../../components/ui/TextInput.tsx";
@@ -94,6 +95,9 @@ export function ProfilePage() {
 	const [defaultChatSettings, setDefaultChatSettings] = useState(() =>
 		loadDefaultChatSettings()
 	);
+	const [simProjectFolders, setSimProjectFolders] = useState<string[]>([]);
+	const [simFoldersLoading, setSimFoldersLoading] = useState(false);
+	const [simFoldersStatus, setSimFoldersStatus] = useState<string | null>(null);
 	const defaultAgentDefinition = getAgentDefinition(
 		defaultChatSettings.agentKind
 	);
@@ -117,6 +121,115 @@ export function ProfilePage() {
 		};
 		saveDefaultChatSettings(normalized);
 		setDefaultChatSettings(loadDefaultChatSettings());
+	};
+
+	const loadSimulatorProjectFolders = useCallback(async () => {
+		try {
+			const response = await fetch("/api/simulator/project-folders");
+			if (!response.ok) throw new Error(await response.text());
+			const payload = (await response.json()) as { folders?: string[] };
+			setSimProjectFolders(
+				Array.isArray(payload.folders) ? payload.folders : []
+			);
+		} catch (err) {
+			setError(
+				err instanceof Error
+					? err.message
+					: "Unable to load simulator project folders"
+			);
+		}
+	}, []);
+
+	useEffect(() => {
+		void loadSimulatorProjectFolders();
+	}, [loadSimulatorProjectFolders]);
+
+	const saveSimulatorProjectFolders = async (folders: string[]) => {
+		const uniqueFolders = [...new Set(folders.map((folder) => folder.trim()))]
+			.filter(Boolean)
+			.sort((a, b) => a.localeCompare(b));
+		const response = await fetch("/api/simulator/project-folders", {
+			method: "PUT",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ folders: uniqueFolders }),
+		});
+		if (!response.ok) throw new Error(await response.text());
+		const payload = (await response.json()) as { folders?: string[] };
+		const nextFolders = Array.isArray(payload.folders)
+			? payload.folders
+			: uniqueFolders;
+		setSimProjectFolders(nextFolders);
+		return nextFolders;
+	};
+
+	const addSimulatorProjectFolder = async () => {
+		setSimFoldersLoading(true);
+		setSimFoldersStatus(null);
+		try {
+			const response = await fetch("/api/simulator/project-folders/pick", {
+				method: "POST",
+			});
+			if (!response.ok) throw new Error(await response.text());
+			const payload = (await response.json()) as { folder?: string | null };
+			if (!payload.folder) return;
+			const nextFolders = await saveSimulatorProjectFolders([
+				...simProjectFolders,
+				payload.folder,
+			]);
+			setSimFoldersStatus(`${nextFolders.length} project folders configured.`);
+			navigate("/simulators");
+		} catch (err) {
+			setError(
+				err instanceof Error ? err.message : "Unable to add project folder"
+			);
+		} finally {
+			setSimFoldersLoading(false);
+		}
+	};
+
+	const autoDetectSimulatorProjectFolders = async () => {
+		setSimFoldersLoading(true);
+		setSimFoldersStatus(null);
+		try {
+			const response = await fetch("/api/simulator/project-folders/detect", {
+				method: "POST",
+			});
+			if (!response.ok) throw new Error(await response.text());
+			const payload = (await response.json()) as { folders?: string[] };
+			const nextFolders = Array.isArray(payload.folders) ? payload.folders : [];
+			setSimProjectFolders(nextFolders);
+			setSimFoldersStatus(
+				nextFolders.length
+					? `${nextFolders.length} project folders configured.`
+					: "No simulator projects were detected."
+			);
+			if (nextFolders.length > 0) navigate("/simulators");
+		} catch (err) {
+			setError(
+				err instanceof Error
+					? err.message
+					: "Unable to detect simulator project folders"
+			);
+		} finally {
+			setSimFoldersLoading(false);
+		}
+	};
+
+	const removeSimulatorProjectFolder = async (folder: string) => {
+		setSimFoldersLoading(true);
+		setSimFoldersStatus(null);
+		try {
+			const nextFolders = await saveSimulatorProjectFolders(
+				simProjectFolders.filter((item) => item !== folder)
+			);
+			setSimFoldersStatus(`${nextFolders.length} project folders configured.`);
+		} catch (err) {
+			setError(
+				err instanceof Error ? err.message : "Unable to remove project folder"
+			);
+		} finally {
+			setSimFoldersLoading(false);
+		}
 	};
 
 	const loadAccounts = useCallback(async (force = false) => {
@@ -364,6 +477,77 @@ export function ProfilePage() {
 										fullWidth
 									/>
 								</div>
+							) : null}
+						</div>
+					</Panel>
+
+					<Panel>
+						<PanelHeader
+							title="Xcode Projects"
+							description="Configure folders Inferay scans for Xcode and React Native simulator apps."
+							actions={
+								<div {...stylex.props(styles.panelActions)}>
+									<Button
+										type="button"
+										onClick={() => void autoDetectSimulatorProjectFolders()}
+										disabled={simFoldersLoading}
+										variant="secondary"
+										size="sm"
+									>
+										<IconRefreshCw size={12} />
+										<span>Auto Detect</span>
+									</Button>
+									<Button
+										type="button"
+										onClick={() => void addSimulatorProjectFolder()}
+										disabled={simFoldersLoading}
+										variant="primary"
+										size="sm"
+									>
+										<IconPlus size={12} />
+										<span>Add Folder</span>
+									</Button>
+								</div>
+							}
+						/>
+						<div {...stylex.props(styles.projectFolderBody)}>
+							{simProjectFolders.length === 0 ? (
+								<div {...stylex.props(styles.projectFolderEmpty)}>
+									Add your iOS app root, Xcode project folder, or React Native
+									repo so Simulators can build and launch it.
+								</div>
+							) : (
+								<div {...stylex.props(styles.projectFolderList)}>
+									{simProjectFolders.map((folder) => (
+										<div
+											key={folder}
+											{...stylex.props(styles.projectFolderRow)}
+										>
+											<div {...stylex.props(styles.projectFolderIcon)}>
+												<IconTerminal size={13} />
+											</div>
+											<span {...stylex.props(styles.projectFolderPath)}>
+												{folder}
+											</span>
+											<button
+												type="button"
+												aria-label={`Remove ${folder}`}
+												onClick={() =>
+													void removeSimulatorProjectFolder(folder)
+												}
+												disabled={simFoldersLoading}
+												{...stylex.props(styles.projectFolderRemove)}
+											>
+												<IconX size={12} />
+											</button>
+										</div>
+									))}
+								</div>
+							)}
+							{simFoldersStatus ? (
+								<p {...stylex.props(styles.projectFolderStatus)}>
+									{simFoldersStatus}
+								</p>
 							) : null}
 						</div>
 					</Panel>
@@ -854,6 +1038,104 @@ const styles = stylex.create({
 		display: "flex",
 		alignItems: "center",
 		gap: controlSize._2,
+	},
+	panelActions: {
+		display: "flex",
+		alignItems: "center",
+		gap: controlSize._2,
+	},
+	projectFolderBody: {
+		display: "flex",
+		flexDirection: "column",
+		gap: controlSize._2,
+		borderTopWidth: 1,
+		borderTopStyle: "solid",
+		borderTopColor: color.border,
+		padding: controlSize._4,
+	},
+	projectFolderList: {
+		display: "flex",
+		flexDirection: "column",
+		gap: controlSize._1,
+	},
+	projectFolderRow: {
+		display: "flex",
+		minHeight: "2.25rem",
+		alignItems: "center",
+		gap: controlSize._2,
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.border,
+		borderRadius: controlSize._2,
+		backgroundColor: {
+			default: color.backgroundRaised,
+			":hover": color.controlHover,
+		},
+		paddingBlock: controlSize._1,
+		paddingInline: controlSize._2,
+	},
+	projectFolderIcon: {
+		display: "flex",
+		width: controlSize._6,
+		height: controlSize._6,
+		flexShrink: 0,
+		alignItems: "center",
+		justifyContent: "center",
+		borderRadius: controlSize._1,
+		color: color.textMuted,
+		backgroundColor: color.controlActive,
+	},
+	projectFolderPath: {
+		minWidth: 0,
+		flex: 1,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+		color: color.textMain,
+		fontSize: font.size_2,
+	},
+	projectFolderRemove: {
+		display: "flex",
+		width: controlSize._6,
+		height: controlSize._6,
+		flexShrink: 0,
+		alignItems: "center",
+		justifyContent: "center",
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.transparent,
+		borderRadius: controlSize._1,
+		backgroundColor: {
+			default: color.transparent,
+			":hover": color.controlHover,
+		},
+		color: {
+			default: color.textMuted,
+			":hover": color.textSoft,
+		},
+		":disabled": {
+			opacity: 0.45,
+		},
+	},
+	projectFolderEmpty: {
+		display: "flex",
+		minHeight: "5rem",
+		alignItems: "center",
+		justifyContent: "center",
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.border,
+		borderRadius: controlSize._2,
+		backgroundColor: color.backgroundRaised,
+		color: color.textMuted,
+		fontSize: font.size_2,
+		lineHeight: 1.5,
+		padding: controlSize._4,
+		textAlign: "center",
+	},
+	projectFolderStatus: {
+		color: color.textMuted,
+		fontSize: font.size_1,
 	},
 	cloneControls: {
 		display: "flex",

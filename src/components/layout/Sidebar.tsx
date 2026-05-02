@@ -27,6 +27,7 @@ import {
 	IconChevronRight,
 	IconPlus,
 	IconSettings,
+	IconSimulator,
 	IconSlash,
 	IconTerminal,
 	IconUser,
@@ -52,6 +53,7 @@ interface ForgeAccount {
 const navItems: NavItem[] = [
 	{ label: "Prompts", path: "/prompts", icon: IconSlash },
 	{ label: "Images", path: "/images", icon: IconCamera },
+	{ label: "Simulators", path: "/simulators", icon: IconSimulator },
 ];
 
 const logoUrl = resolveServerUrl("/logo.png");
