@@ -1,6 +1,27 @@
+import { platform } from "node:os";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import { resolveNativeCoreBinary } from "../services/native-core.ts";
 import { computeNativeDiff } from "../services/native-diff.ts";
+
+async function openPath(path: string, reveal: boolean) {
+	const os = platform();
+	const command =
+		os === "darwin"
+			? reveal
+				? ["open", "-R", path]
+				: ["open", path]
+			: os === "win32"
+				? reveal
+					? ["explorer.exe", `/select,${path}`]
+					: ["cmd.exe", "/c", "start", "", path]
+				: ["xdg-open", reveal ? path.replace(/\/[^/]*$/, "") || path : path];
+	const proc = Bun.spawn(command, {
+		stdout: "ignore",
+		stderr: "ignore",
+	});
+	const exitCode = await proc.exited;
+	return exitCode === 0;
+}
 
 export function nativeRoutes() {
 	return {
@@ -27,6 +48,19 @@ export function nativeRoutes() {
 				}
 
 				return Response.json({ ok: true, diff });
+			}),
+		},
+		"/api/native/open-path": {
+			POST: tryRoute(async (req) => {
+				const body = (await req.json()) as {
+					path?: string;
+					reveal?: boolean;
+				};
+				if (typeof body.path !== "string" || !body.path.trim()) {
+					return badRequest("Missing path");
+				}
+				const ok = await openPath(body.path, Boolean(body.reveal));
+				return Response.json({ ok });
 			}),
 		},
 	};

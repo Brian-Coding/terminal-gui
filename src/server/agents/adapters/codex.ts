@@ -5,6 +5,7 @@ import {
 	createCodexEnv,
 	resolveCodexBinary,
 } from "../../../lib/terminal-command.ts";
+import { summarizeToolInput } from "../events.ts";
 import type { AgentAdapter, AgentHandle, AgentRunContext } from "../types.ts";
 
 interface CodexRunState {
@@ -15,6 +16,7 @@ interface CodexRunState {
 	sawAssistantStream: boolean;
 	hasFinalAssistantMessage: boolean;
 	lastAssistantMessage: string;
+	currentToolId: string | null;
 }
 
 const MAX_STDERR_CHARS = 64_000;
@@ -132,7 +134,14 @@ function handleCodexEvent(
 	const closeTool = () => {
 		if (!state.toolOpen) return;
 		ctx.emitChatEvent({ type: "content_block_stop" });
+		if (state.currentToolId) {
+			ctx.emitAgentEvent({
+				type: "tool-call-end",
+				toolCallId: state.currentToolId,
+			});
+		}
 		state.toolOpen = false;
+		state.currentToolId = null;
 	};
 	const closeAssistant = () => {
 		if (!state.assistantOpen) return;
@@ -152,11 +161,20 @@ function handleCodexEvent(
 	const startTool = (name: string, input: unknown = {}) => {
 		closeAssistant();
 		closeTool();
+		const toolCallId = `${name}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 		ctx.emitChatEvent({
 			type: "content_block_start",
 			content_block: { type: "tool_use", name, input },
 		});
+		ctx.emitAgentEvent({
+			type: "tool-call-start",
+			toolCallId,
+			toolName: name,
+			input,
+			summary: summarizeToolInput(name, input),
+		});
 		state.toolOpen = true;
+		state.currentToolId = toolCallId;
 	};
 	const toolDelta = (textDelta: string) => {
 		if (!state.toolOpen || !textDelta) return;
@@ -164,6 +182,13 @@ function handleCodexEvent(
 			type: "content_block_delta",
 			delta: { type: "input_json_delta", partial_json: textDelta },
 		});
+		if (state.currentToolId) {
+			ctx.emitAgentEvent({
+				type: "tool-call-delta",
+				toolCallId: state.currentToolId,
+				delta: textDelta,
+			});
+		}
 	};
 	const assistantDelta = (textDelta: string) => {
 		if (!textDelta) return;
@@ -172,6 +197,7 @@ function handleCodexEvent(
 			type: "content_block_delta",
 			delta: { type: "text_delta", text: textDelta },
 		});
+		ctx.emitAgentEvent({ type: "text-delta", text: textDelta });
 	};
 
 	const eventType = String(event?.type ?? "");
@@ -179,11 +205,14 @@ function handleCodexEvent(
 
 	if (event?.type === "thread.started" && event.thread_id) {
 		ctx.updateSessionId(event.thread_id);
+		ctx.emitAgentEvent({ type: "session", providerSessionId: event.thread_id });
 	} else if (event?.type === "turn.started") {
 		ctx.emitStatus("thinking", true);
+		ctx.emitAgentEvent({ type: "status", status: "thinking" });
 	} else if (event?.type === "agent_message_delta") {
 		assistantDelta(event.delta ?? event.text ?? event.content ?? "");
 		ctx.emitStatus("responding", true);
+		ctx.emitAgentEvent({ type: "status", status: "responding" });
 	} else if (event?.type === "agent_message") {
 		const content = event.message ?? event.content ?? event.text ?? "";
 		if (typeof content === "string" && content) {
@@ -249,6 +278,7 @@ function handleCodexEvent(
 		event.item?.type === "error" &&
 		event.item.message
 	) {
+		ctx.emitAgentEvent({ type: "error", message: event.item.message });
 		ctx.emitSystemMessage(event.item.message);
 	} else if (
 		event?.type === "item.completed" &&
@@ -258,9 +288,11 @@ function handleCodexEvent(
 		const itemText = extractText(event.item);
 		if (!state.sawAssistantStream && itemText) {
 			ctx.emitChatEvent({ type: "result", result: itemText });
+			ctx.emitAgentEvent({ type: "result", text: itemText });
 			state.hasFinalAssistantMessage = true;
 		}
 	} else if (event?.type === "error" && event.message) {
+		ctx.emitAgentEvent({ type: "error", message: event.message });
 		ctx.emitSystemMessage(event.message);
 	} else if (
 		event?.type === "task_complete" &&
@@ -272,6 +304,7 @@ function handleCodexEvent(
 				type: "result",
 				result: event.last_agent_message,
 			});
+			ctx.emitAgentEvent({ type: "result", text: event.last_agent_message });
 			state.hasFinalAssistantMessage = true;
 		}
 	} else if (
@@ -281,6 +314,7 @@ function handleCodexEvent(
 	) {
 		assistantDelta(eventText);
 		ctx.emitStatus("responding", true);
+		ctx.emitAgentEvent({ type: "status", status: "responding" });
 	}
 }
 
@@ -305,6 +339,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 			sawAssistantStream: false,
 			hasFinalAssistantMessage: false,
 			lastAssistantMessage: "",
+			currentToolId: null,
 		};
 	},
 
@@ -369,9 +404,16 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
 				// Finalize
 				if (state.toolOpen || state.assistantOpen) {
+					if (state.currentToolId) {
+						ctx.emitAgentEvent({
+							type: "tool-call-end",
+							toolCallId: state.currentToolId,
+						});
+					}
 					ctx.emitChatEvent({ type: "content_block_stop" });
 					state.toolOpen = false;
 					state.assistantOpen = false;
+					state.currentToolId = null;
 				}
 
 				let assistantText = "";
@@ -415,9 +457,15 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 						type: "result",
 						result: assistantText,
 					});
+					ctx.emitAgentEvent({ type: "result", text: assistantText });
 				} else if (exitCode !== 0 && stderrText) {
+					ctx.emitAgentEvent({ type: "error", message: stderrText });
 					ctx.emitSystemMessage(stderrText);
 				}
+				ctx.emitAgentEvent({
+					type: "finish",
+					reason: exitCode === 0 ? "completed" : `exit:${exitCode}`,
+				});
 
 				return { lastAssistantMessage: state.lastAssistantMessage };
 			},

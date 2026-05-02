@@ -8,14 +8,19 @@ import { BottomTerminalPanel } from "./components/layout/BottomTerminalPanel.tsx
 import { preloadPrompts } from "./hooks/usePrompts.ts";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
 import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
+import { readStoredBoolean } from "./lib/stored-json.ts";
 import { GitPage } from "./pages/GitPage";
 import { ImagesPage } from "./pages/ImagesPage";
+import { OnboardingPage, ONBOARDING_DONE_KEY } from "./pages/OnboardingPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PromptsPage } from "./pages/PromptsPage";
 
 const TerminalPage = lazy(() =>
 	import("./pages/Terminal").then((m) => ({ default: m.TerminalPage }))
 );
+
+const onboardingDone = readStoredBoolean(ONBOARDING_DONE_KEY);
+const defaultRoute = onboardingDone ? "/terminal" : "/onboarding";
 
 if (window.location.origin !== getServerOrigin()) {
 	const originalFetch = window.fetch.bind(window);
@@ -60,34 +65,51 @@ if (!rootElement) {
 }
 
 const root = createRoot(rootElement);
+function AppShell() {
+	return (
+		<div className="flex h-screen flex-col bg-inferay-black">
+			<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-inferay-black" />
+			<div className="flex min-h-0 flex-1">
+				<Sidebar />
+				<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+					<TerminalShellHeader />
+					<main className="min-w-0 flex-1 overflow-hidden">
+						<Suspense fallback={null}>
+							<Routes>
+								<Route path="/terminal" element={<TerminalPage />} />
+								<Route path="/git" element={<GitPage />} />
+								<Route path="/prompts" element={<PromptsPage />} />
+								<Route path="/images" element={<ImagesPage />} />
+								<Route path="/profile" element={<ProfilePage />} />
+							</Routes>
+						</Suspense>
+					</main>
+					<BottomTerminalPanel />
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function OnboardingShell() {
+	return (
+		<div className="flex h-screen flex-col bg-inferay-black">
+			<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-inferay-black" />
+			<div className="min-h-0 flex-1">
+				<OnboardingPage />
+			</div>
+		</div>
+	);
+}
+
 root.render(
 	<ErrorBoundary>
 		<HashRouter>
-			<div className="flex h-screen flex-col bg-inferay-black">
-				<div className="electrobun-webkit-app-region-drag h-6 shrink-0 bg-inferay-black" />
-				<div className="flex min-h-0 flex-1">
-					<Sidebar />
-					<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-						<TerminalShellHeader />
-						<main className="min-w-0 flex-1 overflow-hidden">
-							<Suspense fallback={null}>
-								<Routes>
-									<Route
-										path="/"
-										element={<Navigate to="/terminal" replace />}
-									/>
-									<Route path="/terminal" element={<TerminalPage />} />
-									<Route path="/git" element={<GitPage />} />
-									<Route path="/prompts" element={<PromptsPage />} />
-									<Route path="/images" element={<ImagesPage />} />
-									<Route path="/profile" element={<ProfilePage />} />
-								</Routes>
-							</Suspense>
-						</main>
-						<BottomTerminalPanel />
-					</div>
-				</div>
-			</div>
+			<Routes>
+				<Route path="/" element={<Navigate to={defaultRoute} replace />} />
+				<Route path="/onboarding" element={<OnboardingShell />} />
+				<Route path="/*" element={<AppShell />} />
+			</Routes>
 		</HashRouter>
 	</ErrorBoundary>
 );

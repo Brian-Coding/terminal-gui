@@ -2,7 +2,9 @@ import {
 	createClaudeEnv,
 	resolveClaudeBinary,
 } from "../../../lib/terminal-command.ts";
-import type { AgentAdapter, AgentHandle } from "../types.ts";
+import type { AgentEvent } from "../events.ts";
+import { summarizeToolInput } from "../events.ts";
+import type { AgentAdapter, AgentHandle, AgentRunContext } from "../types.ts";
 
 const MAX_STDERR_CHARS = 64_000;
 
@@ -42,6 +44,73 @@ function flushNdjsonLeftover(leftover: string, handler: (event: any) => void) {
 	try {
 		handler(JSON.parse(leftover));
 	} catch {}
+}
+
+function emitClaudeAgentEvent(event: any, ctx: AgentRunContext) {
+	const normalized = normalizeClaudeEvent(event);
+	if (normalized) ctx.emitAgentEvent(normalized);
+}
+
+function normalizeClaudeEvent(event: any): AgentEvent | null {
+	if (!event?.type) return null;
+	if (event.type === "content_block_start") {
+		const block = event.content_block;
+		if (
+			block?.type === "text" &&
+			typeof block.text === "string" &&
+			block.text
+		) {
+			return { type: "text-delta", text: block.text };
+		}
+		if (block?.type === "tool_use") {
+			const toolName = String(block.name ?? "tool");
+			const input = block.input ?? {};
+			return {
+				type: "tool-call-start",
+				toolCallId: String(event.index ?? block.id ?? `${toolName}:latest`),
+				toolName,
+				input,
+				summary: summarizeToolInput(toolName, input),
+			};
+		}
+	}
+	if (event.type === "content_block_delta") {
+		const delta = event.delta;
+		if (delta?.type === "text_delta" && typeof delta.text === "string") {
+			return { type: "text-delta", text: delta.text };
+		}
+		if (
+			delta?.type === "thinking_delta" &&
+			typeof delta.thinking === "string"
+		) {
+			return { type: "thinking-delta", text: delta.thinking };
+		}
+		if (
+			delta?.type === "input_json_delta" &&
+			typeof delta.partial_json === "string"
+		) {
+			return {
+				type: "tool-call-delta",
+				toolCallId: String(event.index ?? "latest"),
+				delta: delta.partial_json,
+			};
+		}
+	}
+	if (event.type === "result" && typeof event.result === "string") {
+		return { type: "result", text: event.result };
+	}
+	if (event.type === "error" && typeof event.message === "string") {
+		return { type: "error", message: event.message };
+	}
+	if (event.type === "system" && event.subtype === "init") {
+		return {
+			type: "raw",
+			provider: "claude",
+			eventType: event.type,
+			event,
+		};
+	}
+	return null;
 }
 
 export const claudeAdapter: AgentAdapter<undefined> = {
@@ -96,16 +165,32 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 						leftover += decoder.decode(value, { stream: true });
 						leftover = parseNdjsonLines(leftover, (event) => {
 							if (event?.session_id) {
+								const isNewSession = ctx.getSessionId() !== event.session_id;
 								ctx.updateSessionId(event.session_id);
+								if (isNewSession) {
+									ctx.emitAgentEvent({
+										type: "session",
+										providerSessionId: event.session_id,
+									});
+								}
 							}
+							emitClaudeAgentEvent(event, ctx);
 							ctx.emitChatEvent(event);
 						});
 					}
 
 					flushNdjsonLeftover(leftover, (event) => {
 						if (event?.session_id) {
+							const isNewSession = ctx.getSessionId() !== event.session_id;
 							ctx.updateSessionId(event.session_id);
+							if (isNewSession) {
+								ctx.emitAgentEvent({
+									type: "session",
+									providerSessionId: event.session_id,
+								});
+							}
 						}
+						emitClaudeAgentEvent(event, ctx);
 						ctx.emitChatEvent(event);
 					});
 
@@ -113,10 +198,16 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 					proc = null;
 					const stderrText = (await stderrPromise).trim();
 					if (exitCode !== 0 && stderrText) {
+						ctx.emitAgentEvent({ type: "error", message: stderrText });
 						ctx.emitSystemMessage(stderrText);
 					}
+					ctx.emitAgentEvent({
+						type: "finish",
+						reason: exitCode === 0 ? "completed" : `exit:${exitCode}`,
+					});
 				} catch (err: any) {
 					const msg = err.message || "Claude encountered an error";
+					ctx.emitAgentEvent({ type: "error", message: msg });
 					ctx.emitSystemMessage(msg);
 				}
 			},

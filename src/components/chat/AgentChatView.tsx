@@ -51,8 +51,10 @@ import {
 } from "./chat-command-utils.ts";
 import {
 	clearAgentChatMessages,
+	clearPendingSend,
 	clearStoredCheckpoints,
 	clearStoredSessionId,
+	loadPendingSend,
 	loadStoredCheckpoints,
 	loadStoredInput,
 	loadStoredMessages,
@@ -210,6 +212,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			[]
 		);
 		const [input, setInputRaw] = useState(() => loadStoredInput(paneId));
+		const pendingSendConsumedRef = useRef(false);
 		const setInput = useCallback(
 			(val: string) => {
 				setInputRaw(val);
@@ -570,6 +573,17 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			(): ToolActivity[] => extractToolActivities(messagesRef.current),
 			[]
 		);
+
+		useEffect(() => {
+			if (pendingSendConsumedRef.current || isLoading) return;
+			const pending = loadPendingSend(paneId).trim();
+			if (!pending) return;
+			pendingSendConsumedRef.current = true;
+			clearPendingSend(paneId);
+			setInput("");
+			appendLocalMessages([{ role: "user", content: pending }]);
+			sendToServer(pending);
+		}, [paneId, isLoading, setInput, appendLocalMessages, sendToServer]);
 
 		const stopGeneration = useCallback(() => {
 			wsClient.send({ type: "chat:stop", paneId });

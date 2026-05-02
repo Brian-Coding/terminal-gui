@@ -81,10 +81,49 @@ function addCorsToRoutes(
 async function hasViteBuild() {
 	try {
 		const entries = await readdir(distDir);
-		return entries.some((e) => e === "index.html" || e === "assets");
+		return entries.some(
+			(e) => e === "index.html" || e === "main.js" || e === "assets"
+		);
 	} catch {
 		return false;
 	}
+}
+
+async function serveRendererIndex(): Promise<Response | null> {
+	const indexFile = Bun.file(resolve(distDir, "index.html"));
+	if (await indexFile.exists()) {
+		return new Response(indexFile, {
+			headers: {
+				"Content-Type": "text/html",
+				"Cache-Control": "no-cache",
+			},
+		});
+	}
+
+	const mainFile = Bun.file(resolve(distDir, "main.js"));
+	if (!(await mainFile.exists())) return null;
+
+	return new Response(
+		[
+			"<!doctype html>",
+			'<html lang="en">',
+			"<head>",
+			'<meta charset="UTF-8" />',
+			'<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />',
+			"<title>inferay</title>",
+			'<meta name="theme-color" content="#09090b" />',
+			'<meta name="color-scheme" content="dark" />',
+			"</head>",
+			'<body><div id="root"></div><script type="module" src="/main.js"></script></body>',
+			"</html>",
+		].join(""),
+		{
+			headers: {
+				"Content-Type": "text/html",
+				"Cache-Control": "no-cache",
+			},
+		}
+	);
 }
 
 async function serveDistFile(pathname: string): Promise<Response | null> {
@@ -191,17 +230,8 @@ export async function startAppServer(port = 4001) {
 				if (distResponse) return withCors(distResponse);
 
 				if (!url.pathname.startsWith("/api/")) {
-					const indexFile = Bun.file(resolve(distDir, "index.html"));
-					if (await indexFile.exists()) {
-						return withCors(
-							new Response(indexFile, {
-								headers: {
-									"Content-Type": "text/html",
-									"Cache-Control": "no-cache",
-								},
-							})
-						);
-					}
+					const indexResponse = await serveRendererIndex();
+					if (indexResponse) return withCors(indexResponse);
 				}
 			}
 

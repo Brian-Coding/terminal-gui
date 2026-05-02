@@ -1,8 +1,19 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	memo,
+	type ReactNode,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { MarkdownPreview } from "../../components/diff/MarkdownPreview.tsx";
 import {
 	IconChevronRight,
 	IconCopy,
+	IconGitBranch,
+	IconLayoutGrid,
+	IconLayoutRows,
 	IconX,
 } from "../../components/ui/Icons.tsx";
 import type { DiffLine, HunkDiff } from "../../hooks/useGitDiff.ts";
@@ -57,6 +68,9 @@ const DIFF_CONFIG = {
 
 const LINE_H = DIFF_CONFIG.lineHeight;
 const OVERSCAN = DIFF_CONFIG.overscan;
+const MAX_RENDERED_DIFF_LINES = 6000;
+const MAX_RENDERED_LINE_CHARS = 4000;
+const MAX_PANEL_CONTENT_WIDTH = 8000;
 
 const DiffRow = memo(function DiffRow({
 	line,
@@ -132,9 +146,14 @@ const DiffRow = memo(function DiffRow({
 		}
 	};
 	const renderContent = () => {
+		const content =
+			line.content.length > MAX_RENDERED_LINE_CHARS
+				? `${line.content.slice(0, MAX_RENDERED_LINE_CHARS)} ... [line truncated for display]`
+				: line.content;
 		if (highlightedHtml) {
 			return (
 				<span
+					// biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki returns escaped syntax-highlighted HTML.
 					dangerouslySetInnerHTML={{ __html: highlightedHtml }}
 					className="shiki-line"
 				/>
@@ -147,7 +166,7 @@ const DiffRow = memo(function DiffRow({
 				</span>
 			));
 		}
-		return line.content;
+		return content;
 	};
 
 	return (
@@ -316,8 +335,10 @@ function VirtualPanel({
 		}
 		return max;
 	}, [lines]);
-	const minContentWidth =
-		DIFF_CONFIG.lineNumWidth + DIFF_CONFIG.signWidth + maxLineLength * 7 + 20;
+	const minContentWidth = Math.min(
+		MAX_PANEL_CONTENT_WIDTH,
+		DIFF_CONFIG.lineNumWidth + DIFF_CONFIG.signWidth + maxLineLength * 7 + 20
+	);
 
 	const start = Math.max(0, Math.floor(scrollTop / LINE_H) - OVERSCAN);
 	const end = Math.min(
@@ -731,11 +752,6 @@ export const GitDiffView = memo(function GitDiffView({
 		return p.length > 1 ? p.pop()! : "";
 	}, [filePath]);
 
-	const hunkLines = useMemo(
-		() => buildStackedLines(diff.oldLines, diff.newLines, true),
-		[diff.oldLines, diff.newLines]
-	);
-
 	const statusMessage = useMemo(() => {
 		if (diff.oldLines.length !== 0 || diff.newLines.length !== 1) return null;
 		const line = diff.newLines[0];
@@ -744,6 +760,21 @@ export const GitDiffView = memo(function GitDiffView({
 		return /too large|cannot read/i.test(text) ? text : null;
 	}, [diff.newLines, diff.oldLines.length]);
 
+	const oversizedMessage = useMemo(() => {
+		const allLines = [...diff.oldLines, ...diff.newLines];
+		if (allLines.length > MAX_RENDERED_DIFF_LINES) {
+			return `Diff is too large to render safely (${allLines.length.toLocaleString()} lines). Use the Editor/terminal to inspect this file in smaller chunks.`;
+		}
+		const longest = allLines.reduce(
+			(max, line) => Math.max(max, line.content.length),
+			0
+		);
+		if (longest > MAX_RENDERED_LINE_CHARS * 2) {
+			return `Diff contains a very long line (${longest.toLocaleString()} characters). Rendering is limited to keep the app responsive.`;
+		}
+		return null;
+	}, [diff.newLines, diff.oldLines]);
+
 	const disableTokenize = useMemo(() => {
 		const allLines = [...diff.oldLines, ...diff.newLines];
 		return (
@@ -751,6 +782,11 @@ export const GitDiffView = memo(function GitDiffView({
 			allLines.some((line) => line.content.length > 1000)
 		);
 	}, [diff.newLines, diff.oldLines]);
+
+	const hunkLines = useMemo(() => {
+		if (oversizedMessage) return [];
+		return buildStackedLines(diff.oldLines, diff.newLines, true);
+	}, [diff.oldLines, diff.newLines, oversizedMessage]);
 
 	const sync = useCallback(
 		(src: "left" | "right", scrollTop: number, scrollLeft: number) => {
@@ -813,6 +849,21 @@ export const GitDiffView = memo(function GitDiffView({
 				<div className="flex flex-1 items-center justify-center px-6">
 					<p className="max-w-xs text-center text-[11px] leading-5 text-inferay-muted-gray">
 						{statusMessage}
+					</p>
+				</div>
+			</div>
+		);
+	}
+
+	if (oversizedMessage) {
+		return (
+			<div className="flex h-full flex-col bg-inferay-black">
+				{!hideHeader && (
+					<DiffHeader filePath={filePath} staged={staged} onClose={onClose} />
+				)}
+				<div className="flex flex-1 items-center justify-center px-6">
+					<p className="max-w-sm text-center text-[11px] leading-5 text-inferay-muted-gray">
+						{oversizedMessage}
 					</p>
 				</div>
 			</div>
@@ -1028,46 +1079,54 @@ function DiffViewToolbar({
 	onChange: (viewMode: DiffViewMode) => void;
 }) {
 	return (
-		<div className="flex h-8 shrink-0 items-center gap-1 border-b border-inferay-gray-border bg-inferay-black px-2">
-			<DiffViewButton
-				active={viewMode === "split"}
-				label="Split"
-				onClick={() => onChange("split")}
-			/>
-			<DiffViewButton
-				active={viewMode === "stacked"}
-				label="Vertical"
-				onClick={() => onChange("stacked")}
-			/>
-			<DiffViewButton
-				active={viewMode === "hunks"}
-				label="Hunks"
-				onClick={() => onChange("hunks")}
-			/>
+		<div className="flex shrink-0 items-center justify-end gap-2 border-b border-inferay-gray-border bg-inferay-black px-3 py-1.5">
+			<div className="flex h-5 items-center overflow-hidden rounded-md border border-inferay-gray-border bg-inferay-dark-gray">
+				<DiffViewButton
+					active={viewMode === "split"}
+					title="Split diff"
+					icon={<IconLayoutGrid size={11} />}
+					onClick={() => onChange("split")}
+				/>
+				<DiffViewButton
+					active={viewMode === "stacked"}
+					title="Vertical diff"
+					icon={<IconLayoutRows size={11} />}
+					onClick={() => onChange("stacked")}
+				/>
+				<DiffViewButton
+					active={viewMode === "hunks"}
+					title="Hunk view"
+					icon={<IconGitBranch size={11} />}
+					onClick={() => onChange("hunks")}
+				/>
+			</div>
 		</div>
 	);
 }
 
 function DiffViewButton({
 	active,
-	label,
+	title,
+	icon,
 	onClick,
 }: {
 	active: boolean;
-	label: string;
+	title: string;
+	icon: ReactNode;
 	onClick: () => void;
 }) {
 	return (
 		<button
 			type="button"
+			title={title}
 			onClick={onClick}
-			className={`rounded-md px-2 py-1 text-[10px] transition-colors ${
+			className={`flex h-full w-6 items-center justify-center transition-colors ${
 				active
-					? "bg-inferay-gray text-inferay-white"
-					: "text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
+					? "bg-inferay-white/10 text-inferay-white"
+					: "text-inferay-muted-gray hover:bg-inferay-white/[0.04] hover:text-inferay-soft-white"
 			}`}
 		>
-			{label}
+			{icon}
 		</button>
 	);
 }

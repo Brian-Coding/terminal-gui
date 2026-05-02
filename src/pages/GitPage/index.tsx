@@ -7,12 +7,52 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { GroupTabs } from "../../components/ui/GroupTabs.tsx";
-import { IconGitBranch, IconPlus } from "../../components/ui/Icons.tsx";
+import { useNavigate } from "react-router-dom";
+import {
+	loadStoredMessages,
+	savePendingSend,
+	saveStoredInput,
+} from "../../components/chat/chat-session-store.ts";
+import { IconButton } from "../../components/ui/IconButton.tsx";
+import {
+	IconGitBranch,
+	IconOpenAI,
+	IconPlus,
+	IconRobot,
+	IconTerminal,
+	IconX,
+} from "../../components/ui/Icons.tsx";
+import { useAgentSessions } from "../../hooks/useAgentSessions.ts";
 import { useGitDiff } from "../../hooks/useGitDiff.ts";
 import { type GitFileEntry, useGitStatus } from "../../hooks/useGitStatus.ts";
-import { fetchJson } from "../../lib/fetch-json.ts";
-import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
+import type { AgentKind } from "../../lib/agents.ts";
+import {
+	buildCommitMessage,
+	buildFilePrompt,
+	buildRepoExplainPrompt,
+	buildSummaryPrompt,
+	type ChangeCheckpoint,
+	checkpointKey,
+	buildReviewPrompt as composeReviewPrompt,
+	createChangeSignature,
+	formatShortTime,
+} from "../../lib/changes-workspace.ts";
+import { createDiffDocumentFromHunkDiff } from "../../lib/diff-document.ts";
+import { fetchJson, postJson } from "../../lib/fetch-json.ts";
+import {
+	readStoredJson,
+	writeStoredJson,
+	writeStoredValue,
+} from "../../lib/stored-json.ts";
+import {
+	createGroupId,
+	createTerminalPane,
+	DEFAULT_FONT_FAMILY,
+	DEFAULT_FONT_SIZE,
+	DEFAULT_OPACITY,
+	loadTerminalState,
+	saveTerminalState,
+} from "../../lib/terminal-utils.ts";
 import { InlineDirectoryPicker } from "../Terminal/InlineDirectoryPicker.tsx";
 
 const GitDiffView = lazy(() =>
@@ -25,14 +65,40 @@ function persist(dirs: string[]) {
 	writeStoredJson("git-watched-dirs", dirs);
 }
 
+function statusLabel(status: string): string {
+	const labels: Record<string, string> = {
+		M: "modified",
+		A: "added",
+		D: "deleted",
+		R: "renamed",
+		C: "copied",
+		U: "conflict",
+		"?": "new",
+	};
+	return labels[status] ?? status;
+}
+
+interface StoredChatMessage {
+	role?: string;
+	content?: string;
+}
+
 export function GitPage() {
+	const navigate = useNavigate();
 	const [dirs, setDirs] = useState<string[]>(() =>
 		readStoredJson<string[]>("git-watched-dirs", [])
 	);
 	const [activeCwd, setActiveCwd] = useState<string | null>(null);
 	const [pickerOpen, setPickerOpen] = useState(false);
 	const [pickerError, setPickerError] = useState<string | null>(null);
-	const { projects } = useGitStatus(dirs);
+	const [actionMessage, setActionMessage] = useState<string | null>(null);
+	const [actionBusy, setActionBusy] = useState<string | null>(null);
+	const [agentActivityVersion, setAgentActivityVersion] = useState(0);
+	const [openActionMenu, setOpenActionMenu] = useState<"repo" | "file" | null>(
+		null
+	);
+	const { projects, refetch } = useGitStatus(dirs);
+	const { sessions: liveAgentSessions } = useAgentSessions();
 	const {
 		diff,
 		request: diffReq,
@@ -51,6 +117,7 @@ export function GitPage() {
 		path: string;
 		staged: boolean;
 	} | null>(null);
+	const [checkpointVersion, setCheckpointVersion] = useState(0);
 	const prevCwd = useRef<string | null>(null);
 	const hasAutoSelected = useRef(false);
 	useEffect(() => {
@@ -65,13 +132,31 @@ export function GitPage() {
 		const f = project.files[0]!;
 		setSelFile({ path: f.path, staged: f.staged });
 		loadDiff({ cwd: project.cwd, file: f.path, staged: f.staged });
-	}, [project?.cwd, project?.files.length, loadDiff, project]);
+	}, [project, loadDiff]);
 	const allFiles = useMemo(() => {
 		if (!project) return [];
 		const unstaged = project.files.filter((f) => !f.staged);
 		const staged = project.files.filter((f) => f.staged);
 		return [...unstaged, ...staged];
 	}, [project]);
+	const selectedFileEntry = useMemo(() => {
+		if (!selFile || !project) return null;
+		return (
+			project.files.find(
+				(file) => file.path === selFile.path && file.staged === selFile.staged
+			) ?? null
+		);
+	}, [project, selFile]);
+	const diffDocument = useMemo(() => {
+		if (!diff || !diffReq || !project) return null;
+		return createDiffDocumentFromHunkDiff({
+			cwd: project.cwd,
+			path: diffReq.file,
+			staged: diffReq.staged,
+			status: selectedFileEntry?.status ?? "M",
+			diff,
+		});
+	}, [diff, diffReq, project, selectedFileEntry]);
 
 	const selectFile = useCallback(
 		(path: string, staged: boolean) => {
@@ -164,20 +249,300 @@ export function GitPage() {
 		setPickerError(null);
 	}, []);
 
-	const tabs = useMemo(
-		() =>
-			projects.map((p) => ({
-				id: p.cwd,
-				name: p.name,
-				count: p.stagedCount + p.unstagedCount + p.untrackedCount || undefined,
-			})),
-		[projects]
-	);
-
 	const staged = project?.files.filter((f) => f.staged) || [];
 	const modified =
 		project?.files.filter((f) => !f.staged && f.status !== "?") || [];
 	const untracked = project?.files.filter((f) => f.status === "?") || [];
+	const changeSignature = useMemo(
+		() => (project ? createChangeSignature(project.files) : ""),
+		[project]
+	);
+	const latestCheckpoint = useMemo(() => {
+		if (!project) return null;
+		void checkpointVersion;
+		return readStoredJson<ChangeCheckpoint | null>(
+			checkpointKey(project.cwd),
+			null
+		);
+	}, [project, checkpointVersion]);
+	const dirtySinceCheckpoint = Boolean(
+		project &&
+		latestCheckpoint &&
+		latestCheckpoint.signature !== changeSignature
+	);
+	const totalChanges =
+		(project?.stagedCount ?? 0) +
+		(project?.unstagedCount ?? 0) +
+		(project?.untrackedCount ?? 0);
+	const repoAgentActivity = useMemo(() => {
+		if (!project) return null;
+		void agentActivityVersion;
+		const state = loadTerminalState();
+		const panes = (state?.groups ?? [])
+			.flatMap((group) => group.panes)
+			.filter(
+				(pane) =>
+					pane.cwd === project.cwd &&
+					pane.agentKind &&
+					pane.agentKind !== "terminal"
+			);
+		const pane = panes[panes.length - 1];
+		if (!pane) return null;
+		const messages = loadStoredMessages<StoredChatMessage>(pane.id);
+		const latestPrompt = [...messages]
+			.reverse()
+			.find((message) => message.role === "user" && message.content?.trim());
+		const liveSession = liveAgentSessions.find(
+			(session) => session.paneId === pane.id
+		);
+		return {
+			agentKind: pane.agentKind,
+			latestPrompt: latestPrompt?.content?.trim() ?? "",
+			status: liveSession?.isRunning ? "running" : "idle",
+		};
+	}, [project, agentActivityVersion, liveAgentSessions]);
+
+	const refreshProject = useCallback(async () => {
+		setActionBusy("refresh");
+		try {
+			await refetch();
+			if (project && selFile) {
+				loadDiff({
+					cwd: project.cwd,
+					file: selFile.path,
+					staged: selFile.staged,
+				});
+			}
+			setActionMessage("Refreshed");
+		} finally {
+			setActionBusy(null);
+		}
+	}, [refetch, project, selFile, loadDiff]);
+
+	const openPane = useCallback(
+		(agentKind: AgentKind, initialInput?: string, autoSend = false) => {
+			if (!project) return null;
+			const existing = loadTerminalState();
+			const groups = existing?.groups ?? [
+				{
+					id: createGroupId(),
+					name: "Default",
+					panes: [],
+					selectedPaneId: null,
+					columns: 2,
+					rows: 1,
+				},
+			];
+			const selectedGroupId =
+				existing?.selectedGroupId ?? groups[0]?.id ?? null;
+			if (!selectedGroupId) return null;
+			const pane = createTerminalPane(agentKind, project.cwd);
+			if (initialInput && agentKind !== "terminal") {
+				if (autoSend) {
+					savePendingSend(pane.id, initialInput);
+				} else {
+					saveStoredInput(pane.id, initialInput);
+				}
+			}
+			saveTerminalState({
+				groups: groups.map((group) =>
+					group.id === selectedGroupId
+						? {
+								...group,
+								panes: [...group.panes, pane],
+								selectedPaneId: pane.id,
+							}
+						: group
+				),
+				selectedGroupId,
+				themeId: existing?.themeId ?? ("default" as const),
+				fontSize: existing?.fontSize ?? DEFAULT_FONT_SIZE,
+				fontFamily: existing?.fontFamily ?? DEFAULT_FONT_FAMILY,
+				opacity: existing?.opacity ?? DEFAULT_OPACITY,
+			});
+			window.dispatchEvent(new Event("terminal-shell-change"));
+			setAgentActivityVersion((version) => version + 1);
+			navigate("/terminal");
+			return pane;
+		},
+		[navigate, project]
+	);
+
+	const openEditor = useCallback(() => {
+		if (!project) return;
+		const pane = openPane("terminal");
+		if (pane) {
+			writeStoredValue("terminal-main-view", "editor");
+			writeStoredValue("editor-selected-pane", pane.id);
+			window.dispatchEvent(new Event("terminal-shell-change"));
+		}
+	}, [openPane, project]);
+
+	const openNativePath = useCallback(async (path: string, reveal = false) => {
+		setActionBusy(reveal ? "reveal" : "open-path");
+		try {
+			await postJson<{ ok: boolean }>("/api/native/open-path", {
+				path,
+				reveal,
+			});
+			setActionMessage(reveal ? "Opened in Finder" : "Opened file");
+		} catch {
+			setActionMessage(reveal ? "Could not open Finder" : "Could not open");
+		} finally {
+			setActionBusy(null);
+		}
+	}, []);
+
+	const copyText = useCallback(async (text: string, message: string) => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setActionMessage(message);
+		} catch {
+			setActionMessage("Copy failed");
+		}
+	}, []);
+
+	const loadReviewPrompt = useCallback(async () => {
+		if (!project) return;
+		const diffs = await Promise.all(
+			project.files.map(async (file) => {
+				const result = await fetchJson<{ diff: string }>(
+					`/api/git/diff?cwd=${encodeURIComponent(project.cwd)}&file=${encodeURIComponent(file.path)}&staged=${file.staged}`
+				);
+				return { file, diff: result.diff };
+			})
+		);
+		return composeReviewPrompt(project, diffs);
+	}, [project]);
+
+	const copyReviewPrompt = useCallback(async () => {
+		setActionBusy("review-prompt");
+		try {
+			const prompt = await loadReviewPrompt();
+			if (!prompt) return;
+			await copyText(prompt, "Review prompt copied");
+		} catch {
+			setActionMessage("Could not build review prompt");
+		} finally {
+			setActionBusy(null);
+		}
+	}, [loadReviewPrompt, copyText]);
+
+	const summarizeChanges = useCallback(async () => {
+		if (!project) return;
+		setActionBusy("summary");
+		try {
+			const prompt = await loadReviewPrompt();
+			if (!prompt) return;
+			const summaryPrompt = buildSummaryPrompt(project, prompt);
+			openPane("claude", summaryPrompt, true);
+			setActionMessage("Summary requested");
+		} catch {
+			setActionMessage("Could not summarize changes");
+		} finally {
+			setActionBusy(null);
+		}
+	}, [loadReviewPrompt, openPane, project]);
+
+	const openReviewPane = useCallback(
+		async (agentKind: "claude" | "codex", autoSend = false) => {
+			setActionBusy(`review:${agentKind}`);
+			try {
+				const prompt = await loadReviewPrompt();
+				if (!prompt) return;
+				openPane(agentKind, prompt, autoSend);
+				setActionMessage(autoSend ? "Review sent" : "Review draft opened");
+			} catch {
+				setActionMessage("Could not build review prompt");
+			} finally {
+				setActionBusy(null);
+			}
+		},
+		[loadReviewPrompt, openPane]
+	);
+
+	const loadFilePrompt = useCallback(
+		async (file: GitFileEntry, intent: "explain" | "fix") => {
+			if (!project) return;
+			const result = await fetchJson<{ diff: string }>(
+				`/api/git/diff?cwd=${encodeURIComponent(project.cwd)}&file=${encodeURIComponent(file.path)}&staged=${file.staged}`
+			);
+			return buildFilePrompt(project, file, result.diff, intent);
+		},
+		[project]
+	);
+
+	const askAboutFile = useCallback(
+		async (agentKind: "claude" | "codex", intent: "explain" | "fix") => {
+			if (!selFile) return;
+			setActionBusy(`file:${intent}:${agentKind}`);
+			try {
+				const prompt = await loadFilePrompt(selFile, intent);
+				if (!prompt) return;
+				openPane(agentKind, prompt, true);
+				setActionMessage(
+					intent === "fix" ? "Fix request sent" : "File question sent"
+				);
+			} catch {
+				setActionMessage("Could not build file prompt");
+			} finally {
+				setActionBusy(null);
+			}
+		},
+		[loadFilePrompt, openPane, selFile]
+	);
+
+	const copyCommitMessage = useCallback(async () => {
+		if (!project) return;
+		await copyText(buildCommitMessage(project), "Commit message copied");
+	}, [project, copyText]);
+
+	const createCheckpoint = useCallback(() => {
+		if (!project) return;
+		const checkpoint: ChangeCheckpoint = {
+			id: crypto.randomUUID().slice(0, 8),
+			cwd: project.cwd,
+			timestamp: Date.now(),
+			signature: changeSignature,
+		};
+		writeStoredJson(checkpointKey(project.cwd), checkpoint);
+		setCheckpointVersion((version) => version + 1);
+		setActionMessage(`Checkpoint ${checkpoint.id} created`);
+	}, [project, changeSignature]);
+
+	const explainRepo = useCallback(() => {
+		if (!project) return;
+		openPane("claude", buildRepoExplainPrompt(project), true);
+		setActionMessage("Repo explanation requested");
+	}, [openPane, project]);
+
+	useEffect(() => {
+		const handler = (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			if (
+				target?.tagName === "INPUT" ||
+				target?.tagName === "TEXTAREA" ||
+				target?.tagName === "SELECT" ||
+				event.metaKey ||
+				event.ctrlKey ||
+				event.altKey
+			) {
+				return;
+			}
+			if (event.key === "r") {
+				event.preventDefault();
+				void refreshProject();
+			} else if (event.key === "R") {
+				event.preventDefault();
+				void openReviewPane("claude", true);
+			} else if (event.key === "c") {
+				event.preventDefault();
+				void copyCommitMessage();
+			}
+		};
+		window.addEventListener("keydown", handler);
+		return () => window.removeEventListener("keydown", handler);
+	}, [copyCommitMessage, openReviewPane, refreshProject]);
 
 	if (dirs.length === 0 && !pickerOpen) {
 		return (
@@ -223,12 +588,40 @@ export function GitPage() {
 	return (
 		<div className="flex h-full flex-col bg-inferay-black">
 			<div className="shrink-0 flex items-center gap-2 px-2 sm:gap-3 sm:px-3 h-12 border-b border-inferay-gray-border bg-inferay-black">
-				<GroupTabs
-					items={tabs}
-					activeId={project?.cwd || null}
-					onSelect={switchRepo}
-					onDelete={removeRepo}
-				/>
+				<div className="flex min-w-0 items-center gap-2">
+					<span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-inferay-muted-gray sm:inline">
+						Repository
+					</span>
+					<label className="sr-only" htmlFor="git-repo-select">
+						Repository
+					</label>
+					<select
+						id="git-repo-select"
+						value={project?.cwd ?? ""}
+						onChange={(event) => switchRepo(event.target.value)}
+						className="h-8 min-w-[180px] max-w-[280px] rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2 text-[12px] font-medium text-inferay-soft-white outline-none transition-colors hover:bg-inferay-white/[0.06] focus:border-inferay-muted-gray"
+					>
+						{projects.map((repo) => {
+							const count =
+								repo.stagedCount + repo.unstagedCount + repo.untrackedCount;
+							return (
+								<option key={repo.cwd} value={repo.cwd}>
+									{repo.name}
+									{count ? ` (${count})` : ""}
+								</option>
+							);
+						})}
+					</select>
+					{project && dirs.length > 1 && (
+						<IconButton
+							type="button"
+							title="Remove repository"
+							onClick={() => removeRepo(project.cwd)}
+						>
+							<IconX size={11} />
+						</IconButton>
+					)}
+				</div>
 				<button
 					type="button"
 					onClick={() => setPickerOpen(true)}
@@ -257,9 +650,99 @@ export function GitPage() {
 								-{project.behind}
 							</span>
 						)}
+						{dirtySinceCheckpoint && (
+							<span className="rounded border border-git-modified/30 bg-git-modified/10 px-1.5 py-0.5 text-[9px] text-git-modified">
+								dirty since checkpoint
+							</span>
+						)}
 					</>
 				)}
 				<span className="flex-1" />
+				{project && (
+					<div className="hidden items-center gap-1 lg:flex">
+						<ActionButton
+							label="Review"
+							variant="primary"
+							disabled={
+								project.files.length === 0 || actionBusy?.startsWith("review:")
+							}
+							onClick={() => void openReviewPane("claude", true)}
+						/>
+						<ActionButton
+							label="Summary"
+							disabled={project.files.length === 0 || actionBusy === "summary"}
+							onClick={() => void summarizeChanges()}
+						/>
+						<div className="mx-1 h-4 w-px bg-inferay-gray-border/40" />
+						<IconButton
+							type="button"
+							title="Open terminal here"
+							onClick={() => openPane("terminal")}
+						>
+							<IconTerminal size={12} />
+						</IconButton>
+						<IconButton
+							type="button"
+							title="Open Claude here"
+							onClick={() => openPane("claude")}
+						>
+							<IconRobot size={12} />
+						</IconButton>
+						<IconButton
+							type="button"
+							title="Open Codex here"
+							onClick={() => openPane("codex")}
+						>
+							<IconOpenAI size={12} />
+						</IconButton>
+						<ActionMenu
+							label="More"
+							open={openActionMenu === "repo"}
+							onToggle={() =>
+								setOpenActionMenu((value) => (value === "repo" ? null : "repo"))
+							}
+							items={[
+								{
+									label: "Refresh",
+									disabled: actionBusy === "refresh",
+									onSelect: () => void refreshProject(),
+								},
+								{
+									label: "Copy branch",
+									onSelect: () =>
+										project.branch &&
+										void copyText(project.branch, "Branch copied"),
+								},
+								{ label: "Open in Editor", onSelect: openEditor },
+								{
+									label: "Open in Finder",
+									disabled: actionBusy === "reveal",
+									onSelect: () => void openNativePath(project.cwd, false),
+								},
+								{
+									label: "Draft review",
+									disabled:
+										project.files.length === 0 ||
+										actionBusy?.startsWith("review:"),
+									onSelect: () => void openReviewPane("claude"),
+								},
+								{
+									label: "Copy review prompt",
+									disabled:
+										project.files.length === 0 ||
+										actionBusy === "review-prompt",
+									onSelect: () => void copyReviewPrompt(),
+								},
+								{
+									label: "Copy commit message",
+									disabled: project.files.length === 0,
+									onSelect: () => void copyCommitMessage(),
+								},
+								{ label: "Create checkpoint", onSelect: createCheckpoint },
+							]}
+						/>
+					</div>
+				)}
 				{selFile && (
 					<span
 						className="text-[11px] font-mono text-inferay-muted-gray truncate max-w-[400px]"
@@ -269,6 +752,86 @@ export function GitPage() {
 					</span>
 				)}
 			</div>
+			{project && (
+				<div className="flex h-9 shrink-0 items-center gap-2 border-b border-inferay-gray-border bg-inferay-black px-3">
+					<span className="text-[10px] font-medium uppercase tracking-[0.12em] text-inferay-muted-gray">
+						Changes
+					</span>
+					<span className="rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-1.5 py-0.5 text-[9px] tabular-nums text-inferay-soft-white">
+						{totalChanges} files
+					</span>
+					{selFile && (
+						<>
+							<div className="h-4 w-px bg-inferay-gray-border/40" />
+							<ActionButton
+								label="Explain"
+								variant="primary"
+								disabled={actionBusy?.startsWith("file:")}
+								onClick={() => void askAboutFile("claude", "explain")}
+							/>
+							<ActionButton
+								label="Fix"
+								disabled={actionBusy?.startsWith("file:")}
+								onClick={() => void askAboutFile("codex", "fix")}
+							/>
+							<ActionMenu
+								label="More"
+								open={openActionMenu === "file"}
+								onToggle={() =>
+									setOpenActionMenu((value) =>
+										value === "file" ? null : "file"
+									)
+								}
+								items={[
+									{
+										label: "Copy path",
+										onSelect: () => void copyText(selFile.path, "Path copied"),
+									},
+									{
+										label: "Open file",
+										disabled: actionBusy === "open-path",
+										onSelect: () =>
+											project &&
+											void openNativePath(
+												`${project.cwd}/${selFile.path}`,
+												false
+											),
+									},
+								]}
+							/>
+						</>
+					)}
+					{diffDocument && (
+						<span className="rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-1.5 py-0.5 text-[9px] tabular-nums text-inferay-muted-gray">
+							+{diffDocument.stats.added} -{diffDocument.stats.removed}
+						</span>
+					)}
+					{latestCheckpoint && (
+						<span
+							className="hidden rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-1.5 py-0.5 text-[9px] text-inferay-muted-gray sm:inline"
+							title={new Date(latestCheckpoint.timestamp).toLocaleString()}
+						>
+							cp {latestCheckpoint.id}{" "}
+							{formatShortTime(latestCheckpoint.timestamp)}
+						</span>
+					)}
+					{repoAgentActivity && (
+						<span
+							className="hidden max-w-[260px] truncate rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-1.5 py-0.5 text-[9px] text-inferay-muted-gray xl:inline"
+							title={repoAgentActivity.latestPrompt || "No prompt yet"}
+						>
+							{repoAgentActivity.agentKind} {repoAgentActivity.status}:{" "}
+							{repoAgentActivity.latestPrompt || "no prompt"}
+						</span>
+					)}
+					<span className="flex-1" />
+					{actionMessage && (
+						<span className="truncate text-[10px] text-inferay-muted-gray">
+							{actionMessage}
+						</span>
+					)}
+				</div>
+			)}
 
 			<div className="flex flex-1 min-h-0 overflow-hidden">
 				<div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -320,10 +883,33 @@ export function GitPage() {
 							/>
 						</Suspense>
 					) : (
-						<div className="flex h-full items-center justify-center">
-							<p className="text-[11px] text-inferay-muted-gray/40">
-								{project ? "Select a file to view changes" : "Add a repository"}
-							</p>
+						<div className="flex h-full items-center justify-center px-6">
+							<div className="flex max-w-md flex-col items-center gap-3 text-center">
+								<p className="text-[12px] text-inferay-muted-gray">
+									{project
+										? project.files.length === 0
+											? "No worktree changes"
+											: "Select a file to view changes"
+										: "Add a repository"}
+								</p>
+								{project && (
+									<div className="flex flex-wrap items-center justify-center gap-1.5">
+										<ActionButton
+											label="Open terminal here"
+											onClick={() => openPane("terminal")}
+										/>
+										<ActionButton
+											label="Open Claude here"
+											onClick={() => openPane("claude")}
+										/>
+										<ActionButton
+											label="Open Codex here"
+											onClick={() => openPane("codex")}
+										/>
+										<ActionButton label="Explain repo" onClick={explainRepo} />
+									</div>
+								)}
+							</div>
 						</div>
 					)}
 				</div>
@@ -412,25 +998,99 @@ function FileGroup({
 				const name = f.path.split("/").pop() || f.path;
 				const active = selFile?.path === f.path && selFile?.staged === f.staged;
 				return (
-					<button
-						type="button"
+					<div
 						key={`${f.staged ? "s" : "u"}-${f.path}`}
-						onClick={() => onSelect(f.path)}
-						className={`w-full flex items-center px-2.5 h-[24px] text-left transition-colors ${
+						className={`group w-full flex items-center gap-2 px-2.5 h-[26px] text-left transition-colors ${
 							active
 								? "bg-inferay-accent/8 border-l-[2px] border-inferay-accent"
 								: "border-l-[2px] border-transparent hover:bg-inferay-white/[0.03]"
 						}`}
-						title={f.path}
 					>
-						<span
-							className={`truncate text-[10.5px] font-mono ${active ? "text-inferay-white" : "text-inferay-soft-white/80"}`}
+						<button
+							type="button"
+							onClick={() => onSelect(f.path)}
+							className="flex min-w-0 flex-1 items-center text-left"
+							title={f.path}
 						>
-							{name}
+							<span
+								className={`min-w-0 flex-1 truncate text-[10.5px] font-mono ${active ? "text-inferay-white" : "text-inferay-soft-white/80"}`}
+							>
+								{name}
+							</span>
+						</button>
+						<span className="shrink-0 rounded border border-inferay-gray-border px-1 py-px text-[7px] uppercase tracking-[0.08em] text-inferay-muted-gray">
+							{statusLabel(f.status)}
 						</span>
-					</button>
+					</div>
 				);
 			})}
+		</div>
+	);
+}
+
+function ActionButton({
+	label,
+	disabled,
+	onClick,
+	variant = "secondary",
+}: {
+	label: string;
+	disabled?: boolean;
+	onClick: () => void;
+	variant?: "primary" | "secondary";
+}) {
+	return (
+		<button
+			type="button"
+			disabled={disabled}
+			onClick={onClick}
+			className={`inline-flex h-6 items-center rounded-md border px-2 text-[9px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-35 ${
+				variant === "primary"
+					? "border-inferay-accent/35 bg-inferay-accent/12 text-inferay-soft-white hover:bg-inferay-accent/18"
+					: "border-inferay-gray-border bg-inferay-dark-gray text-inferay-muted-gray hover:bg-inferay-white/[0.06] hover:text-inferay-soft-white"
+			}`}
+		>
+			{label}
+		</button>
+	);
+}
+
+function ActionMenu({
+	label,
+	open,
+	onToggle,
+	items,
+}: {
+	label: string;
+	open: boolean;
+	onToggle: () => void;
+	items: {
+		label: string;
+		disabled?: boolean;
+		onSelect: () => void;
+	}[];
+}) {
+	return (
+		<div className="relative">
+			<ActionButton label={label} onClick={onToggle} />
+			{open && (
+				<div className="absolute right-0 top-7 z-30 min-w-40 overflow-hidden rounded-lg border border-inferay-gray-border bg-inferay-dark-gray shadow-2xl">
+					{items.map((item) => (
+						<button
+							key={item.label}
+							type="button"
+							disabled={item.disabled}
+							onClick={() => {
+								onToggle();
+								item.onSelect();
+							}}
+							className="flex h-8 w-full items-center px-2.5 text-left text-[10px] text-inferay-muted-gray transition-colors hover:bg-inferay-white/[0.06] hover:text-inferay-soft-white disabled:pointer-events-none disabled:opacity-35"
+						>
+							{item.label}
+						</button>
+					))}
+				</div>
+			)}
 		</div>
 	);
 }

@@ -4,6 +4,7 @@ import {
 	createClaudeEnv,
 	resolveClaudeBinary,
 } from "../../lib/terminal-command.ts";
+import type { AgentEvent } from "../agents/events.ts";
 import { getAgentAdapter } from "../agents/registry.ts";
 import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
 import { CheckpointService } from "./checkpoint.ts";
@@ -188,6 +189,7 @@ interface ChatSession {
 	messageBuffer: ChatMessageBuffer;
 	cleanupTimer: ReturnType<typeof setTimeout> | null;
 	goal: GoalState | null;
+	agentEvents: AgentEvent[];
 }
 
 interface GoalState {
@@ -356,6 +358,7 @@ async function runAgent(
 	emitDone = true
 ) {
 	const adapter = getAgentAdapter(session.agentKind);
+	session.agentEvents ??= [];
 	const ctx: AgentRunContext = {
 		paneId,
 		cwd: session.cwd,
@@ -367,6 +370,13 @@ async function runAgent(
 		emitChatEvent: (event) => {
 			broadcast(session, { type: "chat:event", paneId, event });
 			session.messageBuffer.applyEvent(event);
+		},
+		emitAgentEvent: (event) => {
+			session.agentEvents.push(event);
+			if (session.agentEvents.length > 500) {
+				session.agentEvents = session.agentEvents.slice(-500);
+			}
+			broadcast(session, { type: "chat:agent-event", paneId, event });
 		},
 		emitStatus: (status, isLoading = true) =>
 			broadcast(session, { type: "chat:status", paneId, status, isLoading }),
@@ -519,6 +529,7 @@ export const ChatService = {
 				messageBuffer: new ChatMessageBuffer(),
 				cleanupTimer: null,
 				goal: null,
+				agentEvents: [],
 			};
 			sessions.set(paneId, session);
 		}

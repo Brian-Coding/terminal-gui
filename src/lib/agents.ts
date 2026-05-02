@@ -62,7 +62,8 @@ const CLAUDE_NATIVE_COMMANDS = [
 ] as const satisfies readonly NativeSlashCommand[];
 
 const CLAUDE_MODELS: readonly ModelOption[] = [
-	{ id: "claude-opus-4-6", label: "Opus 4.6", detail: "★ Most capable" },
+	{ id: "claude-opus-4-7", label: "Opus 4.7", detail: "★ Most capable" },
+	{ id: "claude-opus-4-6", label: "Opus 4.6", detail: "Previous Opus" },
 	{ id: "claude-sonnet-4-6", label: "Sonnet 4.6", detail: "Best value" },
 	{ id: "claude-haiku-4-5", label: "Haiku 4.5", detail: "Fastest" },
 ] as const;
@@ -115,7 +116,7 @@ const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
 		supportsResume: true,
 		nativeSlashCommands: CLAUDE_NATIVE_COMMANDS,
 		models: CLAUDE_MODELS,
-		defaultModel: "claude-sonnet-4-6",
+		defaultModel: "claude-opus-4-7",
 	},
 	codex: {
 		kind: "codex",

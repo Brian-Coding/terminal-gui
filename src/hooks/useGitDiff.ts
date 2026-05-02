@@ -36,13 +36,16 @@ export function useGitDiff() {
 
 	const loadDiff = useCallback((req: DiffRequest) => {
 		const id = ++requestCounter;
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 12000);
 		activeId.current = id;
 		setRequest(req);
 		setLoading(true);
 		setDiff(null);
 
 		fetch(
-			`/api/git/full-diff?cwd=${encodeURIComponent(req.cwd)}&file=${encodeURIComponent(req.file)}&staged=${req.staged}`
+			`/api/git/full-diff?cwd=${encodeURIComponent(req.cwd)}&file=${encodeURIComponent(req.file)}&staged=${req.staged}`,
+			{ signal: controller.signal }
 		)
 			.then((resp) => {
 				if (activeId.current !== id) return null;
@@ -56,8 +59,22 @@ export function useGitDiff() {
 			})
 			.catch(() => {
 				if (activeId.current !== id) return;
-				setDiff(null);
+				setDiff({
+					oldLines: [],
+					newLines: [
+						{
+							number: 1,
+							content: "Diff timed out before it could render safely",
+							type: "context",
+						},
+					],
+					isBinary: false,
+					isNew: false,
+				});
 				setLoading(false);
+			})
+			.finally(() => {
+				clearTimeout(timeout);
 			});
 	}, []);
 

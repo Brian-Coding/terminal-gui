@@ -26,6 +26,9 @@ const config: ElectrobunConfig = {
 			createDmg: true,
 		},
 	},
+	scripts: {
+		postBuild: "scripts/ensure-electrobun-views.ts",
+	},
 	runtime: {
 		exitOnLastWindowClosed: true,
 	},

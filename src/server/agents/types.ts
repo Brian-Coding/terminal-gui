@@ -1,4 +1,5 @@
 import type { ChatAgentKind } from "../../lib/agents.ts";
+import type { AgentEvent } from "./events.ts";
 
 export interface AgentActivityEvent {
 	toolName: string;
@@ -14,13 +15,14 @@ export interface AgentRunContext {
 	getSessionId(): string | null;
 	updateSessionId(nextSessionId: string): void;
 	emitChatEvent(event: unknown): void;
+	emitAgentEvent(event: AgentEvent): void;
 	emitStatus(status: string, isLoading?: boolean): void;
 	emitActivity(activity: AgentActivityEvent): void;
 	emitSystemMessage(message: string): void;
 }
 
 export interface AgentHandle {
-	run(): Promise<AgentRunResult | void>;
+	run(): Promise<AgentRunResult | undefined>;
 	stop(): void;
 	kill(): void;
 }

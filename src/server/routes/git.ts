@@ -38,6 +38,8 @@ interface HunkDiff {
 }
 
 const MAX_UNTRACKED_FILE_BYTES = 120_000;
+const MAX_RENDERED_DIFF_LINES = 6000;
+const MAX_RENDERED_LINE_CHARS = 8000;
 
 const IMAGE_EXTENSIONS = new Set([
 	".png",
@@ -150,6 +152,19 @@ async function getHunkDiff(
 
 	const oldFileLines = oldContent.split("\n");
 	const newFileLines = currentContent.split("\n");
+	if (oldFileLines.length + newFileLines.length > MAX_RENDERED_DIFF_LINES) {
+		return tooLargeDiff("Diff too large to render safely");
+	}
+	let longestLine = 0;
+	for (const line of oldFileLines)
+		longestLine = Math.max(longestLine, line.length);
+	for (const line of newFileLines)
+		longestLine = Math.max(longestLine, line.length);
+	if (longestLine > MAX_RENDERED_LINE_CHARS) {
+		return tooLargeDiff(
+			"Diff contains a very long line and cannot render safely"
+		);
+	}
 
 	interface DiffHunk {
 		oldStart: number;

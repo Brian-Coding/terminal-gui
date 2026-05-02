@@ -1,283 +1,533 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
-	IconCamera,
-	IconLogOut,
+	IconAlertTriangle,
+	IconCheck,
+	IconExternalLink,
+	IconGitBranch,
+	IconPlus,
+	IconRefreshCw,
+	IconTerminal,
 	IconUser,
-	IconZap,
 } from "../../components/ui/Icons.tsx";
+import { ONBOARDING_DONE_KEY } from "../OnboardingPage/index.tsx";
 
-type ProfileTab = "profile" | "keys";
-
-interface ProviderKey {
-	readonly id: string;
-	readonly provider: string;
-	readonly label: string;
-	readonly value: string;
-	readonly connected: boolean;
+interface ForgeAccount {
+	provider: "github";
+	host: string;
+	login: string;
+	name: string | null;
+	avatarUrl: string | null;
+	email: string | null;
+	active: boolean;
 }
 
-const INITIAL_KEYS: readonly ProviderKey[] = [
-	{
-		id: "anthropic",
-		provider: "Anthropic",
-		label: "Claude API",
-		value: "sk-ant-1x4a",
-		connected: true,
-	},
-	{
-		id: "openai",
-		provider: "OpenAI",
-		label: "GPT / ChatGPT",
-		value: "sk-proj-6d2f",
-		connected: true,
-	},
-	{
-		id: "google",
-		provider: "Google",
-		label: "Gemini",
-		value: "",
-		connected: false,
-	},
-	{
-		id: "replicate",
-		provider: "Replicate",
-		label: "Open Source Models",
-		value: "",
-		connected: false,
-	},
-	{
-		id: "fal",
-		provider: "Fal",
-		label: "Image Generation",
-		value: "",
-		connected: false,
-	},
-] as const;
+interface GithubRepo {
+	name: string;
+	full_name: string;
+	description: string | null;
+	html_url: string;
+	language: string | null;
+	stargazers_count: number;
+	updated_at: string;
+	private: boolean;
+}
+
+type LoadState = "idle" | "loading" | "ready" | "error";
+const PROFILE_CACHE_TTL_MS = 120_000;
+
+let cachedAccounts: { value: ForgeAccount[]; cachedAt: number } | null = null;
+let cachedRepos: { value: GithubRepo[]; cachedAt: number } | null = null;
+
+function isFresh(cachedAt: number) {
+	return Date.now() - cachedAt < PROFILE_CACHE_TTL_MS;
+}
 
 export function ProfilePage() {
-	const [activeTab, setActiveTab] = useState<ProfileTab>("profile");
-	const [displayName, setDisplayName] = useState("User");
-	const [email, setEmail] = useState("user@example.com");
-	const [keys] = useState<readonly ProviderKey[]>(INITIAL_KEYS);
+	const navigate = useNavigate();
+	const resetOnboarding = () => {
+		localStorage.removeItem(ONBOARDING_DONE_KEY);
+		navigate("/onboarding", { replace: true });
+	};
+	const [accounts, setAccounts] = useState<ForgeAccount[]>(
+		cachedAccounts && isFresh(cachedAccounts.cachedAt)
+			? cachedAccounts.value
+			: []
+	);
+	const [loadState, setLoadState] = useState<LoadState>(
+		cachedAccounts && isFresh(cachedAccounts.cachedAt) ? "ready" : "idle"
+	);
+	const [error, setError] = useState<string | null>(null);
+	const [connecting, setConnecting] = useState(false);
+	const [repos, setRepos] = useState<GithubRepo[]>(
+		cachedRepos && isFresh(cachedRepos.cachedAt) ? cachedRepos.value : []
+	);
+	const [reposLoading, setReposLoading] = useState(false);
+	const [repoQuery, setRepoQuery] = useState("");
+	const [cloneDirectory, setCloneDirectory] = useState("~/Desktop");
+	const [cloneStatus, setCloneStatus] = useState<string | null>(null);
+	const [cloningRepo, setCloningRepo] = useState<string | null>(null);
 
-	const connectedCount = useMemo(
-		() => keys.filter((provider) => provider.connected).length,
-		[keys]
+	const loadAccounts = useCallback(async (force = false) => {
+		if (!force && cachedAccounts && isFresh(cachedAccounts.cachedAt)) {
+			setAccounts(cachedAccounts.value);
+			setLoadState("ready");
+			return;
+		}
+		if (force || !cachedAccounts || !isFresh(cachedAccounts.cachedAt)) {
+			setLoadState("loading");
+		}
+		setError(null);
+		try {
+			const response = await fetch("/api/forge/accounts");
+			if (!response.ok) {
+				throw new Error(await response.text());
+			}
+			const payload = (await response.json()) as { accounts?: ForgeAccount[] };
+			const nextAccounts = Array.isArray(payload.accounts)
+				? payload.accounts
+				: [];
+			cachedAccounts = { value: nextAccounts, cachedAt: Date.now() };
+			setAccounts(nextAccounts);
+			setLoadState("ready");
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Unable to load accounts");
+			setLoadState("error");
+		}
+	}, []);
+
+	useEffect(() => {
+		void loadAccounts();
+	}, [loadAccounts]);
+
+	const loadRepos = useCallback(async (force = false) => {
+		if (!force && cachedRepos && isFresh(cachedRepos.cachedAt)) {
+			setRepos(cachedRepos.value);
+			return;
+		}
+		setReposLoading(true);
+		try {
+			const response = await fetch("/api/forge/repos?limit=50");
+			if (!response.ok) throw new Error(await response.text());
+			const payload = (await response.json()) as { repos?: GithubRepo[] };
+			const nextRepos = Array.isArray(payload.repos) ? payload.repos : [];
+			cachedRepos = { value: nextRepos, cachedAt: Date.now() };
+			setRepos(nextRepos);
+		} catch (err) {
+			setError(
+				err instanceof Error
+					? err.message
+					: "Unable to load GitHub repositories"
+			);
+		} finally {
+			setReposLoading(false);
+		}
+	}, []);
+
+	useEffect(() => {
+		if (accounts.length > 0) {
+			void loadRepos();
+		}
+	}, [accounts.length, loadRepos]);
+
+	const activeAccount = useMemo(
+		() => accounts.find((account) => account.active) ?? accounts[0] ?? null,
+		[accounts]
 	);
 
-	const tabs: {
-		readonly id: ProfileTab;
-		readonly label: string;
-		readonly icon: ReactNode;
-	}[] = [
-		{ id: "profile", label: "Profile", icon: <IconUser size={13} /> },
-		{ id: "keys", label: "API Keys", icon: <IconZap size={13} /> },
-	];
+	const filteredRepos = useMemo(() => {
+		const query = repoQuery.trim().toLowerCase();
+		if (!query) return repos;
+		return repos.filter(
+			(repo) =>
+				repo.full_name.toLowerCase().includes(query) ||
+				repo.description?.toLowerCase().includes(query)
+		);
+	}, [repoQuery, repos]);
+
+	const connectGithub = async () => {
+		setConnecting(true);
+		try {
+			await fetch("/api/forge/connect", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ provider: "github" }),
+			});
+		} finally {
+			setConnecting(false);
+		}
+	};
+
+	const pickCloneDirectory = async () => {
+		const response = await fetch("/api/config/pick-folder", { method: "POST" });
+		const payload = (await response.json()) as { folder: string | null };
+		if (payload.folder) setCloneDirectory(payload.folder);
+	};
+
+	const cloneRepo = async (repo: GithubRepo) => {
+		setCloningRepo(repo.full_name);
+		setCloneStatus(null);
+		setError(null);
+		try {
+			const response = await fetch("/api/forge/clone", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					gitUrl: repo.html_url,
+					cloneDirectory,
+				}),
+			});
+			const payload = (await response.json()) as {
+				error?: string;
+				displayPath?: string;
+			};
+			if (!response.ok) throw new Error(payload.error ?? "Clone failed");
+			cachedRepos = null;
+			setCloneStatus(`Cloned ${repo.full_name} to ${payload.displayPath}`);
+			window.dispatchEvent(new Event("terminal-shell-change"));
+		} catch (err) {
+			setError(
+				err instanceof Error ? err.message : "Unable to clone repository"
+			);
+		} finally {
+			setCloningRepo(null);
+		}
+	};
 
 	return (
 		<div className="flex h-full min-h-0 bg-inferay-black">
 			<aside className="flex w-[220px] shrink-0 flex-col border-r border-inferay-gray-border bg-inferay-black">
 				<div className="border-b border-inferay-gray-border px-4 py-4">
 					<div className="flex items-center gap-3">
-						<div className="flex h-10 w-10 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-gray">
-							<IconUser size={18} className="text-inferay-soft-white" />
-						</div>
-						<div>
-							<p className="text-[11px] font-medium text-inferay-white">
-								{displayName}
+						<AccountAvatar account={activeAccount} size="md" />
+						<div className="min-w-0">
+							<p className="truncate text-[11px] font-medium text-inferay-white">
+								{activeAccount?.name ||
+									activeAccount?.login ||
+									"GitHub Account"}
 							</p>
-							<p className="text-[8px] text-inferay-muted-gray">Pro Plan</p>
+							<p className="truncate text-[8px] text-inferay-muted-gray">
+								{activeAccount ? `@${activeAccount.login}` : "Not connected"}
+							</p>
 						</div>
 					</div>
 				</div>
 
-				<nav className="flex-1 space-y-1 px-3 py-3">
-					{tabs.map((tab) => {
-						const active = activeTab === tab.id;
-						return (
-							<button
-								type="button"
-								key={tab.id}
-								onClick={() => setActiveTab(tab.id)}
-								className={`flex h-8 w-full items-center gap-2 rounded-lg border px-2.5 text-[10px] transition-colors ${
-									active
-										? "border-inferay-gray-border bg-inferay-gray text-inferay-white"
-										: "border-transparent text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
-								}`}
-							>
-								<span className="text-inferay-muted-gray">{tab.icon}</span>
-								<span>{tab.label}</span>
-								{tab.id === "keys" ? (
-									<span className="ml-auto text-[8px] tabular-nums text-inferay-muted-gray">
-										{connectedCount}/{keys.length}
-									</span>
-								) : null}
-							</button>
-						);
-					})}
+				<nav className="flex-1 px-3 py-3">
+					<div className="flex h-8 w-full items-center gap-2 rounded-lg border border-inferay-gray-border bg-inferay-gray px-2.5 text-[10px] text-inferay-white">
+						<IconGitBranch size={13} className="text-inferay-muted-gray" />
+						<span>GitHub</span>
+						<span className="ml-auto text-[8px] tabular-nums text-inferay-muted-gray">
+							{accounts.length}
+						</span>
+					</div>
 				</nav>
 
-				<div className="border-t border-inferay-gray-border p-3">
+				<div className="flex flex-col gap-2 border-t border-inferay-gray-border p-3">
 					<button
 						type="button"
+						onClick={connectGithub}
+						disabled={connecting}
+						className="flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-inferay-gray-border text-[10px] text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white disabled:opacity-50"
+					>
+						<IconTerminal size={13} />
+						<span>{connecting ? "Opening..." : "Connect GitHub"}</span>
+					</button>
+					<button
+						type="button"
+						onClick={resetOnboarding}
 						className="flex h-8 w-full items-center justify-center gap-2 rounded-lg border border-inferay-gray-border text-[10px] text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 					>
-						<IconLogOut size={13} />
-						<span>Sign Out</span>
+						<IconRefreshCw size={13} />
+						<span>Replay Onboarding</span>
 					</button>
 				</div>
 			</aside>
 
-			<div className="min-w-0 flex-1 overflow-y-auto">
-				{activeTab === "profile" ? (
-					<div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-5">
+			<main className="min-w-0 flex-1 overflow-y-auto">
+				<div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-5">
+					<header className="flex items-center justify-between gap-3">
 						<div>
 							<h1 className="text-[13px] font-medium text-inferay-white">
-								Profile
+								GitHub Accounts
 							</h1>
 							<p className="mt-1 text-[9px] text-inferay-muted-gray">
-								Manage your account information and preferences.
+								Inferay uses your local GitHub CLI login, the same way Helmor
+								detects accounts.
 							</p>
 						</div>
-
-						<div className="flex items-center gap-4 rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/30 p-4">
-							<div className="flex h-16 w-16 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-gray">
-								<IconUser size={24} className="text-inferay-soft-white" />
-							</div>
-							<div className="flex-1">
-								<p className="text-[11px] font-medium text-inferay-white">
-									Profile Photo
-								</p>
-								<div className="mt-2 flex items-center gap-2">
-									<button
-										type="button"
-										className="flex h-7 items-center gap-1.5 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[9px] text-inferay-soft-white transition-colors hover:bg-inferay-gray"
-									>
-										<IconCamera size={12} />
-										<span>Upload</span>
-									</button>
-									<button
-										type="button"
-										className="h-7 rounded-lg border border-inferay-gray-border px-2.5 text-[9px] text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
-									>
-										Remove
-									</button>
-								</div>
-							</div>
+						<div className="flex items-center gap-2">
+							<button
+								type="button"
+								onClick={() => void loadAccounts(true)}
+								className="flex h-7 items-center gap-1.5 rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[9px] text-inferay-soft-white transition-colors hover:bg-inferay-gray"
+							>
+								<IconRefreshCw size={12} />
+								<span>Refresh</span>
+							</button>
+							<button
+								type="button"
+								onClick={connectGithub}
+								className="flex h-7 items-center gap-1.5 rounded-md border border-inferay-gray-border bg-inferay-gray px-2.5 text-[9px] font-medium text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
+							>
+								<IconTerminal size={12} />
+								<span>Connect</span>
+							</button>
 						</div>
+					</header>
 
-						<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
-							<div className="space-y-3 rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/20 p-4">
-								<div>
-									<label
-										htmlFor="profile-display-name"
-										className="text-[8px] font-medium uppercase tracking-wide text-inferay-muted-gray"
-									>
-										Display Name
-									</label>
+					{error ? <ErrorBanner message={error} /> : null}
+					{cloneStatus ? <SuccessBanner message={cloneStatus} /> : null}
+
+					<section className="overflow-hidden rounded-lg border border-inferay-gray-border bg-inferay-dark-gray/20">
+						{loadState === "loading" ? (
+							<div className="flex h-28 items-center justify-center text-[10px] text-inferay-muted-gray">
+								Checking GitHub CLI accounts...
+							</div>
+						) : accounts.length === 0 ? (
+							<EmptyState onConnect={connectGithub} />
+						) : (
+							accounts.map((account) => (
+								<AccountRow
+									key={`${account.host}:${account.login}`}
+									account={account}
+								/>
+							))
+						)}
+					</section>
+
+					{accounts.length > 0 ? (
+						<section className="rounded-lg border border-inferay-gray-border bg-inferay-dark-gray/20">
+							<div className="flex items-center justify-between gap-3 border-b border-inferay-gray-border px-4 py-3">
+								<div className="min-w-0">
+									<h2 className="text-[11px] font-medium text-inferay-white">
+										Clone from GitHub
+									</h2>
+									<p className="mt-1 text-[8px] text-inferay-muted-gray">
+										Discover repositories from your connected account and add
+										the clone location to Inferay search.
+									</p>
+								</div>
+								<button
+									type="button"
+									onClick={() => void loadRepos(true)}
+									className="flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[9px] text-inferay-soft-white transition-colors hover:bg-inferay-gray"
+								>
+									<IconRefreshCw size={12} />
+									<span>Repos</span>
+								</button>
+							</div>
+							<div className="flex flex-col gap-2 border-b border-inferay-gray-border px-4 py-3 md:flex-row">
+								<input
+									type="text"
+									value={repoQuery}
+									onChange={(event) => setRepoQuery(event.target.value)}
+									placeholder="Search repositories"
+									className="h-8 min-w-0 flex-1 rounded-md border border-inferay-gray-border bg-inferay-black px-2.5 text-[10px] text-inferay-white outline-none placeholder:text-inferay-muted-gray focus:border-inferay-accent/60"
+								/>
+								<div className="flex min-w-0 items-center gap-2 md:w-[320px]">
 									<input
-										id="profile-display-name"
 										type="text"
-										value={displayName}
-										onChange={(event) => setDisplayName(event.target.value)}
-										className="mt-1.5 h-9 w-full rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-3 text-[10px] text-inferay-white outline-none focus:border-inferay-accent/50"
+										value={cloneDirectory}
+										onChange={(event) => setCloneDirectory(event.target.value)}
+										className="h-8 min-w-0 flex-1 rounded-md border border-inferay-gray-border bg-inferay-black px-2.5 text-[10px] text-inferay-white outline-none focus:border-inferay-accent/60"
 									/>
-								</div>
-								<div>
-									<label
-										htmlFor="profile-email"
-										className="text-[8px] font-medium uppercase tracking-wide text-inferay-muted-gray"
+									<button
+										type="button"
+										onClick={() => void pickCloneDirectory()}
+										className="h-8 shrink-0 rounded-md border border-inferay-gray-border px-2.5 text-[9px] text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 									>
-										Email
-									</label>
-									<input
-										id="profile-email"
-										type="email"
-										value={email}
-										onChange={(event) => setEmail(event.target.value)}
-										className="mt-1.5 h-9 w-full rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-3 text-[10px] text-inferay-white outline-none focus:border-inferay-accent/50"
-									/>
+										Browse
+									</button>
 								</div>
-								<button
-									type="button"
-									className="h-8 rounded-lg border border-inferay-gray-border bg-inferay-gray px-4 text-[10px] font-medium text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
-								>
-									Save Changes
-								</button>
 							</div>
-
-							<div className="rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/30 p-4">
-								<p className="text-[10px] font-medium text-inferay-white">
-									Pro Plan
-								</p>
-								<p className="mt-1 text-[8px] leading-relaxed text-inferay-muted-gray">
-									Unlimited conversations, all models, priority support.
-								</p>
-								<button
-									type="button"
-									className="mt-4 h-8 rounded-lg border border-inferay-gray-border bg-inferay-gray px-3 text-[9px] font-medium text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
-								>
-									Manage
-								</button>
+							<div className="max-h-[320px] overflow-y-auto">
+								{reposLoading ? (
+									<div className="flex h-24 items-center justify-center text-[10px] text-inferay-muted-gray">
+										Loading repositories...
+									</div>
+								) : filteredRepos.length === 0 ? (
+									<div className="flex h-24 items-center justify-center text-[10px] text-inferay-muted-gray">
+										No repositories found.
+									</div>
+								) : (
+									filteredRepos.map((repo) => (
+										<RepoRow
+											key={repo.full_name}
+											repo={repo}
+											cloning={cloningRepo === repo.full_name}
+											onClone={() => void cloneRepo(repo)}
+										/>
+									))
+								)}
 							</div>
-						</div>
-					</div>
-				) : null}
+						</section>
+					) : null}
+				</div>
+			</main>
+		</div>
+	);
+}
 
-				{activeTab === "keys" ? (
-					<div className="mx-auto flex max-w-4xl flex-col gap-4 px-6 py-5">
-						<div>
-							<h1 className="text-[13px] font-medium text-inferay-white">
-								API Keys
-							</h1>
-							<p className="mt-1 text-[9px] text-inferay-muted-gray">
-								Mock provider keys for now. The layout matches the landing page
-								and can be wired to real storage later.
-							</p>
-						</div>
-
-						<div className="overflow-hidden rounded-xl border border-inferay-gray-border bg-inferay-dark-gray/20">
-							{keys.map((provider) => (
-								<div
-									key={provider.id}
-									className="flex items-center gap-3 border-b border-inferay-gray-border px-4 py-3 last:border-b-0"
-								>
-									<div className="flex h-9 w-9 items-center justify-center rounded-lg border border-inferay-gray-border bg-inferay-dark-gray text-[10px] font-semibold text-inferay-soft-white">
-										{provider.provider.slice(0, 1)}
-									</div>
-									<div className="min-w-0 flex-1">
-										<div className="flex items-center gap-2">
-											<p className="text-[10px] font-medium text-inferay-white">
-												{provider.provider}
-											</p>
-											{provider.connected ? (
-												<span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[7px] font-medium text-emerald-400">
-													Connected
-												</span>
-											) : null}
-										</div>
-										<p className="text-[8px] text-inferay-muted-gray">
-											{provider.label}
-										</p>
-									</div>
-									{provider.connected ? (
-										<span className="font-mono text-[9px] text-inferay-muted-gray">
-											{provider.value}
-										</span>
-									) : (
-										<button
-											type="button"
-											className="h-7 rounded-lg border border-inferay-gray-border bg-inferay-dark-gray px-2.5 text-[9px] text-inferay-soft-white transition-colors hover:bg-inferay-gray"
-										>
-											Add Key
-										</button>
-									)}
-								</div>
-							))}
-						</div>
-					</div>
-				) : null}
+function RepoRow({
+	repo,
+	cloning,
+	onClone,
+}: {
+	repo: GithubRepo;
+	cloning: boolean;
+	onClone: () => void;
+}) {
+	return (
+		<div className="flex min-h-[64px] items-center gap-3 border-b border-inferay-gray-border px-4 py-3 last:border-b-0">
+			<div className="min-w-0 flex-1">
+				<div className="flex items-center gap-2">
+					<p className="truncate text-[10px] font-medium text-inferay-white">
+						{repo.full_name}
+					</p>
+					{repo.private ? (
+						<span className="rounded-full border border-inferay-gray-border px-1.5 py-0.5 text-[7px] text-inferay-muted-gray">
+							Private
+						</span>
+					) : null}
+				</div>
+				<p className="mt-1 truncate text-[8px] text-inferay-muted-gray">
+					{repo.description || repo.language || "No description"}
+				</p>
 			</div>
+			<a
+				href={repo.html_url}
+				target="_blank"
+				rel="noreferrer"
+				className="flex h-7 w-7 items-center justify-center rounded-md border border-inferay-gray-border text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
+				title="Open on GitHub"
+			>
+				<IconExternalLink size={12} />
+			</a>
+			<button
+				type="button"
+				onClick={onClone}
+				disabled={cloning}
+				className="flex h-7 items-center gap-1.5 rounded-md border border-inferay-gray-border bg-inferay-gray px-2.5 text-[9px] text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black disabled:opacity-50"
+			>
+				<IconPlus size={12} />
+				<span>{cloning ? "Cloning" : "Clone"}</span>
+			</button>
+		</div>
+	);
+}
+
+function AccountRow({ account }: { account: ForgeAccount }) {
+	const displayName = account.name?.trim() || account.login;
+	const githubUrl = `https://${account.host}/${account.login}`;
+
+	return (
+		<div className="flex min-h-[74px] items-center gap-3 border-b border-inferay-gray-border px-4 py-3 last:border-b-0">
+			<AccountAvatar account={account} size="lg" />
+			<div className="min-w-0 flex-1">
+				<div className="flex items-center gap-2">
+					<p className="truncate text-[11px] font-medium text-inferay-white">
+						{displayName}
+					</p>
+					<p className="truncate text-[10px] text-inferay-muted-gray">
+						@{account.login}
+					</p>
+					{account.active ? (
+						<span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[7px] font-medium text-emerald-400">
+							<IconCheck size={9} />
+							Active
+						</span>
+					) : null}
+				</div>
+				<div className="mt-1 flex min-h-4 items-center gap-2 text-[8px] text-inferay-muted-gray">
+					<span>{account.host}</span>
+					{account.email ? <span>{account.email}</span> : null}
+				</div>
+			</div>
+			<a
+				href={githubUrl}
+				target="_blank"
+				rel="noreferrer"
+				className="flex h-7 w-7 items-center justify-center rounded-md border border-inferay-gray-border text-inferay-muted-gray transition-colors hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
+				title="Open on GitHub"
+			>
+				<IconExternalLink size={12} />
+			</a>
+		</div>
+	);
+}
+
+function AccountAvatar({
+	account,
+	size,
+}: {
+	account: ForgeAccount | null;
+	size: "md" | "lg";
+}) {
+	const className =
+		size === "lg" ? "h-10 w-10 text-[13px]" : "h-10 w-10 text-[12px]";
+	const fallback = account?.login.slice(0, 2).toUpperCase() || "GH";
+
+	return (
+		<div
+			className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-inferay-gray-border bg-inferay-gray font-semibold text-inferay-soft-white ${className}`}
+		>
+			{account?.avatarUrl ? (
+				<img
+					src={account.avatarUrl}
+					alt={account.login}
+					className="h-full w-full object-cover"
+				/>
+			) : account ? (
+				fallback
+			) : (
+				<IconUser size={18} />
+			)}
+		</div>
+	);
+}
+
+function EmptyState({ onConnect }: { onConnect: () => void }) {
+	return (
+		<div className="flex min-h-[180px] flex-col items-center justify-center gap-3 px-6 text-center">
+			<div className="flex h-10 w-10 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-dark-gray text-inferay-muted-gray">
+				<IconGitBranch size={17} />
+			</div>
+			<div>
+				<p className="text-[11px] font-medium text-inferay-white">
+					No GitHub accounts found
+				</p>
+				<p className="mt-1 max-w-sm text-[9px] leading-relaxed text-inferay-muted-gray">
+					Connect with the GitHub CLI and Inferay will pick up the account
+					automatically.
+				</p>
+			</div>
+			<button
+				type="button"
+				onClick={onConnect}
+				className="flex h-7 items-center gap-1.5 rounded-md border border-inferay-gray-border bg-inferay-gray px-2.5 text-[9px] font-medium text-inferay-white transition-colors hover:border-inferay-accent hover:bg-inferay-accent hover:text-black"
+			>
+				<IconTerminal size={12} />
+				<span>Run gh auth login</span>
+			</button>
+		</div>
+	);
+}
+
+function ErrorBanner({ message }: { message: string }) {
+	return (
+		<div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-3 py-2 text-[9px] text-amber-200">
+			<IconAlertTriangle size={13} className="mt-0.5 shrink-0" />
+			<span className="min-w-0 break-words">{message}</span>
+		</div>
+	);
+}
+
+function SuccessBanner({ message }: { message: string }) {
+	return (
+		<div className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[9px] text-emerald-200">
+			<IconCheck size={13} className="mt-0.5 shrink-0" />
+			<span className="min-w-0 break-words">{message}</span>
 		</div>
 	);
 }

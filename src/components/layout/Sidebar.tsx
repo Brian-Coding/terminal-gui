@@ -14,7 +14,6 @@ import {
 import {
 	IconCamera,
 	IconGitBranch,
-	IconLayers,
 	IconPlus,
 	IconSettings,
 	IconSlash,
@@ -30,8 +29,18 @@ interface NavItem {
 	icon: React.ComponentType<{ size?: number; className?: string }>;
 }
 
+interface ForgeAccount {
+	provider: "github";
+	host: string;
+	login: string;
+	name: string | null;
+	avatarUrl: string | null;
+	email: string | null;
+	active: boolean;
+}
+
 const navItems: NavItem[] = [
-	{ label: "Git", path: "/git", icon: IconGitBranch },
+	{ label: "Changes", path: "/git", icon: IconGitBranch },
 	{ label: "Prompts", path: "/prompts", icon: IconSlash },
 	{ label: "Images", path: "/images", icon: IconCamera },
 ];
@@ -175,6 +184,7 @@ export function Sidebar() {
 	const [collapsed, setCollapsed] = useState(() => {
 		return readStoredBoolean("sidebar-collapsed");
 	});
+	const [githubAccount, setGithubAccount] = useState<ForgeAccount | null>(null);
 
 	const isDefault = loadAppThemeId() === "default";
 	const logoImageStyle = useMemo(
@@ -271,6 +281,36 @@ export function Sidebar() {
 	useEffect(() => {
 		writeStoredValue("sidebar-collapsed", String(collapsed));
 	}, [collapsed]);
+
+	useEffect(() => {
+		let cancelled = false;
+		async function loadGithubAccount() {
+			try {
+				const response = await fetch("/api/forge/accounts");
+				if (!response.ok) return;
+				const payload = (await response.json()) as {
+					accounts?: ForgeAccount[];
+				};
+				const accounts = Array.isArray(payload.accounts)
+					? payload.accounts
+					: [];
+				const account =
+					accounts.find((item) => item.active) ?? accounts[0] ?? null;
+				if (!cancelled) setGithubAccount(account);
+			} catch {
+				if (!cancelled) setGithubAccount(null);
+			}
+		}
+		void loadGithubAccount();
+		window.addEventListener("focus", loadGithubAccount);
+		return () => {
+			cancelled = true;
+			window.removeEventListener("focus", loadGithubAccount);
+		};
+	}, []);
+
+	const githubLabel =
+		githubAccount?.login || githubAccount?.name || "GitHub Account";
 
 	return (
 		<aside
@@ -381,12 +421,30 @@ export function Sidebar() {
 								: "border-transparent text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
 						} ${collapsed ? "justify-center h-7 w-7 mx-auto p-0" : "h-7 px-2"}`
 					}
-					title={collapsed ? "Profile" : undefined}
+					title={collapsed ? githubLabel : undefined}
 				>
-					<IconUser size={14} className="shrink-0" />
-					{!collapsed ? <span>Profile</span> : null}
+					<SidebarAccountAvatar account={githubAccount} />
+					{!collapsed ? <span className="truncate">{githubLabel}</span> : null}
 				</NavLink>
 			</div>
 		</aside>
+	);
+}
+
+function SidebarAccountAvatar({ account }: { account: ForgeAccount | null }) {
+	if (account?.avatarUrl) {
+		return (
+			<img
+				src={account.avatarUrl}
+				alt=""
+				className="h-4 w-4 shrink-0 rounded-full border border-inferay-gray-border object-cover"
+			/>
+		);
+	}
+
+	return (
+		<span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-gray text-[7px] font-semibold uppercase text-inferay-soft-white">
+			{account?.login ? account.login.slice(0, 2) : <IconUser size={10} />}
+		</span>
 	);
 }
