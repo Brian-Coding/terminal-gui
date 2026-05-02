@@ -128,6 +128,24 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 		return {
 			async run() {
 				try {
+					let lastAssistantMessage = "";
+					const handleEvent = (event: any) => {
+						if (event?.session_id) {
+							const isNewSession = ctx.getSessionId() !== event.session_id;
+							ctx.updateSessionId(event.session_id);
+							if (isNewSession) {
+								ctx.emitAgentEvent({
+									type: "session",
+									providerSessionId: event.session_id,
+								});
+							}
+						}
+						if (event?.type === "result" && typeof event.result === "string") {
+							lastAssistantMessage = event.result;
+						}
+						emitClaudeAgentEvent(event, ctx);
+						ctx.emitChatEvent(event);
+					};
 					const args = [
 						resolveClaudeBinary(),
 						"-p",
@@ -163,36 +181,10 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 						const { done, value } = await reader.read();
 						if (done) break;
 						leftover += decoder.decode(value, { stream: true });
-						leftover = parseNdjsonLines(leftover, (event) => {
-							if (event?.session_id) {
-								const isNewSession = ctx.getSessionId() !== event.session_id;
-								ctx.updateSessionId(event.session_id);
-								if (isNewSession) {
-									ctx.emitAgentEvent({
-										type: "session",
-										providerSessionId: event.session_id,
-									});
-								}
-							}
-							emitClaudeAgentEvent(event, ctx);
-							ctx.emitChatEvent(event);
-						});
+						leftover = parseNdjsonLines(leftover, handleEvent);
 					}
 
-					flushNdjsonLeftover(leftover, (event) => {
-						if (event?.session_id) {
-							const isNewSession = ctx.getSessionId() !== event.session_id;
-							ctx.updateSessionId(event.session_id);
-							if (isNewSession) {
-								ctx.emitAgentEvent({
-									type: "session",
-									providerSessionId: event.session_id,
-								});
-							}
-						}
-						emitClaudeAgentEvent(event, ctx);
-						ctx.emitChatEvent(event);
-					});
+					flushNdjsonLeftover(leftover, handleEvent);
 
 					const exitCode = await proc.exited;
 					proc = null;
@@ -205,10 +197,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 						type: "finish",
 						reason: exitCode === 0 ? "completed" : `exit:${exitCode}`,
 					});
+					return lastAssistantMessage ? { lastAssistantMessage } : undefined;
 				} catch (err: any) {
 					const msg = err.message || "Claude encountered an error";
 					ctx.emitAgentEvent({ type: "error", message: msg });
 					ctx.emitSystemMessage(msg);
+					return undefined;
 				}
 			},
 

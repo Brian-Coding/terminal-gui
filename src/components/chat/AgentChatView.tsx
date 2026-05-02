@@ -61,12 +61,14 @@ import {
 	loadStoredModel,
 	loadStoredReasoningLevel,
 	loadStoredSessionId,
+	loadStoredSummary,
 	saveStoredCheckpoints,
 	saveStoredInput,
 	saveStoredMessages,
 	saveStoredModel,
 	saveStoredReasoningLevel,
 	saveStoredSessionId,
+	saveStoredSummary,
 } from "./chat-session-store.ts";
 import {
 	appendMessageContent,
@@ -181,10 +183,34 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				: "low";
 		});
 		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+		const summaryRef = useRef<string | null>(loadStoredSummary(paneId));
+		const titleRequestedRef = useRef(false);
 		const scheduleMessageSave = useCallback(
 			(nextMessages: ChatMessage[]) => {
 				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 				if (nextMessages.some((message) => message.isStreaming)) return;
+				// Generate AI title from first user message (fire-and-forget)
+				if (!summaryRef.current && !titleRequestedRef.current) {
+					const firstUser = nextMessages.find((m) => m.role === "user");
+					if (firstUser?.content) {
+						titleRequestedRef.current = true;
+						fetch("/api/generate-title", {
+							method: "POST",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify({ message: firstUser.content }),
+						})
+							.then((res) => (res.ok ? res.json() : null))
+							.then((data: { title?: string } | null) => {
+								const title = data?.title?.trim();
+								if (title) {
+									summaryRef.current = title;
+									saveStoredSummary(paneId, title);
+									window.dispatchEvent(new Event("terminal-shell-change"));
+								}
+							})
+							.catch(() => {});
+					}
+				}
 				saveTimerRef.current = setTimeout(() => {
 					saveStoredMessages(paneId, nextMessages);
 				}, 2000);
@@ -1446,8 +1472,6 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				{!hideHeader && (
 					<AgentChatHeader
 						paneId={paneId}
-						cwd={cwd}
-						gitBranch={gitBranch}
 						draggable={draggable}
 						onDragStart={onDragStart}
 						onDragEnd={onDragEnd}
@@ -1582,6 +1606,8 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							mdPreview={mdPreview}
 							setMdPreview={setMdPreview}
 							onMdFileClick={handleMdFileClick}
+							cwd={cwd}
+							gitBranch={gitBranch}
 						/>
 					</div>
 				</div>

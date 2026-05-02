@@ -5,6 +5,7 @@ const CHECKPOINT_KEY_PREFIX = "inferay-checkpoints-";
 const MODEL_KEY_PREFIX = "inferay-chat-model-";
 const REASONING_KEY_PREFIX = "inferay-chat-reasoning-";
 const PENDING_SEND_KEY_PREFIX = "inferay-chat-pending-send-";
+const SUMMARY_KEY_PREFIX = "inferay-chat-summary-";
 
 export function loadStoredMessages<T>(paneId: string): T[] {
 	try {
@@ -133,10 +134,25 @@ export function saveStoredReasoningLevel(
 	} catch {}
 }
 
+export function loadStoredSummary(paneId: string): string | null {
+	try {
+		return localStorage.getItem(SUMMARY_KEY_PREFIX + paneId);
+	} catch {
+		return null;
+	}
+}
+
+export function saveStoredSummary(paneId: string, summary: string) {
+	try {
+		localStorage.setItem(SUMMARY_KEY_PREFIX + paneId, summary);
+	} catch {}
+}
+
 export function clearAgentChatMessages(paneId: string) {
 	try {
 		localStorage.removeItem(STORAGE_KEY_PREFIX + paneId);
 		localStorage.removeItem(SESSION_KEY_PREFIX + paneId);
 		localStorage.removeItem(INPUT_KEY_PREFIX + paneId);
+		localStorage.removeItem(SUMMARY_KEY_PREFIX + paneId);
 	} catch {}
 }

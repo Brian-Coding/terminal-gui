@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { getAgentIcon } from "../../lib/agent-ui.tsx";
+import { isChatAgentKind } from "../../lib/agents.ts";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { readStoredBoolean, writeStoredValue } from "../../lib/stored-json.ts";
@@ -10,9 +12,16 @@ import {
 	DEFAULT_ROWS,
 	loadTerminalState,
 	saveTerminalState,
+	type TerminalPaneModel,
 } from "../../lib/terminal-utils.ts";
 import {
+	loadStoredMessages,
+	loadStoredSummary,
+	saveStoredSummary,
+} from "../chat/chat-session-store.ts";
+import {
 	IconCamera,
+	IconChevronRight,
 	IconGitBranch,
 	IconPlus,
 	IconSettings,
@@ -47,26 +56,145 @@ const navItems: NavItem[] = [
 
 const logoUrl = resolveServerUrl("/logo.png");
 
+// Track which panes have a pending title request to avoid duplicates
+const pendingTitleRequests = new Set<string>();
+
+function getPaneBaseFolder(pane: TerminalPaneModel): string {
+	return pane.cwd?.split("/").filter(Boolean).pop() || "No folder";
+}
+
+function deriveSummary(paneId: string): string | null {
+	const existing = loadStoredSummary(paneId);
+	if (existing) return existing;
+	// Try to derive from stored messages
+	const messages = loadStoredMessages<{ role: string; content: string }>(
+		paneId
+	);
+	const firstUser = messages.find((m) => m.role === "user");
+	if (!firstUser?.content) return null;
+	// Fire off AI title generation in background
+	if (!pendingTitleRequests.has(paneId)) {
+		pendingTitleRequests.add(paneId);
+		fetch("/api/generate-title", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ message: firstUser.content }),
+		})
+			.then((res) => (res.ok ? res.json() : null))
+			.then((data: { title?: string } | null) => {
+				const title = data?.title?.trim();
+				if (title) {
+					saveStoredSummary(paneId, title);
+					window.dispatchEvent(new Event("terminal-shell-change"));
+				}
+			})
+			.catch(() => {})
+			.finally(() => pendingTitleRequests.delete(paneId));
+	}
+	// Return a temporary placeholder from the first line while AI generates
+	const text = firstUser.content.trim().split("\n")[0] ?? "";
+	return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+}
+
+function PaneSummaryItem({
+	pane,
+	isActive,
+	onClick,
+}: {
+	pane: TerminalPaneModel;
+	isActive: boolean;
+	onClick: () => void;
+}) {
+	const isChat = isChatAgentKind(pane.agentKind);
+	const summary = isChat ? deriveSummary(pane.id) : null;
+	const dirName = pane.cwd?.split("/").pop();
+	const primaryLabel = isChat
+		? (summary ?? pane.title)
+		: (dirName ?? pane.title);
+	const secondaryLabel = isChat ? (dirName ?? pane.title) : null;
+
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className={`group/pane mx-1.5 mb-0.5 flex w-[calc(100%-12px)] items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
+				isActive
+					? "bg-inferay-gray/60 text-inferay-white"
+					: "text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
+			}`}
+		>
+			<span className="mt-0.5 shrink-0">
+				{isChat ? (
+					getAgentIcon(pane.agentKind, 12, "opacity-60")
+				) : (
+					<IconTerminal size={12} className="opacity-60" />
+				)}
+			</span>
+			<div className="min-w-0 flex-1">
+				<p className="truncate text-[10px] font-medium leading-tight">
+					{primaryLabel}
+				</p>
+				{secondaryLabel && secondaryLabel !== primaryLabel && (
+					<p className="mt-0.5 truncate text-[9px] leading-tight text-inferay-muted-gray">
+						{secondaryLabel}
+					</p>
+				)}
+			</div>
+		</button>
+	);
+}
+
 function WorkspaceItem({
 	group,
 	isActive,
 	canDelete,
 	collapsed,
+	selectedPaneId,
 	onSelect,
+	onSelectPane,
 	onDelete,
 	onRename,
 }: {
-	group: { id: string; name: string; panes: unknown[] };
+	group: {
+		id: string;
+		name: string;
+		panes: TerminalPaneModel[];
+		selectedPaneId: string | null;
+	};
 	isActive: boolean;
 	canDelete: boolean;
 	collapsed: boolean;
+	selectedPaneId: string | null;
 	onSelect: () => void;
+	onSelectPane: (paneId: string) => void;
 	onDelete: () => void;
 	onRename: (name: string) => void;
 }) {
+	const [expanded, setExpanded] = useState(isActive);
 	const [editing, setEditing] = useState(false);
 	const [editValue, setEditValue] = useState(group.name);
 	const inputRef = useRef<HTMLInputElement>(null);
+	const paneGroups = useMemo(() => {
+		const byFolder = new Map<string, TerminalPaneModel[]>();
+		for (const pane of group.panes) {
+			const folder = getPaneBaseFolder(pane);
+			const panes = byFolder.get(folder) ?? [];
+			panes.push(pane);
+			byFolder.set(folder, panes);
+		}
+		return Array.from(byFolder.entries())
+			.map(([folder, panes]) => ({ folder, panes }))
+			.sort((a, b) => {
+				if (a.folder === "No folder") return 1;
+				if (b.folder === "No folder") return -1;
+				return a.folder.localeCompare(b.folder);
+			});
+	}, [group.panes]);
+
+	// Auto-expand when workspace becomes active
+	useEffect(() => {
+		if (isActive) setExpanded(true);
+	}, [isActive]);
 
 	useEffect(() => {
 		if (editing) {
@@ -81,6 +209,17 @@ function WorkspaceItem({
 			onRename(trimmed);
 		}
 		setEditing(false);
+	};
+
+	const handleClick = () => {
+		if (isActive) {
+			// Already active — toggle expand/collapse
+			setExpanded((prev) => !prev);
+		} else {
+			// Select this workspace and expand
+			onSelect();
+			setExpanded(true);
+		}
 	};
 
 	if (collapsed) {
@@ -123,57 +262,88 @@ function WorkspaceItem({
 	}
 
 	return (
-		<div
-			className={`group mx-1.5 mb-1 flex h-8 items-center gap-2 rounded-lg border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
-				isActive
-					? "border-inferay-gray-border bg-inferay-gray text-inferay-white"
-					: "border-transparent text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
-			}`}
-			onClick={onSelect}
-		>
-			<IconTerminal size={13} className="shrink-0" />
-			<div className="flex-1 min-w-0">
-				{editing ? (
-					<input
-						ref={inputRef}
-						value={editValue}
-						onChange={(e) => setEditValue(e.target.value)}
-						onBlur={commitRename}
-						onClick={(e) => e.stopPropagation()}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") commitRename();
-							if (e.key === "Escape") setEditing(false);
-						}}
-						className="w-full bg-transparent text-[11px] text-inferay-white outline-none border-b border-inferay-accent"
-					/>
-				) : (
-					<div
-						className="truncate"
-						onDoubleClick={(e) => {
+		<div className="mb-1">
+			<div
+				className={`group mx-1.5 flex h-8 items-center gap-2 rounded-lg border px-2 text-[11px] font-medium cursor-pointer transition-colors ${
+					isActive
+						? "border-inferay-gray-border bg-inferay-gray text-inferay-white"
+						: "border-transparent text-inferay-muted-gray hover:bg-inferay-dark-gray hover:text-inferay-soft-white"
+				}`}
+				onClick={handleClick}
+			>
+				<IconChevronRight
+					size={10}
+					className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+				/>
+				<div className="flex-1 min-w-0">
+					{editing ? (
+						<input
+							ref={inputRef}
+							value={editValue}
+							onChange={(e) => setEditValue(e.target.value)}
+							onBlur={commitRename}
+							onClick={(e) => e.stopPropagation()}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") commitRename();
+								if (e.key === "Escape") setEditing(false);
+							}}
+							className="w-full bg-transparent text-[11px] text-inferay-white outline-none border-b border-inferay-accent"
+						/>
+					) : (
+						<div
+							className="truncate"
+							onDoubleClick={(e) => {
+								e.stopPropagation();
+								setEditValue(group.name);
+								setEditing(true);
+							}}
+						>
+							{group.name}
+						</div>
+					)}
+				</div>
+				<span className="ml-1 text-[9px] text-inferay-muted-gray shrink-0">
+					{group.panes.length}
+				</span>
+				{canDelete && !editing && (
+					<button
+						type="button"
+						onClick={(e) => {
 							e.stopPropagation();
-							setEditValue(group.name);
-							setEditing(true);
+							onDelete();
 						}}
+						className="ml-1 rounded p-0.5 text-inferay-muted-gray opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 shrink-0"
+						title="Delete workspace"
 					>
-						{group.name}
-					</div>
+						<IconTrash size={10} />
+					</button>
 				)}
 			</div>
-			<span className="ml-1 text-[9px] text-inferay-muted-gray shrink-0">
-				{group.panes.length}
-			</span>
-			{canDelete && !editing && (
-				<button
-					type="button"
-					onClick={(e) => {
-						e.stopPropagation();
-						onDelete();
-					}}
-					className="ml-1 rounded p-0.5 text-inferay-muted-gray opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100 shrink-0"
-					title="Delete workspace"
-				>
-					<IconTrash size={10} />
-				</button>
+			{/* Expanded pane list */}
+			{expanded && group.panes.length > 0 && (
+				<div className="mt-1 pb-1">
+					{paneGroups.map(({ folder, panes }) => (
+						<div key={folder} className="mb-1 last:mb-0">
+							<div className="mx-3 mb-0.5 flex items-center gap-1.5 pl-3 text-[8px] font-medium uppercase tracking-[0.12em] text-inferay-muted-gray/60">
+								<span className="h-px w-2 bg-inferay-gray-border/70" />
+								<span className="min-w-0 truncate">{folder}</span>
+								<span className="rounded-sm bg-inferay-white/[0.04] px-1 text-[7px] tabular-nums text-inferay-muted-gray/50">
+									{panes.length}
+								</span>
+							</div>
+							<div className="ml-4 border-l border-inferay-gray-border/35 pl-1">
+								{panes.map((pane) => (
+									<PaneSummaryItem
+										key={pane.id}
+										pane={pane}
+										isActive={isActive && pane.id === selectedPaneId}
+										onClick={() => onSelectPane(pane.id)}
+									/>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
 			)}
 		</div>
 	);
@@ -215,7 +385,7 @@ export function Sidebar() {
 	const selectWorkspace = useCallback(
 		(groupId: string) => {
 			// Optimistic update — render immediately, then persist
-			setWorkspaces((prev) => ({ ...prev, selectedGroupId: groupId }));
+			setWorkspaces((prev) => ({ ...prev, selectedGroupId: groupId as never }));
 			const state = loadTerminalState();
 			if (!state) return;
 			saveTerminalState({ ...state, selectedGroupId: groupId as never });
@@ -225,6 +395,28 @@ export function Sidebar() {
 			}
 		},
 		[navigate]
+	);
+
+	const selectPane = useCallback(
+		(groupId: string, paneId: string) => {
+			const state = loadTerminalState();
+			if (!state) return;
+			const gid = groupId as never;
+			const pid = paneId as never;
+			saveTerminalState({
+				...state,
+				selectedGroupId: gid,
+				groups: state.groups.map((g) =>
+					g.id === groupId ? { ...g, selectedPaneId: pid } : g
+				),
+			});
+			setWorkspaces(loadWorkspaces);
+			window.dispatchEvent(new Event("terminal-shell-change"));
+			if (window.location.hash !== "#/terminal") {
+				navigate("/terminal");
+			}
+		},
+		[navigate, loadWorkspaces]
 	);
 
 	const addWorkspace = useCallback(() => {
@@ -393,7 +585,9 @@ export function Sidebar() {
 							isActive={group.id === workspaces.selectedGroupId}
 							canDelete={workspaces.groups.length > 1}
 							collapsed={collapsed}
+							selectedPaneId={group.selectedPaneId ?? null}
 							onSelect={() => selectWorkspace(group.id)}
+							onSelectPane={(paneId) => selectPane(group.id, paneId)}
 							onDelete={() => removeWorkspace(group.id)}
 							onRename={(name) => renameWorkspace(group.id, name)}
 						/>

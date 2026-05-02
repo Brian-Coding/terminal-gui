@@ -6,6 +6,7 @@ import { gitRoutes } from "./git.ts";
 import { nativeRoutes } from "./native.ts";
 import { promptRoutes } from "./prompts.ts";
 import { terminalRoutes } from "./terminal.ts";
+import { titleRoutes } from "./title.ts";
 export function buildApiRoutes() {
 	return {
 		...configRoutes(),
@@ -16,5 +17,6 @@ export function buildApiRoutes() {
 		...checkpointRoutes(),
 		...promptRoutes(),
 		...gitRoutes(),
+		...titleRoutes(),
 	};
 }

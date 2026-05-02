@@ -1,0 +1,114 @@
+import type { ChatAgentKind } from "../../lib/agents.ts";
+import { getAgentDefinition } from "../../lib/agents.ts";
+import { getAgentAdapter } from "../agents/registry.ts";
+import type { AgentRunContext } from "../agents/types.ts";
+
+interface RunAgentOnceOptions {
+	agentKind: ChatAgentKind;
+	prompt: string;
+	cwd: string;
+	model?: string;
+	reasoningLevel?: string;
+	timeoutMs?: number;
+}
+
+function resolveModel(
+	agentKind: ChatAgentKind,
+	requestedModel?: string
+): string | undefined {
+	const definition = getAgentDefinition(agentKind);
+	if (!definition.models.length) return undefined;
+	if (
+		requestedModel &&
+		definition.models.some((model) => model.id === requestedModel)
+	) {
+		return requestedModel;
+	}
+	return definition.defaultModel || definition.models[0]?.id;
+}
+
+function extractChatResult(event: unknown): string {
+	const value = event as any;
+	if (!value?.type) return "";
+	if (value.type === "result" && typeof value.result === "string") {
+		return value.result;
+	}
+	if (value.type === "content_block_delta") {
+		const delta = value.delta;
+		if (delta?.type === "text_delta" && typeof delta.text === "string") {
+			return delta.text;
+		}
+	}
+	if (value.type === "content_block_start") {
+		const block = value.content_block;
+		if (block?.type === "text" && typeof block.text === "string") {
+			return block.text;
+		}
+	}
+	return "";
+}
+
+export async function runAgentOnce({
+	agentKind,
+	prompt,
+	cwd,
+	model,
+	reasoningLevel,
+	timeoutMs = 30_000,
+}: RunAgentOnceOptions): Promise<string | null> {
+	const adapter = getAgentAdapter(agentKind);
+	let sessionId: string | null = null;
+	let resultText = "";
+	let streamedText = "";
+
+	const ctx: AgentRunContext = {
+		paneId: `one-off-${agentKind}-${Date.now()}`,
+		cwd,
+		model: resolveModel(agentKind, model),
+		reasoningLevel,
+		getSessionId: () => sessionId,
+		updateSessionId: (nextSessionId) => {
+			sessionId = nextSessionId;
+		},
+		emitChatEvent: (event) => {
+			const text = extractChatResult(event);
+			if (!text) return;
+			const value = event as any;
+			if (value?.type === "result") resultText = text;
+			else streamedText += text;
+		},
+		emitAgentEvent: (event) => {
+			if (event.type === "result") resultText = event.text;
+			if (event.type === "text-delta") streamedText += event.text;
+		},
+		emitStatus: () => {},
+		emitActivity: () => {},
+		emitSystemMessage: () => {},
+	};
+
+	const state = adapter.createState(ctx);
+	const handle = adapter.createHandle(prompt, ctx, state);
+	let timeout: ReturnType<typeof setTimeout> | null = null;
+
+	try {
+		const output = await Promise.race([
+			handle.run(),
+			new Promise<never>((_, reject) => {
+				timeout = setTimeout(() => {
+					handle.kill();
+					reject(new Error(`${adapter.displayName} one-off call timed out`));
+				}, timeoutMs);
+			}),
+		]);
+		const lastAssistantMessage =
+			output && typeof output === "object"
+				? output.lastAssistantMessage
+				: undefined;
+		const text = (lastAssistantMessage || resultText || streamedText).trim();
+		return text || null;
+	} catch {
+		return null;
+	} finally {
+		if (timeout) clearTimeout(timeout);
+	}
+}

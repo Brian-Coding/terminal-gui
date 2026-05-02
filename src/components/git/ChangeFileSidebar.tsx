@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { GitFileEntry } from "../../hooks/useGitStatus.ts";
 import {
 	IconChevronRight,
 	IconFolderFill,
 	IconGitCommit,
 	IconPencil,
 	IconPlus,
-} from "../../components/ui/Icons.tsx";
-import type { GitFileEntry } from "../../hooks/useGitStatus.ts";
+	IconSparkles,
+} from "../ui/Icons.tsx";
 
 export interface SelectedFile {
 	path: string;
 	staged: boolean;
 }
 
-/* ── Main EditorSidebar component ─────────────────────── */
+/* ── Main reusable changes sidebar component ──────────── */
 
-export function EditorSidebar({
+export function ChangeFileSidebar({
 	fileViewMode,
 	onFileViewModeChange,
 	mainViewMode,
@@ -43,7 +44,11 @@ export function EditorSidebar({
 	isCommitting,
 	amendMode,
 	onAmendModeChange,
+	cwd,
+	showFileActions = true,
+	showCommitSection = true,
 }: {
+	cwd?: string;
 	fileViewMode: "path" | "tree";
 	onFileViewModeChange: (mode: "path" | "tree") => void;
 	mainViewMode: "diff" | "graph";
@@ -79,10 +84,12 @@ export function EditorSidebar({
 	isCommitting: boolean;
 	amendMode: boolean;
 	onAmendModeChange: (v: boolean) => void;
+	showFileActions?: boolean;
+	showCommitSection?: boolean;
 }) {
 	return (
 		<div className="flex flex-1 flex-col min-w-0">
-			<EditorSidebarHeader
+			<ChangeFileSidebarHeader
 				fileViewMode={fileViewMode}
 				onFileViewModeChange={onFileViewModeChange}
 			/>
@@ -95,9 +102,9 @@ export function EditorSidebar({
 						color="text-inferay-soft-white"
 						selected={selectedFile}
 						onSelect={onSelectFile}
-						actionLabel="Stage"
-						onAction={onStageFile}
-						onActionAll={onStageAll}
+						actionLabel={showFileActions ? "Stage" : undefined}
+						onAction={showFileActions ? onStageFile : undefined}
+						onActionAll={showFileActions ? onStageAll : undefined}
 						viewMode={fileViewMode}
 						minHeight={200}
 						maxHeight={300}
@@ -108,9 +115,9 @@ export function EditorSidebar({
 						color="text-git-added"
 						selected={selectedFile}
 						onSelect={onSelectFile}
-						actionLabel="Unstage"
-						onAction={onUnstageFile}
-						onActionAll={onUnstageAll}
+						actionLabel={showFileActions ? "Unstage" : undefined}
+						onAction={showFileActions ? onUnstageFile : undefined}
+						onActionAll={showFileActions ? onUnstageAll : undefined}
 						viewMode={fileViewMode}
 					/>
 
@@ -189,8 +196,9 @@ export function EditorSidebar({
 				</div>
 			)}
 
-			{hasProject && mainViewMode !== "graph" && (
+			{hasProject && mainViewMode !== "graph" && showCommitSection && (
 				<CommitSection
+					cwd={cwd}
 					commitMessage={commitMessage}
 					onCommitMessageChange={onCommitMessageChange}
 					onCommit={onCommit}
@@ -206,7 +214,7 @@ export function EditorSidebar({
 
 /* ── Sub-components ───────────────────────────────────── */
 
-function EditorSidebarHeader({
+export function ChangeFileSidebarHeader({
 	fileViewMode,
 	onFileViewModeChange,
 }: {
@@ -250,6 +258,7 @@ function EditorSidebarHeader({
 }
 
 function CommitSection({
+	cwd,
 	commitMessage,
 	onCommitMessageChange,
 	onCommit,
@@ -258,6 +267,7 @@ function CommitSection({
 	onAmendModeChange,
 	stagedCount,
 }: {
+	cwd?: string;
 	commitMessage: string;
 	onCommitMessageChange: (msg: string) => void;
 	onCommit: () => void;
@@ -266,8 +276,30 @@ function CommitSection({
 	onAmendModeChange: (v: boolean) => void;
 	stagedCount: number;
 }) {
+	const [generating, setGenerating] = useState(false);
 	const summary = commitMessage.split("\n")[0] || "";
 	const description = commitMessage.split("\n").slice(1).join("\n");
+
+	const generateMessage = async () => {
+		if (!cwd || !stagedCount || generating) return;
+		setGenerating(true);
+		try {
+			const res = await fetch("/api/git/generate-commit-message", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ cwd }),
+			});
+			if (!res.ok) return;
+			const data = (await res.json()) as { message?: string };
+			if (data.message) {
+				onCommitMessageChange(data.message);
+			}
+		} catch {
+			// ignore
+		} finally {
+			setGenerating(false);
+		}
+	};
 
 	return (
 		<div className="shrink-0 border-t border-inferay-gray-border">
@@ -279,6 +311,19 @@ function CommitSection({
 						Commit
 					</span>
 				</div>
+				<button
+					type="button"
+					onClick={generateMessage}
+					disabled={!stagedCount || generating || !cwd}
+					title="Generate commit message from staged changes"
+					className="flex items-center gap-1 rounded-md border border-inferay-gray-border/50 bg-inferay-dark-gray px-1.5 py-0.5 text-[8px] font-medium text-inferay-muted-gray hover:text-inferay-soft-white hover:border-inferay-gray-border transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+				>
+					<IconSparkles
+						size={10}
+						className={generating ? "animate-pulse" : ""}
+					/>
+					{generating ? "Generating..." : "Generate"}
+				</button>
 			</div>
 
 			{/* Amend toggle */}
@@ -435,7 +480,7 @@ function CommitDetailsPanel({
 	);
 }
 
-function FileStatusIcon({ status }: { status: string }) {
+export function FileStatusIcon({ status }: { status: string }) {
 	const base =
 		"shrink-0 flex items-center justify-center w-[18px] h-[18px] rounded-sm text-[9px] font-bold leading-none";
 	switch (status) {
@@ -652,7 +697,7 @@ function TreeNodeRow({
 	);
 }
 
-function FileGroup({
+export function FileGroup({
 	title,
 	files,
 	selected,

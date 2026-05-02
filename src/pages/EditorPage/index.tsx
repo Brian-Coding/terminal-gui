@@ -16,6 +16,10 @@ import type {
 } from "../../components/chat/agent-chat-shared.ts";
 import type { ToolActivity } from "../../components/chat/chat-agent-utils.ts";
 import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
+import {
+	ChangeFileSidebar,
+	type SelectedFile,
+} from "../../components/git/ChangeFileSidebar.tsx";
 import { CommitGraph } from "../../components/git/CommitGraph.tsx";
 import {
 	IconCheck,
@@ -52,18 +56,12 @@ import {
 } from "../../lib/app-theme.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
-	getThemeById,
 	loadTerminalState,
 	type TerminalGroupModel,
 } from "../../lib/terminal-utils.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { type DiffViewMode, GitDiffView } from "../Terminal/GitDiffView.tsx";
 import { TerminalSettingsPanel } from "../Terminal/TerminalSettingsPanel.tsx";
-import {
-	EditorSidebar,
-	FileStatusIcon,
-	type SelectedFile,
-} from "./EditorSidebar.tsx";
 
 interface Session {
 	groupId: string;
@@ -130,9 +128,7 @@ export function EditorPage() {
 	const [selectedFiles, setSelectedFiles] = useState<
 		Record<string, SelectedFile | null>
 	>({});
-	const [agentStatuses, setAgentStatuses] = useState<Map<string, string>>(
-		new Map()
-	);
+	const [, setAgentStatuses] = useState<Map<string, string>>(new Map());
 	const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>("split");
 	const [closedPaneIds, setClosedPaneIds] = useState<Set<string>>(new Set());
 	const [commitMessage, setCommitMessage] = useState("");
@@ -176,7 +172,6 @@ export function EditorPage() {
 		[sessions]
 	);
 	const { projectMap } = useGitStatus(trackedDirs);
-	const theme = useMemo(() => getThemeById(themeId), [themeId]);
 	const {
 		diff,
 		request,
@@ -265,7 +260,7 @@ export function EditorPage() {
 		[loadDiff]
 	);
 
-	const { events: activityEvents } = useActivityFeed({
+	useActivityFeed({
 		paneId: session?.paneId,
 		cwd: session?.cwd,
 	});
@@ -556,7 +551,8 @@ export function EditorPage() {
 									className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
 									onMouseDown={handleSidebarDragStart}
 								/>
-								<EditorSidebar
+								<ChangeFileSidebar
+									cwd={session?.cwd}
 									fileViewMode={fileViewMode}
 									onFileViewModeChange={setFileViewMode}
 									mainViewMode="diff"
@@ -657,7 +653,8 @@ export function EditorPage() {
 							className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
 							onMouseDown={handleSidebarDragStart}
 						/>
-						<EditorSidebar
+						<ChangeFileSidebar
+							cwd={session?.cwd}
 							fileViewMode={fileViewMode}
 							onFileViewModeChange={setFileViewMode}
 							mainViewMode="diff"
@@ -786,7 +783,8 @@ export function EditorPage() {
 									className="w-1 cursor-ew-resize bg-transparent hover:bg-inferay-accent/30 transition-colors shrink-0"
 									onMouseDown={handleSidebarDragStart}
 								/>
-								<EditorSidebar
+								<ChangeFileSidebar
+									cwd={session?.cwd}
 									fileViewMode={fileViewMode}
 									onFileViewModeChange={setFileViewMode}
 									mainViewMode={mainViewMode}

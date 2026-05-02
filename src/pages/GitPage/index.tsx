@@ -13,6 +13,10 @@ import {
 	savePendingSend,
 	saveStoredInput,
 } from "../../components/chat/chat-session-store.ts";
+import {
+	ChangeFileSidebar,
+	type SelectedFile,
+} from "../../components/git/ChangeFileSidebar.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
 	IconGitBranch,
@@ -65,19 +69,6 @@ function persist(dirs: string[]) {
 	writeStoredJson("git-watched-dirs", dirs);
 }
 
-function statusLabel(status: string): string {
-	const labels: Record<string, string> = {
-		M: "modified",
-		A: "added",
-		D: "deleted",
-		R: "renamed",
-		C: "copied",
-		U: "conflict",
-		"?": "new",
-	};
-	return labels[status] ?? status;
-}
-
 interface StoredChatMessage {
 	role?: string;
 	content?: string;
@@ -93,6 +84,7 @@ export function GitPage() {
 	const [pickerError, setPickerError] = useState<string | null>(null);
 	const [actionMessage, setActionMessage] = useState<string | null>(null);
 	const [actionBusy, setActionBusy] = useState<string | null>(null);
+	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("path");
 	const [agentActivityVersion, setAgentActivityVersion] = useState(0);
 	const [openActionMenu, setOpenActionMenu] = useState<"repo" | "file" | null>(
 		null
@@ -113,10 +105,7 @@ export function GitPage() {
 		}
 		return projects[0] || null;
 	}, [projects, activeCwd]);
-	const [selFile, setSelFile] = useState<{
-		path: string;
-		staged: boolean;
-	} | null>(null);
+	const [selFile, setSelFile] = useState<SelectedFile | null>(null);
 	const [checkpointVersion, setCheckpointVersion] = useState(0);
 	const prevCwd = useRef<string | null>(null);
 	const hasAutoSelected = useRef(false);
@@ -253,6 +242,62 @@ export function GitPage() {
 	const modified =
 		project?.files.filter((f) => !f.staged && f.status !== "?") || [];
 	const untracked = project?.files.filter((f) => f.status === "?") || [];
+
+	// ── Commit state & git actions ──
+	const [commitMessage, setCommitMessage] = useState("");
+	const [isCommitting, setIsCommitting] = useState(false);
+	const [amendMode, setAmendMode] = useState(false);
+
+	const gitAction = useCallback(
+		async (endpoint: string, body: object) => {
+			await fetch(`/api/git/${endpoint}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+			refetch();
+		},
+		[refetch]
+	);
+
+	const stageFile = useCallback(
+		(file: string) =>
+			project?.cwd && gitAction("stage", { cwd: project.cwd, file }),
+		[project?.cwd, gitAction]
+	);
+	const unstageFile = useCallback(
+		(file: string) =>
+			project?.cwd && gitAction("unstage", { cwd: project.cwd, file }),
+		[project?.cwd, gitAction]
+	);
+	const stageAll = useCallback(
+		() => project?.cwd && gitAction("stage", { cwd: project.cwd }),
+		[project?.cwd, gitAction]
+	);
+	const unstageAll = useCallback(
+		() => project?.cwd && gitAction("unstage", { cwd: project.cwd }),
+		[project?.cwd, gitAction]
+	);
+
+	const handleCommit = useCallback(async () => {
+		if (!project?.cwd || !commitMessage.trim() || isCommitting) return;
+		setIsCommitting(true);
+		try {
+			const res = await fetch("/api/git/commit", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ cwd: project.cwd, message: commitMessage }),
+			});
+			const result = await res.json();
+			if (result.success) {
+				setCommitMessage("");
+				refetch();
+			}
+		} finally {
+			setIsCommitting(false);
+		}
+	}, [project?.cwd, commitMessage, isCommitting, refetch]);
+
 	const changeSignature = useMemo(
 		() => (project ? createChangeSignature(project.files) : ""),
 		[project]
@@ -915,115 +960,37 @@ export function GitPage() {
 				</div>
 
 				{project && (
-					<div className="w-52 shrink-0 border-l border-inferay-gray-border flex flex-col bg-inferay-black">
-						<div className="flex-1 overflow-y-auto">
-							<FileGroup
-								title="Unstaged"
-								files={[...modified, ...untracked]}
-								color="text-inferay-soft-white"
-								selFile={selFile}
-								onSelect={(p) => selectFile(p, false)}
-							/>
-							<FileGroup
-								title="Staged"
-								files={staged}
-								color="text-git-added"
-								selFile={selFile}
-								onSelect={(p) => selectFile(p, true)}
-							/>
-							{project.files.length === 0 && (
-								<div className="flex items-center justify-center h-full">
-									<p className="text-[10px] text-inferay-muted-gray/40">
-										Clean
-									</p>
-								</div>
-							)}
-						</div>
-						{project.files.length > 0 && (
-							<div className="flex items-center gap-2.5 px-2.5 py-1.5 border-t border-inferay-gray-border text-[8px] text-inferay-muted-gray/60 tabular-nums">
-								{staged.length > 0 && (
-									<span className="flex items-center gap-1">
-										<span className="w-1 h-1 rounded-full bg-git-added" />
-										{staged.length} staged
-									</span>
-								)}
-								{modified.length > 0 && (
-									<span className="flex items-center gap-1">
-										<span className="w-1 h-1 rounded-full bg-git-modified" />
-										{modified.length} modified
-									</span>
-								)}
-								{untracked.length > 0 && (
-									<span className="flex items-center gap-1">
-										<span className="w-1 h-1 rounded-full bg-inferay-muted-gray/30" />
-										{untracked.length}
-									</span>
-								)}
-							</div>
-						)}
+					<div className="w-56 shrink-0 border-l border-inferay-gray-border flex flex-col bg-inferay-black">
+						<ChangeFileSidebar
+							cwd={project.cwd}
+							fileViewMode={fileViewMode}
+							onFileViewModeChange={setFileViewMode}
+							mainViewMode="diff"
+							modified={modified}
+							untracked={untracked}
+							staged={staged}
+							selectedFile={selFile}
+							onSelectFile={(file) => selectFile(file.path, file.staged)}
+							onStageFile={stageFile}
+							onUnstageFile={unstageFile}
+							onStageAll={stageAll}
+							onUnstageAll={unstageAll}
+							hasProject={!!project}
+							selectedCommitHash={null}
+							commitDetailsLoading={false}
+							commitDetails={null}
+							files={project.files}
+							branch={project.branch}
+							commitMessage={commitMessage}
+							onCommitMessageChange={setCommitMessage}
+							onCommit={handleCommit}
+							isCommitting={isCommitting}
+							amendMode={amendMode}
+							onAmendModeChange={setAmendMode}
+						/>
 					</div>
 				)}
 			</div>
-		</div>
-	);
-}
-
-function FileGroup({
-	title,
-	files,
-	color,
-	selFile,
-	onSelect,
-}: {
-	title: string;
-	files: GitFileEntry[];
-	color: string;
-	selFile: { path: string; staged: boolean } | null;
-	onSelect: (path: string) => void;
-}) {
-	if (files.length === 0) return null;
-	return (
-		<div>
-			<div className="sticky top-0 z-10 flex items-center justify-between px-2.5 h-6 border-b border-inferay-gray-border/30 bg-inferay-black">
-				<span
-					className={`text-[8px] font-medium uppercase tracking-[0.1em] ${color}`}
-				>
-					{title}
-				</span>
-				<span className="text-[8px] tabular-nums text-inferay-muted-gray/50">
-					{files.length}
-				</span>
-			</div>
-			{files.map((f) => {
-				const name = f.path.split("/").pop() || f.path;
-				const active = selFile?.path === f.path && selFile?.staged === f.staged;
-				return (
-					<div
-						key={`${f.staged ? "s" : "u"}-${f.path}`}
-						className={`group w-full flex items-center gap-2 px-2.5 h-[26px] text-left transition-colors ${
-							active
-								? "bg-inferay-accent/8 border-l-[2px] border-inferay-accent"
-								: "border-l-[2px] border-transparent hover:bg-inferay-white/[0.03]"
-						}`}
-					>
-						<button
-							type="button"
-							onClick={() => onSelect(f.path)}
-							className="flex min-w-0 flex-1 items-center text-left"
-							title={f.path}
-						>
-							<span
-								className={`min-w-0 flex-1 truncate text-[10.5px] font-mono ${active ? "text-inferay-white" : "text-inferay-soft-white/80"}`}
-							>
-								{name}
-							</span>
-						</button>
-						<span className="shrink-0 rounded border border-inferay-gray-border px-1 py-px text-[7px] uppercase tracking-[0.08em] text-inferay-muted-gray">
-							{statusLabel(f.status)}
-						</span>
-					</div>
-				);
-			})}
 		</div>
 	);
 }

@@ -120,6 +120,7 @@ export interface TerminalPaneModel {
 	cwd?: string;
 	pendingCwd?: boolean;
 	referencePaths?: string[];
+	summary?: string;
 }
 
 export interface TerminalGroupModel {

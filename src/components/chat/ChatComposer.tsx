@@ -9,6 +9,8 @@ import type { AgentKind } from "../../lib/terminal-utils.ts";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import {
 	IconCheck,
+	IconFolder,
+	IconGitBranch,
 	IconPencil,
 	IconPlus,
 	IconTrash,
@@ -89,6 +91,8 @@ export function ChatComposer({
 	setMdPreview,
 	onMdFileClick,
 	statusBar,
+	cwd,
+	gitBranch,
 }: {
 	showInput: boolean;
 	agentKind: AgentKind;
@@ -165,10 +169,13 @@ export function ChatComposer({
 	>;
 	onMdFileClick: (path: string) => void;
 	statusBar?: React.ReactNode;
+	cwd?: string;
+	gitBranch?: string | null;
 }) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const inputHighlights = useMemo(() => renderInputHighlights(input), [input]);
 	const agentDefinition = getAgentDefinition(agentKind);
+	const dirName = cwd ? cwd.split("/").pop() || cwd : null;
 	const modelOptions = useMemo(
 		() =>
 			agentDefinition.models.map((option) => ({
@@ -649,6 +656,28 @@ export function ChatComposer({
 							</div>
 						</div>
 					</div>
+					{(dirName || gitBranch) && (
+						<div className="mt-1 flex min-w-0 items-center gap-2 overflow-hidden px-1 text-[9px] text-inferay-muted-gray">
+							{dirName && (
+								<span
+									className="flex min-w-0 items-center gap-1 truncate"
+									title={cwd}
+								>
+									<IconFolder size={10} className="shrink-0 opacity-70" />
+									<span className="truncate">{dirName}</span>
+								</span>
+							)}
+							{gitBranch && (
+								<span
+									className="flex min-w-0 items-center gap-1 truncate"
+									title={gitBranch}
+								>
+									<IconGitBranch size={10} className="shrink-0 opacity-70" />
+									<span className="truncate">{gitBranch}</span>
+								</span>
+							)}
+						</div>
+					)}
 				</div>
 			)}
 
