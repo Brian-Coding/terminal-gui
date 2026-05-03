@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { lazy, Suspense } from "react";
+import { lazy, type ReactElement, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { BottomTerminalPanel } from "./components/layout/BottomTerminalPanel.tsx";
@@ -7,6 +7,11 @@ import { Sidebar } from "./components/layout/Sidebar.tsx";
 import { TerminalShellHeader } from "./components/layout/TerminalShellHeader.tsx";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary.tsx";
 import { preloadPrompts } from "./hooks/usePrompts.ts";
+import {
+	APP_PAGE_ROUTES,
+	type AppRouteId,
+	DEFAULT_APP_ROUTE,
+} from "./lib/app-navigation.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
 import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
 import { readStoredBoolean } from "./lib/stored-json.ts";
@@ -31,7 +36,7 @@ const TerminalPage = lazy(() =>
 );
 
 const onboardingDone = readStoredBoolean(ONBOARDING_DONE_KEY);
-const defaultRoute = onboardingDone ? "/terminal" : "/onboarding";
+const defaultRoute = onboardingDone ? DEFAULT_APP_ROUTE : "/onboarding";
 
 if (window.location.origin !== getServerOrigin()) {
 	const originalFetch = window.fetch.bind(window);
@@ -77,6 +82,15 @@ if (!rootElement) {
 
 const root = createRoot(rootElement);
 function AppShell() {
+	const routeElements = {
+		terminal: <TerminalPage />,
+		git: <GitPage />,
+		prompts: <PromptsPage />,
+		images: <ImagesPage />,
+		simulators: <SimulatorsPage />,
+		profile: <ProfilePage />,
+	} satisfies Record<AppRouteId, ReactElement>;
+
 	const themeProps = stylex.props(
 		colorTheme,
 		controlSizeTheme,
@@ -100,12 +114,13 @@ function AppShell() {
 					<main className="min-w-0 flex-1 overflow-hidden">
 						<Suspense fallback={null}>
 							<Routes>
-								<Route path="/terminal" element={<TerminalPage />} />
-								<Route path="/git" element={<GitPage />} />
-								<Route path="/prompts" element={<PromptsPage />} />
-								<Route path="/images" element={<ImagesPage />} />
-								<Route path="/simulators" element={<SimulatorsPage />} />
-								<Route path="/profile" element={<ProfilePage />} />
+								{APP_PAGE_ROUTES.map((route) => (
+									<Route
+										key={route.id}
+										path={route.path}
+										element={routeElements[route.id]}
+									/>
+								))}
 							</Routes>
 						</Suspense>
 					</main>

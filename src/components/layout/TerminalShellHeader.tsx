@@ -11,6 +11,12 @@ import {
 	loadDefaultChatSettings,
 	type NEW_PANE_AGENT_KINDS,
 } from "../../lib/agents.ts";
+import {
+	DEFAULT_TERMINAL_MAIN_VIEW,
+	isTerminalMainView,
+	TERMINAL_MAIN_VIEWS,
+	type TerminalMainView,
+} from "../../lib/app-navigation.tsx";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
 	createTerminalPane,
@@ -22,18 +28,12 @@ import { Button } from "../ui/Button.tsx";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import {
-	IconCode,
 	IconCollapse,
 	IconExpand,
-	IconGitBranch,
-	IconGitCommit,
 	IconLayoutGrid,
 	IconLayoutRows,
-	IconMessageCircle,
 	IconPlus,
 } from "../ui/Icons.tsx";
-
-type MainViewMode = "editor" | "chat" | "graph" | "changes";
 
 function loadShellState() {
 	const terminalState = loadTerminalState();
@@ -43,10 +43,9 @@ function loadShellState() {
 		groups: terminalState?.groups ?? [],
 		selectedGroupId:
 			terminalState?.selectedGroupId ?? terminalState?.groups[0]?.id ?? null,
-		mainView:
-			mainView === "chat" || mainView === "graph" || mainView === "changes"
-				? mainView
-				: "editor",
+		mainView: isTerminalMainView(mainView)
+			? mainView
+			: DEFAULT_TERMINAL_MAIN_VIEW,
 		editorZenMode: readStoredValue("terminal-editor-zen") === "true",
 	};
 }
@@ -120,7 +119,7 @@ export function TerminalShellHeader() {
 	}, [showNewMenu]);
 
 	const updateMainView = useCallback(
-		(view: MainViewMode) => {
+		(view: TerminalMainView) => {
 			writeStoredValue("terminal-main-view", view);
 			window.dispatchEvent(new Event("terminal-shell-change"));
 			navigate("/terminal");
@@ -159,6 +158,7 @@ export function TerminalShellHeader() {
 		shellState.groups.find(
 			(group) => group.id === shellState.selectedGroupId
 		) ?? null;
+	const isTerminalRoute = location.pathname === "/terminal";
 
 	const updateLayoutMode = useCallback((mode: "grid" | "rows") => {
 		writeStoredValue("terminal-layout-mode", mode);
@@ -199,32 +199,20 @@ export function TerminalShellHeader() {
 			<div
 				className={`electrobun-webkit-app-region-no-drag ${stylex.props(styles.viewTabs).className ?? ""}`}
 			>
-				<ViewTab
-					active={shellState.mainView === "chat"}
-					icon={<IconMessageCircle size={12} />}
-					label="Chat"
-					onClick={() => updateMainView("chat")}
-				/>
-				<ViewTab
-					active={shellState.mainView === "editor"}
-					icon={<IconCode size={12} />}
-					label="Editor"
-					onClick={() => updateMainView("editor")}
-				/>
-				<ViewTab
-					active={shellState.mainView === "changes"}
-					icon={<IconGitCommit size={12} />}
-					label="Changes"
-					onClick={() => updateMainView("changes")}
-				/>
-				<ViewTab
-					active={shellState.mainView === "graph"}
-					icon={<IconGitBranch size={12} />}
-					label="Graph"
-					onClick={() => updateMainView("graph")}
-				/>
+				{TERMINAL_MAIN_VIEWS.map((view) => {
+					const Icon = view.icon;
+					return (
+						<ViewTab
+							key={view.id}
+							active={isTerminalRoute && shellState.mainView === view.id}
+							icon={<Icon size={12} />}
+							label={view.label}
+							onClick={() => updateMainView(view.id)}
+						/>
+					);
+				})}
 			</div>
-			{location.pathname === "/terminal" && (
+			{isTerminalRoute && (
 				<>
 					<div {...stylex.props(styles.spacer)} />
 					<div

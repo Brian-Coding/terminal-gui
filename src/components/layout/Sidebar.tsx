@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { getAgentIcon } from "../../lib/agent-ui.tsx";
 import { isChatAgentKind } from "../../lib/agents.ts";
+import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { readStoredBoolean, writeStoredValue } from "../../lib/stored-json.ts";
@@ -23,22 +24,13 @@ import {
 } from "../chat/chat-session-store.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import {
-	IconCamera,
 	IconChevronRight,
 	IconPlus,
 	IconSettings,
-	IconSimulator,
-	IconSlash,
 	IconTerminal,
 	IconUser,
 	IconX,
 } from "../ui/Icons.tsx";
-
-interface NavItem {
-	label: string;
-	path: string;
-	icon: React.ComponentType<{ size?: number; className?: string }>;
-}
 
 interface ForgeAccount {
 	provider: "github";
@@ -49,12 +41,6 @@ interface ForgeAccount {
 	email: string | null;
 	active: boolean;
 }
-
-const navItems: NavItem[] = [
-	{ label: "Prompts", path: "/prompts", icon: IconSlash },
-	{ label: "Images", path: "/images", icon: IconCamera },
-	{ label: "Simulators", path: "/simulators", icon: IconSimulator },
-];
 
 const logoUrl = resolveServerUrl("/logo.png");
 
@@ -539,7 +525,7 @@ export function Sidebar() {
 				</button>
 			</div>
 			<nav {...stylex.props(styles.nav)}>
-				{navItems.map((item) => {
+				{SIDEBAR_NAV_ROUTES.map((item) => {
 					const Icon = item.icon;
 					return (
 						<NavLink
