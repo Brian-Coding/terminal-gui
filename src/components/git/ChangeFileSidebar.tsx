@@ -342,6 +342,9 @@ const styles = stylex.create({
 		height: controlSize._9,
 		alignItems: "center",
 		justifyContent: "space-between",
+		borderTopWidth: 1,
+		borderTopStyle: "solid",
+		borderTopColor: color.border,
 		borderBottomWidth: 1,
 		borderBottomStyle: "solid",
 		borderBottomColor: color.border,
@@ -670,7 +673,7 @@ const styles = stylex.create({
 		borderLeftWidth: 2,
 		borderLeftStyle: "solid",
 		borderLeftColor: "transparent",
-		paddingBlock: controlSize._1_5,
+		paddingBlock: controlSize._1,
 		paddingInline: controlSize._3,
 		transitionProperty: "background-color, border-color",
 		transitionDuration: "120ms",
@@ -712,8 +715,8 @@ const styles = stylex.create({
 		overflow: "hidden",
 		textOverflow: "ellipsis",
 		whiteSpace: "nowrap",
-		color: color.textMain,
-		fontSize: font.size_3,
+		color: color.textSoft,
+		fontSize: font.size_2,
 		fontWeight: font.weight_5,
 		lineHeight: 1.3,
 		transitionProperty: "color",
@@ -1415,10 +1418,6 @@ function FileGroup({
 						files.map((f) => {
 							const active =
 								selected?.path === f.path && selected?.staged === f.staged;
-							const name = f.path.split("/").pop() || f.path;
-							const dir = f.path.includes("/")
-								? f.path.slice(0, f.path.lastIndexOf("/"))
-								: "";
 							return (
 								<div
 									key={`${f.staged ? "s" : "u"}-${f.path}`}
@@ -1442,11 +1441,8 @@ function FileGroup({
 												active && styles.activeText
 											)}
 										>
-											{name}
+											{f.path}
 										</span>
-										{dir && (
-											<span {...stylex.props(styles.pathDir)}>{dir}</span>
-										)}
 									</button>
 									{onAction && (
 										<button
