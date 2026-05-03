@@ -1,5 +1,12 @@
 import * as stylex from "@stylexjs/stylex";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type MouseEvent as ReactMouseEvent,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
@@ -7,7 +14,11 @@ import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
 import { fetchJsonOr, postJson } from "../../lib/fetch-json.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
-import { readStoredBoolean, writeStoredValue } from "../../lib/stored-json.ts";
+import {
+	readStoredBoolean,
+	readStoredValue,
+	writeStoredValue,
+} from "../../lib/stored-json.ts";
 import {
 	createGroupId,
 	createPendingAgentChatPane,
@@ -44,12 +55,22 @@ interface ForgeAccount {
 }
 
 const logoUrl = resolveServerUrl("/logo.png");
+const DEFAULT_SIDEBAR_WIDTH = 192;
+const MIN_SIDEBAR_WIDTH = 152;
+const MAX_SIDEBAR_WIDTH = 340;
 
 // Track which panes have a pending title request to avoid duplicates
 const pendingTitleRequests = new Set<string>();
 
 function getPaneBaseFolder(pane: TerminalPaneModel): string {
 	return pane.cwd?.split("/").filter(Boolean).pop() || "No folder";
+}
+
+function loadSidebarWidth() {
+	const stored = Number(readStoredValue("main-sidebar-width"));
+	return Number.isFinite(stored)
+		? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, stored))
+		: DEFAULT_SIDEBAR_WIDTH;
 }
 
 function deriveSummary(paneId: string): string | null {
@@ -245,21 +266,21 @@ function WorkspaceItem({
 
 	return (
 		<div
-			{...stylex.props(styles.workspaceWrap)}
+			{...stylex.props(
+				styles.workspaceWrap,
+				isActive && expanded && styles.workspaceWrapActive
+			)}
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 		>
 			<div
 				{...stylex.props(
 					styles.workspaceHeader,
-					isActive ? styles.workspaceHeaderActive : styles.workspaceHeaderIdle
+					isActive ? styles.workspaceHeaderActive : styles.workspaceHeaderIdle,
+					isActive && expanded && styles.workspaceHeaderInActiveWrap
 				)}
 				onClick={handleClick}
 			>
-				<IconChevronRight
-					size={10}
-					className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-				/>
 				<div {...stylex.props(styles.workspaceNameWrap)}>
 					{editing ? (
 						<input
@@ -290,6 +311,10 @@ function WorkspaceItem({
 				<span {...stylex.props(styles.workspaceCount)}>
 					{group.panes.length}
 				</span>
+				<IconChevronRight
+					size={10}
+					className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+				/>
 				{canDelete && hovered && !editing && (
 					<button
 						type="button"
@@ -339,7 +364,11 @@ export function Sidebar() {
 	const [collapsed, setCollapsed] = useState(() => {
 		return readStoredBoolean("sidebar-collapsed");
 	});
+	const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+	const [resizing, setResizing] = useState(false);
 	const [githubAccount, setGithubAccount] = useState<ForgeAccount | null>(null);
+	const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
+	const resizeWidthRef = useRef(sidebarWidth);
 
 	const isDefault = loadAppThemeId() === "default";
 	const logoImageStyle = useMemo(
@@ -461,6 +490,36 @@ export function Sidebar() {
 		writeStoredValue("sidebar-collapsed", String(collapsed));
 	}, [collapsed]);
 
+	const handleResizeStart = useCallback(
+		(event: ReactMouseEvent<HTMLDivElement>) => {
+			if (collapsed) return;
+			event.preventDefault();
+			setResizing(true);
+			resizeWidthRef.current = sidebarWidth;
+			resizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
+			const handleMove = (moveEvent: MouseEvent) => {
+				if (!resizeRef.current) return;
+				const delta = moveEvent.clientX - resizeRef.current.startX;
+				const nextWidth = Math.min(
+					MAX_SIDEBAR_WIDTH,
+					Math.max(MIN_SIDEBAR_WIDTH, resizeRef.current.startWidth + delta)
+				);
+				resizeWidthRef.current = nextWidth;
+				setSidebarWidth(nextWidth);
+			};
+			const handleUp = () => {
+				resizeRef.current = null;
+				setResizing(false);
+				writeStoredValue("main-sidebar-width", String(resizeWidthRef.current));
+				window.removeEventListener("mousemove", handleMove);
+				window.removeEventListener("mouseup", handleUp);
+			};
+			window.addEventListener("mousemove", handleMove);
+			window.addEventListener("mouseup", handleUp);
+		},
+		[collapsed, sidebarWidth]
+	);
+
 	useEffect(() => {
 		let cancelled = false;
 		async function loadGithubAccount() {
@@ -490,18 +549,28 @@ export function Sidebar() {
 	const githubLabel = githubAccount?.login || githubAccount?.name || "";
 	const shellProps = stylex.props(
 		styles.shell,
-		collapsed ? styles.shellCollapsed : styles.shellOpen
+		collapsed ? styles.shellCollapsed : styles.shellOpen,
+		resizing && styles.shellResizing
 	);
 	const logoBarProps = stylex.props(styles.logoBar);
 	const logoButtonProps = stylex.props(styles.logoButton);
 	const workspaceSectionProps = stylex.props(styles.workspaceSection);
 	const footerProps = stylex.props(styles.footer);
+	const resizeHandleProps = stylex.props(styles.resizeHandle);
 
 	return (
 		<aside
 			{...shellProps}
 			className={`electrobun-webkit-app-region-drag ${shellProps.className ?? ""}`}
+			style={collapsed ? undefined : { width: sidebarWidth }}
 		>
+			{!collapsed && (
+				<div
+					{...resizeHandleProps}
+					className={`electrobun-webkit-app-region-no-drag ${resizeHandleProps.className ?? ""}`}
+					onMouseDown={handleResizeStart}
+				/>
+			)}
 			<div
 				className={`electrobun-webkit-app-region-drag ${logoBarProps.className ?? ""}`}
 			>
@@ -796,6 +865,15 @@ const styles = stylex.create({
 	workspaceWrap: {
 		marginBottom: controlSize._1,
 	},
+	workspaceWrapActive: {
+		backgroundColor: color.accentWash,
+		borderColor: color.border,
+		borderRadius: 10,
+		borderStyle: "solid",
+		borderWidth: 1,
+		marginInline: "0.375rem",
+		paddingBlock: controlSize._0_5,
+	},
 	workspaceHeader: {
 		alignItems: "center",
 		borderRadius: 8,
@@ -831,6 +909,11 @@ const styles = stylex.create({
 		backgroundColor: color.accentWash,
 		borderColor: color.border,
 		color: color.textMain,
+	},
+	workspaceHeaderInActiveWrap: {
+		backgroundColor: "transparent",
+		borderColor: "transparent",
+		marginInline: 0,
 	},
 	workspaceNameWrap: {
 		flex: 1,
@@ -925,6 +1008,26 @@ const styles = stylex.create({
 	},
 	shellOpen: {
 		width: 192,
+	},
+	shellResizing: {
+		transitionDuration: "0ms",
+		transitionProperty: "none",
+		userSelect: "none",
+	},
+	resizeHandle: {
+		position: "absolute",
+		top: 0,
+		right: -2,
+		bottom: 0,
+		zIndex: 30,
+		width: controlSize._1,
+		cursor: "ew-resize",
+		backgroundColor: {
+			default: "transparent",
+			":hover": color.controlActive,
+		},
+		transitionProperty: "background-color",
+		transitionDuration: "120ms",
 	},
 	logoBar: {
 		alignItems: "center",

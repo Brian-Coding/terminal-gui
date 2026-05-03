@@ -8,7 +8,6 @@ import {
 	radius,
 	shadow,
 } from "../../tokens.stylex.ts";
-import { Button } from "../ui/Button.tsx";
 import {
 	IconEye,
 	IconFilePlus,
@@ -182,16 +181,14 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 				</div>
 			)}
 
-			<Button
+			<button
 				type="button"
 				onClick={onStop}
-				variant="secondary"
-				size="sm"
-				className={stylex.props(styles.noShrink).className}
+				{...stylex.props(styles.stopButton)}
 			>
 				<IconStop size={12} {...stylex.props(styles.toolIcon)} />
 				Stop
-			</Button>
+			</button>
 		</div>
 	);
 });
@@ -207,9 +204,6 @@ const styles = stylex.create({
 		paddingInline: controlSize._3,
 	},
 	toolIcon: {
-		flexShrink: 0,
-	},
-	noShrink: {
 		flexShrink: 0,
 	},
 	activityWrap: {
@@ -323,5 +317,34 @@ const styles = stylex.create({
 	idleText: {
 		color: color.textMuted,
 		fontSize: font.size_2,
+	},
+	stopButton: {
+		alignItems: "center",
+		backgroundColor: {
+			default: color.backgroundRaised,
+			":hover": color.controlActive,
+		},
+		borderColor: color.border,
+		borderRadius: radius.md,
+		borderStyle: "solid",
+		borderWidth: 1,
+		color: {
+			default: color.textSoft,
+			":hover": color.textMain,
+		},
+		display: "inline-flex",
+		flexShrink: 0,
+		fontSize: font.size_3,
+		fontWeight: font.weight_5,
+		gap: controlSize._1_5,
+		height: controlSize._6,
+		justifyContent: "center",
+		paddingInline: controlSize._2_5,
+		transitionDuration: motion.durationBase,
+		transitionProperty: "background-color, border-color, color, transform",
+		transitionTimingFunction: motion.ease,
+		":active": {
+			transform: "scale(0.97)",
+		},
 	},
 });

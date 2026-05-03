@@ -20,18 +20,40 @@ export interface GitStatusResult {
 	files: GitFileEntry[];
 }
 
-async function run(args: string[], cwd: string): Promise<string | null> {
+async function run(
+	args: string[],
+	cwd: string,
+	timeoutMs?: number
+): Promise<string | null> {
 	try {
 		const proc = Bun.spawn(["git", ...args], {
 			cwd,
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		// Read stdout and stderr concurrently to prevent deadlocks
-		const [text, exitCode] = await Promise.all([
-			new Response(proc.stdout).text(),
-			proc.exited,
+		let timeout: ReturnType<typeof setTimeout> | null = null;
+		const timeoutPromise =
+			timeoutMs == null
+				? null
+				: new Promise<"timeout">((resolve) => {
+						timeout = setTimeout(() => {
+							try {
+								proc.kill();
+							} catch {}
+							resolve("timeout");
+						}, timeoutMs);
+					});
+		const result = await Promise.race([
+			Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]),
+			...(timeoutPromise ? [timeoutPromise] : []),
 		]);
+		if (timeout) clearTimeout(timeout);
+		if (result === "timeout") return null;
+		const [text, _stderr, exitCode] = result;
 		if (exitCode !== 0) return null;
 		return text;
 	} catch {
@@ -45,10 +67,7 @@ async function runSafe(
 	cwd: string,
 	timeoutMs = 5000
 ): Promise<string | null> {
-	return Promise.race([
-		run(args, cwd),
-		new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-	]);
+	return run(args, cwd, timeoutMs);
 }
 
 async function isGitRepo(cwd: string): Promise<boolean> {
@@ -488,7 +507,7 @@ export async function commit(
 		return { success: false, error: "Commit message is required" };
 	}
 
-	const result = await run(["commit", "-m", message], cwd);
+	const result = await run(["commit", "-m", message], cwd, 30_000);
 	if (result === null) {
 		return { success: false, error: "Commit failed" };
 	}

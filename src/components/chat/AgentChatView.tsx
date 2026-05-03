@@ -99,6 +99,7 @@ interface AgentChatViewProps {
 	sessions?: AgentChatSession[];
 	onSelectSession?: (paneId: string) => void;
 	composerOnly?: boolean;
+	composerOnlyOffsetX?: number;
 	onExitComposerOnly?: () => void;
 	/** Called when user picks directories from empty state picker */
 	onDirectoryChange?: (
@@ -160,6 +161,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			sessions,
 			onSelectSession,
 			composerOnly = false,
+			composerOnlyOffsetX = 0,
 			onExitComposerOnly,
 			onDirectoryChange,
 		},
@@ -200,6 +202,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				: defaults.reasoningLevel;
 		});
 		const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+		const pendingMessageSaveRef = useRef<ChatMessage[] | null>(null);
 		const summaryRef = useRef<string | null>(loadStoredSummary(paneId));
 		const titleRequestedRef = useRef(false);
 		const pendingWorkspacePathsRef = useRef<string[]>([]);
@@ -218,6 +221,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			(nextMessages: ChatMessage[]) => {
 				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 				if (nextMessages.some((message) => message.isStreaming)) return;
+				pendingMessageSaveRef.current = nextMessages;
 				// Generate AI title from first user message (fire-and-forget)
 				if (!summaryRef.current && !titleRequestedRef.current) {
 					const firstUser = nextMessages.find((m) => m.role === "user");
@@ -239,6 +243,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				}
 				saveTimerRef.current = setTimeout(() => {
 					saveStoredMessages(paneId, nextMessages);
+					pendingMessageSaveRef.current = null;
 				}, 2000);
 			},
 			[paneId]
@@ -260,8 +265,11 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		useEffect(
 			() => () => {
 				if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+				if (pendingMessageSaveRef.current) {
+					saveStoredMessages(paneId, pendingMessageSaveRef.current);
+				}
 			},
-			[]
+			[paneId]
 		);
 		const [input, setInputRaw] = useState(() => loadStoredInput(paneId));
 		const pendingSendConsumedRef = useRef(false);
@@ -412,7 +420,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			clearAttachedImages,
 			handleDrop,
 			handlePaste,
-		} = useAgentChatComposerState();
+		} = useAgentChatComposerState(paneId);
 
 		const handleScroll = useCallback(() => {
 			const el = scrollRef.current;
@@ -1531,6 +1539,13 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			<div
 				ref={containerRef}
 				{...stylex.props(styles.root, composerOnly && styles.composerOnlyRoot)}
+				style={
+					composerOnly
+						? {
+								left: `calc(50% + ${composerOnlyOffsetX}px)`,
+							}
+						: undefined
+				}
 				onDragOver={(e) => {
 					e.preventDefault();
 					setIsDragOver(true);
@@ -1765,7 +1780,7 @@ const styles = stylex.create({
 		left: 0,
 		right: 0,
 		bottom: 0,
-		top: "-48px",
+		top: "-36px",
 	},
 	composerFade: {
 		position: "absolute",
@@ -1773,7 +1788,7 @@ const styles = stylex.create({
 		left: 0,
 		right: 0,
 		bottom: "100%",
-		height: "48px",
+		height: "36px",
 	},
 	composerContent: {
 		position: "relative",

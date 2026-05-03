@@ -1,5 +1,4 @@
 import { useCallback, useState } from "react";
-import { postJson } from "../../lib/fetch-json.ts";
 import type { GitProjectStatus } from "./useGitStatus.ts";
 
 export function useGitChangeActions({
@@ -91,17 +90,23 @@ export function useGitChangeActions({
 	const commit = useCallback(async () => {
 		if (!cwd || !commitMessage.trim() || isCommitting) return;
 		setIsCommitting(true);
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 35_000);
 		try {
-			const result = await postJson<{ success?: boolean }>("/api/git/commit", {
-				cwd,
-				message: commitMessage,
+			const response = await fetch("/api/git/commit", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ cwd, message: commitMessage }),
+				signal: controller.signal,
 			});
+			const result = (await response.json()) as { success?: boolean };
 			if (result.success) {
 				setCommitMessage("");
 				if (refetchStatus) void refetchStatus();
 				onRefresh?.();
 			}
 		} finally {
+			clearTimeout(timeout);
 			setIsCommitting(false);
 		}
 	}, [cwd, commitMessage, isCommitting, onRefresh, refetchStatus]);

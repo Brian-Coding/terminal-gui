@@ -8,6 +8,7 @@ import {
 	IconChevronRight,
 	IconFolderFill,
 	IconGitCommit,
+	IconPanelLeft,
 	IconPencil,
 	IconPlus,
 	IconSparkles,
@@ -51,6 +52,7 @@ export function ChangeFileSidebar({
 	cwd,
 	showFileActions = true,
 	showCommitSection = true,
+	onCollapse,
 }: {
 	cwd?: string;
 	fileViewMode: "path" | "tree";
@@ -90,12 +92,14 @@ export function ChangeFileSidebar({
 	onAmendModeChange: (v: boolean) => void;
 	showFileActions?: boolean;
 	showCommitSection?: boolean;
+	onCollapse?: () => void;
 }) {
 	return (
 		<div {...stylex.props(styles.root)}>
 			<ChangeFileSidebarHeader
 				fileViewMode={fileViewMode}
 				onFileViewModeChange={onFileViewModeChange}
+				onCollapse={onCollapse}
 			/>
 
 			{mainViewMode !== "graph" && (
@@ -114,7 +118,6 @@ export function ChangeFileSidebar({
 								selected={selectedFile}
 								onSelect={onSelectFile}
 								actionLabel={showFileActions ? "Stage" : undefined}
-								onAction={showFileActions ? onStageFile : undefined}
 								onActionAll={showFileActions ? onStageAll : undefined}
 								viewMode={fileViewMode}
 							/>
@@ -124,7 +127,6 @@ export function ChangeFileSidebar({
 								selected={selectedFile}
 								onSelect={onSelectFile}
 								actionLabel={showFileActions ? "Unstage" : undefined}
-								onAction={showFileActions ? onUnstageFile : undefined}
 								onActionAll={showFileActions ? onUnstageAll : undefined}
 								viewMode={fileViewMode}
 							/>
@@ -294,6 +296,27 @@ const styles = stylex.create({
 	segmentButtonActive: {
 		backgroundColor: color.controlActive,
 		color: color.textMain,
+	},
+	headerIconButton: {
+		alignItems: "center",
+		backgroundColor: {
+			default: color.backgroundRaised,
+			":hover": color.controlActive,
+		},
+		borderColor: color.border,
+		borderRadius: radius.md,
+		borderStyle: "solid",
+		borderWidth: 1,
+		color: {
+			default: color.textMuted,
+			":hover": color.textMain,
+		},
+		display: "inline-flex",
+		height: controlSize._6,
+		justifyContent: "center",
+		width: controlSize._6,
+		transitionProperty: "background-color, border-color, color",
+		transitionDuration: "120ms",
 	},
 	wipHeader: {
 		position: "sticky",
@@ -829,9 +852,11 @@ const styles = stylex.create({
 function ChangeFileSidebarHeader({
 	fileViewMode,
 	onFileViewModeChange,
+	onCollapse,
 }: {
 	fileViewMode: "path" | "tree";
 	onFileViewModeChange: (mode: "path" | "tree") => void;
+	onCollapse?: () => void;
 }) {
 	return (
 		<div {...stylex.props(styles.sidebarHeader)}>
@@ -861,6 +886,16 @@ function ChangeFileSidebarHeader({
 					Tree
 				</button>
 			</div>
+			{onCollapse && (
+				<button
+					type="button"
+					onClick={onCollapse}
+					title="Hide sidebar"
+					{...stylex.props(styles.headerIconButton)}
+				>
+					<IconPanelLeft size={12} />
+				</button>
+			)}
 		</div>
 	);
 }
@@ -988,7 +1023,7 @@ function CommitSection({
 				<Button
 					type="button"
 					onClick={onCommit}
-					disabled={!commitMessage.trim() || !stagedCount || isCommitting}
+					disabled={!commitMessage.trim() || isCommitting}
 					variant="primary"
 					size="sm"
 					className={stylex.props(styles.commitButton).className}
@@ -998,7 +1033,7 @@ function CommitSection({
 						? "Committing..."
 						: stagedCount
 							? `Commit ${stagedCount} file${stagedCount !== 1 ? "s" : ""}`
-							: "Nothing to commit"}
+							: "Commit"}
 				</Button>
 			</div>
 		</div>

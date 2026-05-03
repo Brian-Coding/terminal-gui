@@ -2,6 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import {
 	lazy,
 	Suspense,
+	type MouseEvent as ReactMouseEvent,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -22,6 +23,7 @@ import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
 	IconGitBranch,
 	IconOpenAI,
+	IconPanelLeft,
 	IconPlus,
 	IconRobot,
 	IconTerminal,
@@ -81,6 +83,11 @@ export function GitPage() {
 	const [openActionMenu, setOpenActionMenu] = useState<"repo" | "file" | null>(
 		null
 	);
+	const [sidebarWidth, setSidebarWidth] = useState(280);
+	const [sidebarVisible, setSidebarVisible] = useState(true);
+	const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(
+		null
+	);
 	const { projects, refetch, applyOptimistic } = useGitStatus(dirs);
 	const {
 		diff,
@@ -113,6 +120,36 @@ export function GitPage() {
 			loadDiff({ cwd: project.cwd, file: path, staged });
 		},
 		[project?.cwd, loadDiff, project]
+	);
+	const handleSidebarDragStart = useCallback(
+		(e: ReactMouseEvent) => {
+			e.preventDefault();
+			sidebarDragRef.current = {
+				startX: e.clientX,
+				startWidth: sidebarWidth,
+			};
+
+			const handleMouseMove = (event: MouseEvent) => {
+				if (!sidebarDragRef.current) return;
+				const delta = sidebarDragRef.current.startX - event.clientX;
+				setSidebarWidth(
+					Math.min(
+						420,
+						Math.max(180, sidebarDragRef.current.startWidth + delta)
+					)
+				);
+			};
+
+			const handleMouseUp = () => {
+				sidebarDragRef.current = null;
+				document.removeEventListener("mousemove", handleMouseMove);
+				document.removeEventListener("mouseup", handleMouseUp);
+			};
+
+			document.addEventListener("mousemove", handleMouseMove);
+			document.addEventListener("mouseup", handleMouseUp);
+		},
+		[sidebarWidth]
 	);
 	useEffect(() => {
 		if (!project || project.files.length === 0) return;
@@ -721,8 +758,15 @@ export function GitPage() {
 					)}
 				</div>
 
-				{project && (
-					<div {...stylex.props(styles.fileSidebar)}>
+				{project && sidebarVisible && (
+					<div
+						{...stylex.props(styles.fileSidebar)}
+						style={{ width: sidebarWidth }}
+					>
+						<div
+							{...stylex.props(styles.sidebarResize)}
+							onMouseDown={handleSidebarDragStart}
+						/>
 						<ChangeFileSidebar
 							cwd={project.cwd}
 							fileViewMode={fileViewMode}
@@ -749,8 +793,19 @@ export function GitPage() {
 							isCommitting={isCommitting}
 							amendMode={amendMode}
 							onAmendModeChange={setAmendMode}
+							onCollapse={() => setSidebarVisible(false)}
 						/>
 					</div>
+				)}
+				{project && !sidebarVisible && (
+					<button
+						type="button"
+						onClick={() => setSidebarVisible(true)}
+						title="Show files sidebar"
+						{...stylex.props(styles.sidebarRestore)}
+					>
+						<IconPanelLeft size={12} />
+					</button>
 				)}
 			</div>
 		</div>
@@ -1033,13 +1088,44 @@ const styles = stylex.create({
 	},
 	fileSidebar: {
 		display: "flex",
-		width: "17.5rem",
 		flexShrink: 0,
-		flexDirection: "column",
+		flexDirection: "row",
 		borderLeftWidth: 1,
 		borderLeftStyle: "solid",
 		borderLeftColor: color.border,
 		backgroundColor: color.background,
+	},
+	sidebarResize: {
+		width: controlSize._1,
+		flexShrink: 0,
+		cursor: "ew-resize",
+		backgroundColor: {
+			default: "transparent",
+			":hover": color.controlActive,
+		},
+		transitionProperty: "background-color",
+		transitionDuration: "120ms",
+	},
+	sidebarRestore: {
+		alignItems: "center",
+		backgroundColor: {
+			default: color.background,
+			":hover": color.controlActive,
+		},
+		borderLeftColor: color.border,
+		borderLeftStyle: "solid",
+		borderLeftWidth: 1,
+		color: {
+			default: color.textMuted,
+			":hover": color.textMain,
+		},
+		cursor: "pointer",
+		display: "flex",
+		flexShrink: 0,
+		justifyContent: "center",
+		transitionProperty: "background-color, color",
+		transitionDuration: "120ms",
+		width: controlSize._8,
 	},
 	actionButton: {
 		height: controlSize._5,

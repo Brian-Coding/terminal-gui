@@ -1,6 +1,7 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { wsClient } from "../../lib/websocket.ts";
+import { loadStoredQueue, saveStoredQueue } from "./chat-session-store.ts";
 
 interface QueuedMessage {
 	id: string;
@@ -25,15 +26,19 @@ interface MarkdownPreviewState {
 
 let queueIdCounter = 0;
 
-export function useAgentChatComposerState() {
+export function useAgentChatComposerState(paneId: string) {
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [attachedImages, setAttachedImages] = useState<AttachedImageState[]>(
 		[]
 	);
 	const attachedImagesRef = useRef(attachedImages);
 	attachedImagesRef.current = attachedImages;
-	const queueRef = useRef<QueuedMessage[]>([]);
-	const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+	const queueRef = useRef<QueuedMessage[]>(
+		loadStoredQueue<QueuedMessage>(paneId)
+	);
+	const [queuedMessages, setQueuedMessagesState] = useState<QueuedMessage[]>(
+		() => queueRef.current
+	);
 	const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
 	const [editingQueueText, setEditingQueueText] = useState("");
 	const [mdPreview, setMdPreview] = useState<MarkdownPreviewState>({
@@ -74,37 +79,53 @@ export function useAgentChatComposerState() {
 		return wsClient.onMessage(handleMessage);
 	}, [mdPreview.loading]);
 
+	const setQueuedMessages = useCallback(
+		(messages: QueuedMessage[]) => {
+			queueRef.current = messages;
+			setQueuedMessagesState(messages);
+			saveStoredQueue(paneId, messages);
+		},
+		[paneId]
+	);
+
 	const queueMessage = useCallback(
 		(text: string, displayText: string, images?: string[]) => {
-			queueRef.current.push({
-				id: String(++queueIdCounter),
-				text,
-				displayText,
-				images: images?.length ? images : undefined,
-			});
-			setQueuedMessages([...queueRef.current]);
+			setQueuedMessages([
+				...queueRef.current,
+				{
+					id: String(++queueIdCounter),
+					text,
+					displayText,
+					images: images?.length ? images : undefined,
+				},
+			]);
 		},
-		[]
+		[setQueuedMessages]
 	);
 
 	const shiftQueuedMessage = useCallback(() => {
-		const next = queueRef.current.shift() ?? null;
-		setQueuedMessages([...queueRef.current]);
+		const [next = null, ...rest] = queueRef.current;
+		setQueuedMessages(rest);
 		return next;
-	}, []);
+	}, [setQueuedMessages]);
 
-	const removeQueuedMessage = useCallback((id: string) => {
-		queueRef.current = queueRef.current.filter((q) => q.id !== id);
-		setQueuedMessages([...queueRef.current]);
-	}, []);
+	const removeQueuedMessage = useCallback(
+		(id: string) => {
+			setQueuedMessages(queueRef.current.filter((q) => q.id !== id));
+		},
+		[setQueuedMessages]
+	);
 
-	const updateQueuedMessage = useCallback((id: string, text: string) => {
-		const item = queueRef.current.find((q) => q.id === id);
-		if (!item) return;
-		item.text = text;
-		item.displayText = text;
-		setQueuedMessages([...queueRef.current]);
-	}, []);
+	const updateQueuedMessage = useCallback(
+		(id: string, text: string) => {
+			setQueuedMessages(
+				queueRef.current.map((item) =>
+					item.id === id ? { ...item, text, displayText: text } : item
+				)
+			);
+		},
+		[setQueuedMessages]
+	);
 
 	const attachImage = useCallback(async (file: File) => {
 		try {

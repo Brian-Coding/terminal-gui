@@ -127,12 +127,15 @@ export function useShikiHighlighter({
 
 	// Initialize highlighter and highlight initial visible lines immediately
 	useEffect(() => {
+		cacheRef.current.clear();
+
 		if (!enabled || !language) {
 			setIsReady(true); // Ready but won't highlight
 			return;
 		}
 
 		let cancelled = false;
+		setIsReady(false);
 
 		async function init() {
 			try {
@@ -166,7 +169,7 @@ export function useShikiHighlighter({
 		return () => {
 			cancelled = true;
 		};
-	}, [enabled, language, theme]);
+	}, [enabled, filePath, language, theme]);
 
 	// Highlight visible lines when range changes
 	useEffect(() => {
@@ -194,11 +197,6 @@ export function useShikiHighlighter({
 			setHighlightVersion((v) => v + 1);
 		}
 	}, [isReady, visibleRange, lines, theme]);
-
-	// Clear cache when lines change significantly
-	useEffect(() => {
-		cacheRef.current.clear();
-	}, [filePath]);
 
 	const getHighlightedLine = useCallback(
 		(lineIdx: number): string | undefined => cacheRef.current.get(lineIdx),

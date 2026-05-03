@@ -21,7 +21,10 @@ import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
 	IconGitBranch,
 	IconLayoutGrid,
+	IconPanelLeft,
+	IconPlus,
 	IconSettings,
+	IconX,
 } from "../../components/ui/Icons.tsx";
 import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
@@ -123,6 +126,7 @@ export function EditorPage() {
 	const [scrollToChange, setScrollToChange] = useState(0);
 	const [zenMode, setZenMode] = useState(loadZenMode);
 	const [sidebarWidth, setSidebarWidth] = useState(280); // Default 17.5rem
+	const [sidebarVisible, setSidebarVisible] = useState(true);
 	const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(
 		null
 	);
@@ -501,48 +505,52 @@ export function EditorPage() {
 			/>
 		);
 
-	const renderSidebar = (showCommitDetails: boolean) => (
-		<div {...stylex.props(styles.sidebarShell)} style={{ width: sidebarWidth }}>
+	const renderSidebar = (showCommitDetails: boolean) =>
+		sidebarVisible ? (
 			<div
-				{...stylex.props(styles.sidebarResize)}
-				onMouseDown={handleSidebarDragStart}
-			/>
-			<ChangeFileSidebar
-				cwd={session?.cwd}
-				fileViewMode={fileViewMode}
-				onFileViewModeChange={setFileViewMode}
-				mainViewMode={showCommitDetails ? mainViewMode : "diff"}
-				modified={modified}
-				untracked={untracked}
-				staged={staged}
-				selectedFile={selectedFile}
-				onSelectFile={(f) =>
-					session?.cwd &&
-					selectFile(session.paneId, {
-						cwd: session.cwd,
-						file: f.path,
-						staged: f.staged,
-					})
-				}
-				onStageFile={stageFile}
-				onUnstageFile={unstageFile}
-				onStageAll={stageAll}
-				onUnstageAll={unstageAll}
-				hasProject={!!project}
-				selectedCommitHash={showCommitDetails ? selectedCommitHash : null}
-				commitDetailsLoading={showCommitDetails && commitDetailsLoading}
-				commitDetails={showCommitDetails ? commitDetails : null}
-				files={files}
-				branch={project?.branch}
-				commitMessage={commitMessage}
-				onCommitMessageChange={setCommitMessage}
-				onCommit={commit}
-				isCommitting={isCommitting}
-				amendMode={amendMode}
-				onAmendModeChange={setAmendMode}
-			/>
-		</div>
-	);
+				{...stylex.props(styles.sidebarShell)}
+				style={{ width: sidebarWidth }}
+			>
+				<div
+					{...stylex.props(styles.sidebarResize)}
+					onMouseDown={handleSidebarDragStart}
+				/>
+				<ChangeFileSidebar
+					cwd={session?.cwd}
+					fileViewMode={fileViewMode}
+					onFileViewModeChange={setFileViewMode}
+					mainViewMode={showCommitDetails ? mainViewMode : "diff"}
+					modified={modified}
+					untracked={untracked}
+					staged={staged}
+					selectedFile={selectedFile}
+					onSelectFile={(f) =>
+						session?.cwd &&
+						selectFile(session.paneId, {
+							cwd: session.cwd,
+							file: f.path,
+							staged: f.staged,
+						})
+					}
+					onStageFile={stageFile}
+					onUnstageFile={unstageFile}
+					onStageAll={stageAll}
+					onUnstageAll={unstageAll}
+					hasProject={!!project}
+					selectedCommitHash={showCommitDetails ? selectedCommitHash : null}
+					commitDetailsLoading={showCommitDetails && commitDetailsLoading}
+					commitDetails={showCommitDetails ? commitDetails : null}
+					files={files}
+					branch={project?.branch}
+					commitMessage={commitMessage}
+					onCommitMessageChange={setCommitMessage}
+					onCommit={commit}
+					isCommitting={isCommitting}
+					amendMode={amendMode}
+					onAmendModeChange={setAmendMode}
+				/>
+			</div>
+		) : null;
 
 	const renderEmptyWorkspace = () => (
 		<EditorWorkspace
@@ -585,6 +593,7 @@ export function EditorPage() {
 							chatRef={chatRef}
 							onStatusChange={handleAgentStatusChange}
 							composerOnly
+							composerOnlyOffsetX={sidebarVisible ? -(sidebarWidth / 2) : 0}
 							onExitComposerOnly={() => updateZenMode(false)}
 						/>
 					}
@@ -611,6 +620,11 @@ export function EditorPage() {
 								mainViewMode={mainViewMode}
 								diffViewMode={diffViewMode}
 								filePath={request?.file}
+								selectedFile={selectedFile}
+								sidebarVisible={sidebarVisible}
+								onStageFile={stageFile}
+								onUnstageFile={unstageFile}
+								onToggleSidebar={() => setSidebarVisible((value) => !value)}
 								onMainViewModeChange={setMainViewMode}
 								onDiffViewModeChange={setDiffViewMode}
 							/>
@@ -698,6 +712,7 @@ function EditorAgentChat({
 	sessions,
 	onSelectSession,
 	composerOnly,
+	composerOnlyOffsetX,
 	onExitComposerOnly,
 }: {
 	session: Session;
@@ -707,6 +722,7 @@ function EditorAgentChat({
 	sessions?: Session[];
 	onSelectSession?: (paneId: string) => void;
 	composerOnly?: boolean;
+	composerOnlyOffsetX?: number;
 	onExitComposerOnly?: () => void;
 }) {
 	return (
@@ -722,6 +738,7 @@ function EditorAgentChat({
 			sessions={sessions}
 			onSelectSession={onSelectSession}
 			composerOnly={composerOnly}
+			composerOnlyOffsetX={composerOnlyOffsetX}
 			onExitComposerOnly={onExitComposerOnly}
 		/>
 	);
@@ -759,15 +776,26 @@ function DiffViewerTopBar({
 	mainViewMode,
 	diffViewMode,
 	filePath,
+	selectedFile,
+	sidebarVisible,
+	onStageFile,
+	onUnstageFile,
+	onToggleSidebar,
 	onMainViewModeChange,
 	onDiffViewModeChange,
 }: {
 	mainViewMode: "diff" | "graph";
 	diffViewMode: DiffViewMode;
 	filePath?: string;
+	selectedFile: SelectedFile | null;
+	sidebarVisible: boolean;
+	onStageFile: (path: string) => void;
+	onUnstageFile: (path: string) => void;
+	onToggleSidebar: () => void;
 	onMainViewModeChange: (mode: "diff" | "graph") => void;
 	onDiffViewModeChange: (mode: DiffViewMode) => void;
 }) {
+	const fileActionTitle = selectedFile?.staged ? "Unstage file" : "Stage file";
 	return (
 		<div {...stylex.props(styles.topBar)}>
 			<div {...stylex.props(styles.segmented)}>
@@ -796,7 +824,21 @@ function DiffViewerTopBar({
 			{filePath && (
 				<span {...stylex.props(styles.filePathLabel)}>{filePath}</span>
 			)}
-
+			{filePath && selectedFile && (
+				<IconButton
+					type="button"
+					title={fileActionTitle}
+					onClick={() =>
+						selectedFile.staged
+							? onUnstageFile(selectedFile.path)
+							: onStageFile(selectedFile.path)
+					}
+					variant="subtle"
+					size="xs"
+				>
+					{selectedFile.staged ? <IconX size={10} /> : <IconPlus size={10} />}
+				</IconButton>
+			)}
 			<span {...stylex.props(styles.spacer)} />
 
 			<div {...stylex.props(styles.segmented)}>
@@ -811,6 +853,14 @@ function DiffViewerTopBar({
 					title="Hunk view"
 					onClick={() => onDiffViewModeChange("hunks")}
 					icon={<IconGitBranch size={11} />}
+				/>
+				<ToolbarButton
+					active={!sidebarVisible}
+					title={
+						sidebarVisible ? "Hide changes sidebar" : "Show changes sidebar"
+					}
+					onClick={onToggleSidebar}
+					icon={<IconPanelLeft size={11} />}
 				/>
 			</div>
 		</div>
@@ -892,10 +942,31 @@ const styles = stylex.create({
 		cursor: "ew-resize",
 		backgroundColor: {
 			default: "transparent",
-			":hover": "rgba(29, 185, 84, 0.3)",
+			":hover": color.controlActive,
 		},
 		transitionProperty: "background-color",
 		transitionDuration: "120ms",
+	},
+	sidebarRestore: {
+		alignItems: "center",
+		backgroundColor: {
+			default: color.background,
+			":hover": color.controlActive,
+		},
+		borderLeftColor: color.border,
+		borderLeftStyle: "solid",
+		borderLeftWidth: 1,
+		color: {
+			default: color.textMuted,
+			":hover": color.textMain,
+		},
+		cursor: "pointer",
+		display: "flex",
+		flexShrink: 0,
+		justifyContent: "center",
+		transitionProperty: "background-color, color",
+		transitionDuration: "120ms",
+		width: controlSize._8,
 	},
 	zenLayout: {
 		position: "relative",
@@ -923,7 +994,7 @@ const styles = stylex.create({
 		borderBottomWidth: 1,
 		borderBottomStyle: "solid",
 		borderBottomColor: color.border,
-		paddingBlock: "0.375rem",
+		paddingBlock: controlSize._1,
 		paddingInline: controlSize._3,
 	},
 	topBarLabel: {
