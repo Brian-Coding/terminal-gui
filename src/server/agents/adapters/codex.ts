@@ -1,12 +1,14 @@
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import {
 	createAgentEnv,
 	resolveAgentBinary,
 } from "../../../features/terminal/terminal-command.ts";
 import { noop } from "../../../lib/data.ts";
 import { basename, trimText as trimSummary } from "../../../lib/format.ts";
+import { isWithinDirectory } from "../../security.ts";
 import { summarizeToolInput } from "../events.ts";
 import {
 	drainStreamToString,
@@ -24,7 +26,11 @@ interface CodexRunState {
 	hasFinalAssistantMessage: boolean;
 	lastAssistantMessage: string;
 	currentToolId: string | null;
+	fileSnapshots: Map<string, string | null>;
+	commandOutputs: Map<string, string>;
 }
+
+const MAX_INLINE_DIFF_CHARS = 80_000;
 
 function extractText(value: any): string {
 	if (!value) return "";
@@ -86,6 +92,47 @@ function summarizeToolEvent(toolName: string, payload: any): string {
 		return `${payload.changes.length} changes`;
 	}
 	return toolName;
+}
+
+function resolveChangedPath(cwd: string, value: unknown): string | null {
+	if (typeof value !== "string" || !value) return null;
+	const absolutePath = isAbsolute(value) ? resolve(value) : resolve(cwd, value);
+	return isWithinDirectory(absolutePath, cwd) ? absolutePath : null;
+}
+
+function getDisplayPath(cwd: string, absolutePath: string): string {
+	const relativePath = relative(cwd, absolutePath);
+	return relativePath &&
+		!relativePath.startsWith("..") &&
+		!isAbsolute(relativePath)
+		? relativePath
+		: absolutePath;
+}
+
+function readSnapshot(path: string): string | null {
+	try {
+		if (!existsSync(path)) return "";
+		const stat = statSync(path);
+		if (!stat.isFile() || stat.size > MAX_INLINE_DIFF_CHARS) return null;
+		return readFileSync(path, "utf8");
+	} catch {
+		return null;
+	}
+}
+
+function getFileChangePaths(cwd: string, item: any): string[] {
+	const changes = Array.isArray(item?.changes) ? item.changes : [];
+	const paths = changes
+		.map((change: any) =>
+			resolveChangedPath(cwd, change?.path ?? change?.file_path ?? change?.file)
+		)
+		.filter((path: string | null): path is string => Boolean(path));
+	if (paths.length > 0) return [...new Set(paths)];
+	const singlePath = resolveChangedPath(
+		cwd,
+		item?.path ?? item?.file_path ?? item?.file
+	);
+	return singlePath ? [singlePath] : [];
 }
 
 function handleCodexEvent(
@@ -161,9 +208,37 @@ function handleCodexEvent(
 		});
 		ctx.emitAgentEvent({ type: "text-delta", text: textDelta });
 	};
+	const emitEditDiff = (
+		absolutePath: string,
+		before: string,
+		after: string
+	) => {
+		if (before === after) return;
+		if (before.length + after.length > MAX_INLINE_DIFF_CHARS) return;
+		const input = {
+			file_path: getDisplayPath(ctx.cwd, absolutePath),
+			old_string: before,
+			new_string: after,
+		};
+		startTool("Edit", input);
+		closeTool();
+	};
+	const emitCommandOutputDelta = (item: any) => {
+		if (typeof item?.aggregated_output !== "string" || !item.aggregated_output)
+			return;
+		const itemId = typeof item.id === "string" ? item.id : "latest";
+		const previousOutput = state.commandOutputs.get(itemId) ?? "";
+		const nextOutput = item.aggregated_output;
+		const delta = nextOutput.startsWith(previousOutput)
+			? nextOutput.slice(previousOutput.length)
+			: nextOutput;
+		if (delta) toolDelta(delta);
+		state.commandOutputs.set(itemId, nextOutput);
+	};
 
 	const eventType = String(event?.type ?? "");
 	const eventText = extractText(event);
+	const item = event?.item;
 
 	if (event?.type === "thread.started" && event.thread_id) {
 		ctx.updateSessionId(event.thread_id);
@@ -171,6 +246,73 @@ function handleCodexEvent(
 	} else if (event?.type === "turn.started") {
 		ctx.emitStatus("thinking", true);
 		ctx.emitAgentEvent({ type: "status", status: "thinking" });
+	} else if (
+		event?.type === "item.started" &&
+		item?.type === "command_execution"
+	) {
+		const payload = {
+			command: item.command ?? "",
+			cwd: ctx.cwd,
+		};
+		ctx.emitStatus("tool:exec", true);
+		ctx.emitActivity({
+			toolName: "exec",
+			summary: summarizeToolEvent("exec", payload),
+			isStreaming: true,
+		});
+		if (typeof item.id === "string") {
+			state.commandOutputs.set(item.id, item.aggregated_output ?? "");
+		}
+		startTool("exec", payload);
+	} else if (
+		event?.type === "item.updated" &&
+		item?.type === "command_execution"
+	) {
+		emitCommandOutputDelta(item);
+	} else if (
+		event?.type === "item.completed" &&
+		item?.type === "command_execution"
+	) {
+		emitCommandOutputDelta(item);
+		if (typeof item.id === "string") {
+			state.commandOutputs.delete(item.id);
+		}
+		closeTool();
+	} else if (event?.type === "item.started" && item?.type === "file_change") {
+		const paths = getFileChangePaths(ctx.cwd, item);
+		for (const path of paths) {
+			state.fileSnapshots.set(path, readSnapshot(path));
+		}
+		const payload = { changes: item.changes ?? paths };
+		ctx.emitStatus("tool:patch", true);
+		ctx.emitActivity({
+			toolName: "patch",
+			summary: summarizeToolEvent("patch", payload),
+			isStreaming: true,
+		});
+		startTool("patch", payload);
+	} else if (event?.type === "item.completed" && item?.type === "file_change") {
+		const paths = getFileChangePaths(ctx.cwd, item);
+		closeTool();
+		for (const path of paths) {
+			const before = state.fileSnapshots.get(path);
+			const after = readSnapshot(path);
+			state.fileSnapshots.delete(path);
+			if (before !== null && before !== undefined && after !== null) {
+				emitEditDiff(path, before, after);
+			}
+		}
+	} else if (
+		event?.type === "item.completed" &&
+		item?.type === "agent_message"
+	) {
+		const text = typeof item.text === "string" ? item.text : extractText(item);
+		if (text) {
+			assistantDelta(text);
+			closeAssistant();
+			state.lastAssistantMessage = text;
+			state.hasFinalAssistantMessage = true;
+		}
 	} else if (event?.type === "agent_message_delta") {
 		assistantDelta(event.delta ?? event.text ?? event.content ?? "");
 		ctx.emitStatus("responding", true);
@@ -298,6 +440,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 			hasFinalAssistantMessage: false,
 			lastAssistantMessage: "",
 			currentToolId: null,
+			fileSnapshots: new Map(),
+			commandOutputs: new Map(),
 		};
 	},
 

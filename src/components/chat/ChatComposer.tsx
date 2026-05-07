@@ -21,9 +21,12 @@ import {
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import {
+	IconAlertTriangle,
 	IconCheck,
+	IconMic,
 	IconPencil,
 	IconPlus,
+	IconStop,
 	IconTrash,
 	IconX,
 } from "../ui/Icons.tsx";
@@ -93,6 +96,7 @@ export function ChatComposer({
 	setMdPreview,
 	onMdFileClick,
 	statusBar,
+	voiceInput,
 }: {
 	showInput: boolean;
 	agentKind: AgentKind;
@@ -170,6 +174,12 @@ export function ChatComposer({
 	>;
 	onMdFileClick: (path: string) => void;
 	statusBar?: React.ReactNode;
+	voiceInput?: {
+		error: string | null;
+		isListening: boolean;
+		isSupported: boolean;
+		onToggleListening: () => void;
+	};
 }) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const usePlainTextarea = input.length > HIGHLIGHT_CHAR_LIMIT;
@@ -424,16 +434,60 @@ export function ChatComposer({
 						)}
 
 						<div {...stylex.props(styles.inputRow)}>
-							<IconButton
-								type="button"
-								onClick={() => fileInputRef.current?.click()}
-								variant="ghost"
-								size="md"
-								className="shrink-0"
-								title="Attach image"
-							>
-								<IconPlus size={16} />
-							</IconButton>
+							<div {...stylex.props(styles.inputActions)}>
+								<IconButton
+									type="button"
+									onClick={() => fileInputRef.current?.click()}
+									variant="ghost"
+									size="md"
+									className="shrink-0"
+									title="Attach image"
+								>
+									<IconPlus size={16} />
+								</IconButton>
+								{voiceInput && (
+									<IconButton
+										type="button"
+										onClick={voiceInput.onToggleListening}
+										variant="ghost"
+										size="md"
+										className={`shrink-0 ${
+											stylex.props(
+												voiceInput.isListening && styles.voiceButtonListening,
+												!voiceInput.isListening &&
+													voiceInput.error &&
+													styles.voiceButtonError
+											).className ?? ""
+										}`}
+										title={
+											voiceInput.error && !voiceInput.isListening
+												? voiceInput.error
+												: voiceInput.isSupported
+													? voiceInput.isListening
+														? "Stop voice input"
+														: "Start voice input"
+													: "Voice input is not supported in this browser"
+										}
+										aria-label={
+											voiceInput.isListening
+												? "Stop voice input"
+												: voiceInput.error
+													? voiceInput.error
+													: "Start voice input"
+										}
+										aria-pressed={voiceInput.isListening}
+										disabled={!voiceInput.isSupported}
+									>
+										{voiceInput.isListening ? (
+											<IconStop size={13} />
+										) : voiceInput.error ? (
+											<IconAlertTriangle size={15} />
+										) : (
+											<IconMic size={16} />
+										)}
+									</IconButton>
+								)}
+							</div>
 
 							<div
 								{...stylex.props(styles.textAreaWrap)}
@@ -1085,9 +1139,24 @@ const styles = stylex.create({
 	inputRow: {
 		alignItems: "flex-end",
 		display: "flex",
-		gap: controlSize._2,
+		gap: controlSize._1,
 		paddingBlock: "0.375rem",
-		paddingInline: controlSize._3,
+		paddingLeft: controlSize._1,
+		paddingRight: controlSize._3,
+	},
+	inputActions: {
+		alignItems: "center",
+		display: "flex",
+		flexShrink: 0,
+		gap: controlSize._0_5,
+	},
+	voiceButtonListening: {
+		backgroundColor: color.accentWash,
+		color: color.textSoft,
+	},
+	voiceButtonError: {
+		backgroundColor: color.warningWash,
+		color: color.warning,
 	},
 	textAreaWrap: {
 		flex: 1,

@@ -92,6 +92,7 @@ import {
 } from "./chat-state-utils.ts";
 import { useAgentChatComposerState } from "./useAgentChatComposerState.ts";
 import { useAgentChatMenus } from "./useAgentChatMenus.ts";
+import { useSpeechToText } from "./useSpeechToText.ts";
 
 interface AgentChatViewProps {
 	paneId: string;
@@ -292,6 +293,13 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			},
 			[paneId]
 		);
+		const {
+			cancelListening: cancelSpeechListening,
+			error: speechError,
+			isListening: isSpeechListening,
+			isSupported: isSpeechSupported,
+			toggleListening: toggleSpeechListening,
+		} = useSpeechToText({ value: input, onChange: setInput });
 
 		const cwdList = useMemo(() => (cwd ? [cwd] : []), [cwd]);
 		const { projects: gitProjects } = useGitStatus(cwdList);
@@ -1335,6 +1343,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		const sendMessage = useCallback(() => {
 			const text = input.trim();
 			if (!text && attachedImages.length === 0) return;
+			cancelSpeechListening();
 			if (text.startsWith("/") && !text.includes(" ")) {
 				const cmdName = text.slice(1).toLowerCase();
 				const cmd = allCommands.find((c) => c.name.toLowerCase() === cmdName);
@@ -1394,6 +1403,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			setInput,
 			setFileMenu,
 			setSlashMenu,
+			cancelSpeechListening,
 		]);
 
 		function handleMenuKey<S extends { show: boolean; selectedIdx: number }>(
@@ -1703,6 +1713,12 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							mdPreview={mdPreview}
 							setMdPreview={setMdPreview}
 							onMdFileClick={handleMdFileClick}
+							voiceInput={{
+								error: speechError,
+								isListening: isSpeechListening,
+								isSupported: isSpeechSupported,
+								onToggleListening: toggleSpeechListening,
+							}}
 						/>
 					</div>
 				</div>

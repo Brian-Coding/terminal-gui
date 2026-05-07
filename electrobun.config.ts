@@ -24,6 +24,12 @@ const config: ElectrobunConfig = {
 			codesign: false,
 			notarize: false,
 			createDmg: true,
+			entitlements: {
+				"com.apple.security.device.microphone":
+					"inferay uses the microphone to transcribe voice input into chat drafts.",
+				"com.apple.security.personal-information.speech-recognition":
+					"inferay uses speech recognition to convert spoken words into chat text.",
+			},
 		},
 	},
 	scripts: {

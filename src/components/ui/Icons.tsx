@@ -79,6 +79,7 @@ export const {
 	IconLayoutRows,
 	IconFolder,
 	IconFolderOpen,
+	IconMic,
 	IconPencil,
 	IconGlobe,
 	IconWrench,
@@ -183,6 +184,12 @@ export const {
 	IconFolderOpen: icon([
 		"M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v1",
 		"M5 21l3-9h16l-3 9",
+	]),
+	IconMic: icon([
+		"M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z",
+		"M19 10v2a7 7 0 0 1-14 0v-2",
+		"M12 19v3",
+		"M8 22h8",
 	]),
 	IconPencil: icon(["M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"]),
 	IconGlobe: icon([
