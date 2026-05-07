@@ -13,7 +13,7 @@ import { useNavigate } from "react-router-dom";
 import {
 	savePendingSend,
 	saveStoredInput,
-} from "../../components/chat/chat-session-store.ts";
+} from "../../features/chat/chat-session-store.ts";
 import {
 	ChangeFileSidebar,
 	type SelectedFile,
@@ -39,10 +39,20 @@ import {
 	buildReviewPrompt as composeReviewPrompt,
 	createChangeSignature,
 } from "../../features/git/changes-workspace.ts";
+import {
+	isStagedChange,
+	isUnstagedTrackedChange,
+	isUntrackedChange,
+	orderGitFiles,
+	orderProjectGitFiles,
+} from "../../lib/git-file-utils.ts";
+import { hasCwd, lacksValue } from "../../lib/data.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
 import { useGitChangeActions } from "../../features/git/useGitChangeActions.ts";
 import { useGitDiff } from "../../features/git/useGitDiff.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
+	appendPaneToGroup,
 	createGroupId,
 	createTerminalPane,
 	DEFAULT_FONT_FAMILY,
@@ -68,6 +78,14 @@ const GitDiffView = lazy(() =>
 
 function persist(dirs: string[]) {
 	writeStoredJson("git-watched-dirs", dirs);
+}
+
+function selectRepositoryPath(
+	addRepo: (path: string) => void | Promise<void>,
+	closePicker: () => void,
+	path: string | null
+): void {
+	path ? void addRepo(path) : closePicker();
 }
 
 export function GitPage() {
@@ -98,7 +116,7 @@ export function GitPage() {
 	} = useGitDiff();
 	const project = useMemo(() => {
 		if (activeCwd) {
-			const found = projects.find((p) => p.cwd === activeCwd);
+			const found = projects.find(hasCwd.bind(null, activeCwd));
 			if (found) return found;
 		}
 		return projects[0] || null;
@@ -107,12 +125,10 @@ export function GitPage() {
 	const [checkpointVersion, setCheckpointVersion] = useState(0);
 	const prevCwd = useRef<string | null>(null);
 	const hasAutoSelected = useRef(false);
-	const allFiles = useMemo(() => {
-		if (!project) return [];
-		const unstaged = project.files.filter((f) => !f.staged);
-		const staged = project.files.filter((f) => f.staged);
-		return [...unstaged, ...staged];
-	}, [project]);
+	const allFiles = useMemo(
+		(orderProjectGitFiles<SelectedFile>).bind(null, project),
+		[project]
+	);
 	const selectFile = useCallback(
 		(path: string, staged: boolean) => {
 			if (!project) return;
@@ -187,8 +203,7 @@ export function GitPage() {
 			const next = allFiles[nextIdx]!;
 			selectFile(next.path, next.staged);
 		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
+		return listenWindowEvent("keydown", handler);
 	}, [project, allFiles, selFile, selectFile]);
 
 	const switchRepo = useCallback(
@@ -227,7 +242,7 @@ export function GitPage() {
 
 	const removeRepo = useCallback(
 		(cwd: string) => {
-			const next = dirs.filter((d) => d !== cwd);
+			const next = dirs.filter(lacksValue.bind(null, cwd));
 			setDirs(next);
 			persist(next);
 			if (activeCwd === cwd) {
@@ -245,10 +260,9 @@ export function GitPage() {
 		setPickerError(null);
 	}, []);
 
-	const staged = project?.files.filter((f) => f.staged) || [];
-	const modified =
-		project?.files.filter((f) => !f.staged && f.status !== "?") || [];
-	const untracked = project?.files.filter((f) => f.status === "?") || [];
+	const staged = project?.files.filter(isStagedChange) || [];
+	const modified = project?.files.filter(isUnstagedTrackedChange) || [];
+	const untracked = project?.files.filter(isUntrackedChange) || [];
 
 	const {
 		commit: handleCommit,
@@ -326,15 +340,7 @@ export function GitPage() {
 				}
 			}
 			saveTerminalState({
-				groups: groups.map((group) =>
-					group.id === selectedGroupId
-						? {
-								...group,
-								panes: [...group.panes, pane],
-								selectedPaneId: pane.id,
-							}
-						: group
-				),
+				groups: groups.map(appendPaneToGroup.bind(null, selectedGroupId, pane)),
 				selectedGroupId,
 				themeId: existing?.themeId ?? ("default" as const),
 				fontSize: existing?.fontSize ?? DEFAULT_FONT_SIZE,
@@ -477,8 +483,7 @@ export function GitPage() {
 				void copyCommitMessage();
 			}
 		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
+		return listenWindowEvent("keydown", handler);
 	}, [copyCommitMessage, openReviewPane, refreshProject]);
 
 	if (dirs.length === 0 && !pickerOpen) {
@@ -494,7 +499,7 @@ export function GitPage() {
 					</p>
 					<Button
 						type="button"
-						onClick={() => setPickerOpen(true)}
+						onClick={setPickerOpen.bind(null, true)}
 						variant="secondary"
 						size="sm"
 					>
@@ -513,7 +518,7 @@ export function GitPage() {
 						<div {...stylex.props(styles.errorNotice)}>{pickerError}</div>
 					)}
 					<InlineDirectoryPicker
-						onSelect={(p) => (p ? void addRepo(p) : closePicker())}
+						onSelect={selectRepositoryPath.bind(null, addRepo, closePicker)}
 						onCancel={closePicker}
 					/>
 				</div>
@@ -559,7 +564,7 @@ export function GitPage() {
 				</div>
 				<IconButton
 					type="button"
-					onClick={() => setPickerOpen(true)}
+					onClick={setPickerOpen.bind(null, true)}
 					variant="subtle"
 					size="xs"
 					className={stylex.props(styles.addRepoButton).className}
@@ -608,7 +613,7 @@ export function GitPage() {
 						<IconButton
 							type="button"
 							title="Open terminal here"
-							onClick={() => openPane("terminal")}
+							onClick={openPane.bind(null, "terminal", undefined, undefined)}
 							variant="ghost"
 							size="xs"
 						>
@@ -617,7 +622,7 @@ export function GitPage() {
 						<IconButton
 							type="button"
 							title="Open Claude here"
-							onClick={() => openPane("claude")}
+							onClick={openPane.bind(null, "claude", undefined, undefined)}
 							variant="ghost"
 							size="xs"
 						>
@@ -626,7 +631,7 @@ export function GitPage() {
 						<IconButton
 							type="button"
 							title="Open Codex here"
-							onClick={() => openPane("codex")}
+							onClick={openPane.bind(null, "codex", undefined, undefined)}
 							variant="ghost"
 							size="xs"
 						>
@@ -690,7 +695,11 @@ export function GitPage() {
 									<div {...stylex.props(styles.errorNotice)}>{pickerError}</div>
 								)}
 								<InlineDirectoryPicker
-									onSelect={(p) => (p ? void addRepo(p) : closePicker())}
+									onSelect={selectRepositoryPath.bind(
+										null,
+										addRepo,
+										closePicker
+									)}
 									onCancel={closePicker}
 								/>
 							</div>
@@ -740,15 +749,30 @@ export function GitPage() {
 									<div {...stylex.props(styles.emptyActions)}>
 										<ActionButton
 											label="Open terminal here"
-											onClick={() => openPane("terminal")}
+											onClick={openPane.bind(
+												null,
+												"terminal",
+												undefined,
+												undefined
+											)}
 										/>
 										<ActionButton
 											label="Open Claude here"
-											onClick={() => openPane("claude")}
+											onClick={openPane.bind(
+												null,
+												"claude",
+												undefined,
+												undefined
+											)}
 										/>
 										<ActionButton
 											label="Open Codex here"
-											onClick={() => openPane("codex")}
+											onClick={openPane.bind(
+												null,
+												"codex",
+												undefined,
+												undefined
+											)}
 										/>
 										<ActionButton label="Explain repo" onClick={explainRepo} />
 									</div>

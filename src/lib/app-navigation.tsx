@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { hasId } from "./data.ts";
 import {
 	IconCamera,
 	IconCode,
@@ -8,6 +9,7 @@ import {
 	IconSimulator,
 	IconSlash,
 	IconTarget,
+	IconWorkflow,
 } from "../components/ui/Icons.tsx";
 
 export type AppRouteId =
@@ -15,6 +17,7 @@ export type AppRouteId =
 	| "git"
 	| "prompts"
 	| "goals"
+	| "automations"
 	| "images"
 	| "simulators"
 	| "profile";
@@ -58,6 +61,13 @@ export const APP_PAGE_ROUTES: readonly AppPageRoute[] = [
 		icon: IconTarget,
 	},
 	{
+		id: "automations",
+		label: "Automations",
+		path: "/automations",
+		sidebar: true,
+		icon: IconWorkflow,
+	},
+	{
 		id: "images",
 		label: "Images",
 		path: "/images",
@@ -93,5 +103,5 @@ export const TERMINAL_MAIN_VIEWS = [
 export function isTerminalMainView(
 	value: string | null
 ): value is TerminalMainView {
-	return TERMINAL_MAIN_VIEWS.some((view) => view.id === value);
+	return TERMINAL_MAIN_VIEWS.some(hasId.bind(null, value));
 }

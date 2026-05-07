@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import { type CSSProperties, useEffect, useState } from "react";
+import { formatElapsedMs } from "../../lib/format.ts";
 import { color, controlSize, font, radius } from "../../tokens.stylex.ts";
 
 const SPIRAL_ORDER_5 = [
@@ -170,24 +171,13 @@ export function DotMatrixWeave({
 	);
 }
 
-function formatElapsed(ms: number): string {
-	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-	if (totalSeconds < 60) return `${totalSeconds}s`;
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	if (minutes < 60) return `${minutes}m ${seconds}s`;
-	const hours = Math.floor(minutes / 60);
-	const remMinutes = minutes % 60;
-	return `${hours}h ${remMinutes}m`;
-}
-
 export function ThinkingIndicator({ startTime }: { startTime: number }) {
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
 		const id = window.setInterval(() => setNow(Date.now()), 1000);
 		return () => window.clearInterval(id);
 	}, []);
-	const elapsed = formatElapsed(now - startTime);
+	const elapsed = formatElapsedMs(now - startTime);
 	return (
 		<div
 			{...stylex.props(styles.thinkingRow)}

@@ -1,3 +1,5 @@
+import { basename, trimText as trimSummary } from "../../lib/format.ts";
+
 export type ChatToolMessage = {
 	id: string;
 	role: "user" | "assistant" | "tool" | "system" | "btw";
@@ -12,14 +14,6 @@ export type ToolActivity = {
 	isStreaming: boolean;
 	summary: string;
 };
-
-function basename(value: string): string {
-	return value.split("/").pop() || value;
-}
-
-function trimSummary(value: string, max = 40): string {
-	return value.length > max ? `${value.slice(0, max)}...` : value;
-}
 
 export function normalizeToolName(toolName: string): string {
 	const name = toolName.trim().toLowerCase();
@@ -55,6 +49,33 @@ export function findTriggerAtCursor(
 		index: triggerIdx,
 		query: value.slice(triggerIdx + 1, cursorPos),
 	};
+}
+
+export function hideMenuState<S extends { show: boolean }>(state: S): S {
+	return { ...state, show: false };
+}
+
+export function markRespondingState<S extends { status: string }>(state: S): S {
+	return { ...state, status: "responding" };
+}
+
+export function clearLiveActivities<S extends { liveActivities: unknown[] }>(
+	state: S
+): S {
+	return { ...state, liveActivities: [] };
+}
+
+type ChatLoadingState = {
+	isLoading: boolean;
+	status: string;
+	startTime: number | null;
+};
+
+export function markToolState(
+	toolName: string,
+	state: ChatLoadingState
+): ChatLoadingState {
+	return { ...state, status: `tool:${toolName}` };
 }
 
 function extractToolSummary(content: string): string {

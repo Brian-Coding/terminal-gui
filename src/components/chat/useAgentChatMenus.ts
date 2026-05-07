@@ -1,8 +1,8 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
-import type { SlashCommand } from "./agent-chat-shared.ts";
-import { findTriggerAtCursor } from "./chat-agent-utils.ts";
+import type { SlashCommand } from "../../features/chat/agent-chat-shared.ts";
+import { findTriggerAtCursor, hideMenuState } from "./chat-agent-utils.ts";
 import { applyInlineCompletion } from "./chat-command-utils.ts";
 
 interface MenuPosition {
@@ -99,7 +99,7 @@ export function useAgentChatMenus({
 		const obs = new ResizeObserver(update);
 		obs.observe(inputEl);
 		obs.observe(containerEl);
-		return () => obs.disconnect();
+		return obs.disconnect.bind(obs);
 	}, [containerRef, inputContainerRef]);
 
 	useEffect(
@@ -128,7 +128,7 @@ export function useAgentChatMenus({
 		(value: string, cursorPos: number) => {
 			const trigger = findTriggerAtCursor(value, cursorPos, "/");
 			if (!trigger) {
-				if (slashMenu.show) setSlashMenu((prev) => ({ ...prev, show: false }));
+				if (slashMenu.show) setSlashMenu(hideMenuState);
 				return;
 			}
 
@@ -146,7 +146,7 @@ export function useAgentChatMenus({
 		(value: string, cursorPos: number) => {
 			const trigger = findTriggerAtCursor(value, cursorPos, "@");
 			if (!trigger) {
-				if (fileMenu.show) setFileMenu((prev) => ({ ...prev, show: false }));
+				if (fileMenu.show) setFileMenu(hideMenuState);
 				return;
 			}
 
@@ -191,7 +191,7 @@ export function useAgentChatMenus({
 				`/${cmd.name}`
 			);
 			setInput(nextValue);
-			setSlashMenu((prev) => ({ ...prev, show: false }));
+			setSlashMenu(hideMenuState);
 			requestAnimationFrame(() => {
 				const textarea = textareaRef.current;
 				if (!textarea) return;
@@ -214,7 +214,7 @@ export function useAgentChatMenus({
 				`@${file.path}`
 			);
 			setInput(nextValue);
-			setFileMenu((prev) => ({ ...prev, show: false }));
+			setFileMenu(hideMenuState);
 			requestAnimationFrame(() => {
 				const textarea = textareaRef.current;
 				if (!textarea) return;

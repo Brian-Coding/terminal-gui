@@ -22,8 +22,10 @@ import {
 	type AgentKind,
 	changePaneAgentKind,
 } from "../../features/terminal/terminal-utils.ts";
+import { hasId, hasRole, noop } from "../../lib/data.ts";
 import { postJson } from "../../lib/fetch-json.ts";
 import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { InlineDirectoryPicker } from "../../pages/Terminal/InlineDirectoryPicker.tsx";
 import { color, controlSize, effectValues } from "../../tokens.stylex.ts";
@@ -33,18 +35,23 @@ import { AgentChatStatusBar } from "./AgentChatStatusBar.tsx";
 import {
 	type AgentChatSession,
 	type AttachedImageInfo,
-	addMessage,
+	appendMessage,
+	appendTrimmedMessage,
 	type ChatMessage,
 	type CheckpointInfo,
 	nextId,
 	type QueuedMessageInfo,
 	type SlashCommand,
 	trimMessages,
-} from "./agent-chat-shared.ts";
+} from "../../features/chat/agent-chat-shared.ts";
 import { ChatComposer } from "./ChatComposer.tsx";
 import { ChatMessageList } from "./ChatMessageList.tsx";
 import {
+	clearLiveActivities,
 	extractToolActivities,
+	hideMenuState,
+	markRespondingState,
+	markToolState,
 	type ToolActivity,
 } from "./chat-agent-utils.ts";
 import {
@@ -77,7 +84,7 @@ import {
 	saveStoredReasoningLevel,
 	saveStoredSessionId,
 	saveStoredSummary,
-} from "./chat-session-store.ts";
+} from "../../features/chat/chat-session-store.ts";
 import {
 	appendMessageContent,
 	mergeSyncedMessages,
@@ -184,7 +191,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			const definition = getAgentDefinition(kind);
 			const defaults = loadDefaultChatSettings();
 			return kind === defaults.agentKind &&
-				definition.models.some((model) => model.id === defaults.model)
+				definition.models.some(hasId.bind(null, defaults.model))
 				? defaults.model
 				: definition.defaultModel;
 		}, []);
@@ -192,17 +199,17 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			const stored = loadStoredModel(paneId);
 			const definition = getAgentDefinition(agentKind);
 			const defaults = loadDefaultChatSettings();
-			return definition.models.some((model) => model.id === stored)
+			return definition.models.some(hasId.bind(null, stored))
 				? stored!
 				: agentKind === defaults.agentKind &&
-					  definition.models.some((model) => model.id === defaults.model)
+					  definition.models.some(hasId.bind(null, defaults.model))
 					? defaults.model
 					: definition.defaultModel;
 		});
 		const [selectedReasoningLevel, setSelectedReasoningLevel] = useState(() => {
 			const stored = loadStoredReasoningLevel(paneId);
 			const defaults = loadDefaultChatSettings();
-			return CODEX_REASONING_LEVELS.some((level) => level.id === stored)
+			return CODEX_REASONING_LEVELS.some(hasId.bind(null, stored))
 				? stored!
 				: defaults.reasoningLevel;
 		});
@@ -229,7 +236,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				pendingMessageSaveRef.current = nextMessages;
 				// Generate AI title from first user message (fire-and-forget)
 				if (!summaryRef.current && !titleRequestedRef.current) {
-					const firstUser = nextMessages.find((m) => m.role === "user");
+					const firstUser = nextMessages.find(hasRole.bind(null, "user"));
 					if (firstUser?.content) {
 						titleRequestedRef.current = true;
 						postJson<{ title?: string }>("/api/generate-title", {
@@ -243,7 +250,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 									window.dispatchEvent(new Event("terminal-shell-change"));
 								}
 							})
-							.catch(() => {});
+							.catch(noop);
 					}
 				}
 				saveTimerRef.current = setTimeout(() => {
@@ -319,7 +326,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 		useEffect(() => {
 			const definition = getAgentDefinition(agentKind);
 			if (!definition.models.length) return;
-			if (definition.models.some((model) => model.id === selectedModel)) return;
+			if (definition.models.some(hasId.bind(null, selectedModel))) return;
 			const nextModel = definition.defaultModel;
 			setSelectedModel(nextModel);
 			saveStoredModel(paneId, nextModel);
@@ -496,8 +503,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					scrollToBottom();
 				}
 			};
-			window.addEventListener("keydown", onKeyDown);
-			return () => window.removeEventListener("keydown", onKeyDown);
+			return listenWindowEvent("keydown", onKeyDown);
 		}, [isSelected, isAtBottom, scrollToBottom]);
 
 		useEffect(() => {
@@ -795,15 +801,18 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					saveStoredMessages(paneId, updated);
 					setMessages(updated);
 					const ids = new Set(updated.map((m) => m.id));
+					setLoadingState({
+						isLoading: false,
+						status: "idle",
+						startTime: null,
+					});
 					setChatUiState((prev) => {
 						const pruned = new Set<string>();
 						for (const id of prev.expandedTools) {
 							if (ids.has(id)) pruned.add(id);
 						}
 						return {
-							isLoading: false,
-							status: "idle",
-							startTime: null,
+							...prev,
 							expandedTools:
 								pruned.size === prev.expandedTools.size
 									? prev.expandedTools
@@ -817,7 +826,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					wsClient.send({ type: "chat:reconnect", paneId });
 					sendNextQueuedMessage();
 				} else if (msg.type === "chat:user_message") {
-					setChatUiState((prev) => ({ ...prev, liveActivities: [] }));
+					setChatUiState(clearLiveActivities);
 					setLoadingState({
 						isLoading: true,
 						status: "thinking",
@@ -912,7 +921,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 								startTime: null,
 							};
 						});
-						setChatUiState((prev) => ({ ...prev, liveActivities: [] }));
+						setChatUiState(clearLiveActivities);
 						currentAssistantRef.current = null;
 						currentToolRef.current = null;
 						hasStreamedRef.current = false;
@@ -920,17 +929,14 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				} else if (msg.type === "chat:btw:start") {
 					const id = nextId();
 					currentBtwRef.current = id;
-					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id,
-								role: "btw",
-								content: "",
-								isStreaming: true,
-								btwQuestion: msg.question,
-							},
-						])
+					setMessages(
+						appendTrimmedMessage.bind(null, {
+							id,
+							role: "btw",
+							content: "",
+							isStreaming: true,
+							btwQuestion: msg.question,
+						})
 					);
 				} else if (msg.type === "chat:btw:delta") {
 					const targetId = currentBtwRef.current;
@@ -986,26 +992,20 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						saveStoredCheckpoints(paneId, updated);
 						return updated;
 					});
-					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id: nextId(),
-								role: "system",
-								content: `Reverted ${msg.restoredFiles?.length ?? 0} file(s) to checkpoint`,
-							},
-						])
+					setMessages(
+						appendTrimmedMessage.bind(null, {
+							id: nextId(),
+							role: "system",
+							content: `Reverted ${msg.restoredFiles?.length ?? 0} file(s) to checkpoint`,
+						})
 					);
 				} else if (msg.type === "checkpoint:error") {
-					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{
-								id: nextId(),
-								role: "system",
-								content: `Revert failed: ${msg.error}`,
-							},
-						])
+					setMessages(
+						appendTrimmedMessage.bind(null, {
+							id: nextId(),
+							role: "system",
+							content: `Revert failed: ${msg.error}`,
+						})
 					);
 				}
 			});
@@ -1029,7 +1029,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				if (hasStreamedRef.current) return;
 				for (const block of msg.content) {
 					if (block.type === "text" && block.text) {
-						setLoadingState((prev) => ({ ...prev, status: "responding" }));
+						setLoadingState(markRespondingState);
 						if (currentAssistantRef.current) {
 							const targetId = currentAssistantRef.current;
 							setMessages((prev) => {
@@ -1047,41 +1047,32 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						} else {
 							const id = nextId();
 							currentAssistantRef.current = id;
-							setMessages((prev) =>
-								trimMessages([
-									...prev,
-									{
-										id,
-										role: "assistant",
-										content: block.text,
-										isStreaming: !msg.stop_reason,
-									},
-								])
+							setMessages(
+								appendTrimmedMessage.bind(null, {
+									id,
+									role: "assistant",
+									content: block.text,
+									isStreaming: !msg.stop_reason,
+								})
 							);
 						}
 					} else if (block.type === "tool_use") {
 						const id = nextId();
 						currentAssistantRef.current = null;
 						currentToolRef.current = id;
-						setLoadingState((prev) => ({
-							...prev,
-							status: `tool:${block.name}`,
-						}));
+						setLoadingState(markToolState.bind(null, block.name));
 						const inputStr =
 							typeof block.input === "string"
 								? block.input
 								: JSON.stringify(block.input, null, 2);
-						setMessages((prev) =>
-							trimMessages([
-								...prev,
-								{
-									id,
-									role: "tool",
-									content: inputStr,
-									toolName: block.name,
-									isStreaming: true,
-								},
-							])
+						setMessages(
+							appendTrimmedMessage.bind(null, {
+								id,
+								role: "tool",
+								content: inputStr,
+								toolName: block.name,
+								isStreaming: true,
+							})
 						);
 					}
 				}
@@ -1091,9 +1082,9 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				if (block?.type === "text") {
 					const id = nextId();
 					currentAssistantRef.current = id;
-					setLoadingState((prev) => ({ ...prev, status: "responding" }));
-					setMessages((prev) =>
-						addMessage(prev, {
+					setLoadingState(markRespondingState);
+					setMessages(
+						appendMessage.bind(null, {
 							id,
 							role: "assistant",
 							content: block.text || "",
@@ -1104,12 +1095,9 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					currentAssistantRef.current = null;
 					const id = nextId();
 					currentToolRef.current = id;
-					setLoadingState((prev) => ({
-						...prev,
-						status: `tool:${block.name}`,
-					}));
-					setMessages((prev) =>
-						addMessage(prev, {
+					setLoadingState(markToolState.bind(null, block.name));
+					setMessages(
+						appendMessage.bind(null, {
 							id,
 							role: "tool",
 							content: "",
@@ -1168,7 +1156,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				});
 			} else if (event.type === "result") {
 				if (event.result) {
-					setLoadingState((prev) => ({ ...prev, status: "responding" }));
+					setLoadingState(markRespondingState);
 					if (currentAssistantRef.current) {
 						const targetId = currentAssistantRef.current;
 						setMessages((prev) => {
@@ -1237,28 +1225,26 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 
 		const executeCommand = useCallback(
 			(cmd: SlashCommand, args?: string) => {
-				setCommandMenu((prev) => ({ ...prev, show: false }));
+				setCommandMenu(hideMenuState);
 				setInput("");
 				if (cmd.name === "btw") {
 					const question = (args || "").trim();
 					if (!question) {
-						setMessages((prev) =>
-							trimMessages([
-								...prev,
-								{
-									id: nextId(),
-									role: "system",
-									content: "Usage: /btw <question>",
-								},
-							])
+						setMessages(
+							appendTrimmedMessage.bind(null, {
+								id: nextId(),
+								role: "system",
+								content: "Usage: /btw <question>",
+							})
 						);
 						return;
 					}
-					setMessages((prev) =>
-						trimMessages([
-							...prev,
-							{ id: nextId(), role: "user", content: `/btw ${question}` },
-						])
+					setMessages(
+						appendTrimmedMessage.bind(null, {
+							id: nextId(),
+							role: "user",
+							content: `/btw ${question}`,
+						})
 					);
 					wsClient.send({ type: "chat:btw", paneId, text: question, cwd });
 					return;
@@ -1277,18 +1263,19 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 						const helpText = allCommands
 							.map((c) => `/${c.name} - ${c.description}`)
 							.join("\n");
-						setMessages((prev) =>
-							trimMessages([
-								...prev,
-								{ id: nextId(), role: "system", content: helpText },
-							])
+						setMessages(
+							appendTrimmedMessage.bind(null, {
+								id: nextId(),
+								role: "system",
+								content: helpText,
+							})
 						);
 					}
 				} else {
 					const prompt = getCommandPrompt(cmd, args);
 					const displayText = getCommandDisplayText(cmd, args);
 					if (cmd.id) {
-						incrementLocalUsage(cmd.id).catch(() => {});
+						incrementLocalUsage(cmd.id).catch(noop);
 					}
 
 					if (isLoading) {
@@ -1363,7 +1350,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				allCommands
 			);
 			usedCommandIds.forEach((id) => {
-				incrementLocalUsage(id).catch(() => {});
+				incrementLocalUsage(id).catch(noop);
 			});
 			const displayText =
 				text || `Attached image${attachedImages.length > 1 ? "s" : ""}`;
@@ -1374,8 +1361,8 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					: expandedText;
 
 			setInput("");
-			setSlashMenu((prev) => ({ ...prev, show: false }));
-			setFileMenu((prev) => ({ ...prev, show: false }));
+			setSlashMenu(hideMenuState);
+			setFileMenu(hideMenuState);
 			clearAttachedImages();
 			if (textareaRef.current) textareaRef.current.style.height = "20px";
 
@@ -1439,7 +1426,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 			}
 			if (e.key === "Escape") {
 				e.preventDefault();
-				setMenu((prev) => ({ ...prev, show: false }));
+				setMenu(hideMenuState);
 				return true;
 			}
 			return false;

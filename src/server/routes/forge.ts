@@ -4,8 +4,10 @@ import { mkdir } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
+import { isActive, isString } from "../../lib/data.ts";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import { ConfigManager } from "../services/config-manager.ts";
+import { resolveAllowedLocalPath } from "../security.ts";
 
 const execFileAsync = promisify(execFile);
 const configManager = new ConfigManager();
@@ -228,7 +230,7 @@ async function listGithubRepos(limit = 30): Promise<GithubRepo[]> {
 
 	try {
 		const accounts = await listGithubAccounts();
-		const active = accounts.find((account) => account.active) ?? accounts[0];
+		const active = accounts.find(isActive) ?? accounts[0];
 		const ownerArg = active?.login ? [active.login] : [];
 		const { stdout } = await runGh(
 			[
@@ -290,12 +292,22 @@ function inferRepoName(url: string) {
 	return basename(cleaned.replace(/:/g, "/"));
 }
 
+function isGithubCloneUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		if (url.protocol !== "https:" && url.protocol !== "ssh:") return false;
+		return url.hostname === "github.com" || url.hostname.endsWith(".ghe.com");
+	} catch {
+		return /^git@(?:github\.com|[\w.-]+\.ghe\.com):[\w.-]+\/[\w.-]+(?:\.git)?$/i.test(
+			value
+		);
+	}
+}
+
 async function addSearchFolder(folder: string) {
 	const config = await configManager.load();
 	const current = Array.isArray(config.search_folders)
-		? config.search_folders.filter(
-				(item): item is string => typeof item === "string"
-			)
+		? config.search_folders.filter(isString)
 		: [];
 	const shown = displayPath(folder);
 	if (current.includes(shown) || current.includes(folder)) return;
@@ -304,9 +316,15 @@ async function addSearchFolder(folder: string) {
 
 async function cloneRepository(gitUrl: string, cloneDirectory: string) {
 	const url = gitUrl.trim();
-	const parent = expandHome(cloneDirectory.trim());
+	const parent = resolveAllowedLocalPath(expandHome(cloneDirectory.trim()));
 	if (!url) throw new Error("Git URL is required");
 	if (!cloneDirectory.trim()) throw new Error("Clone location is required");
+	if (!isGithubCloneUrl(url)) {
+		throw new Error("Only GitHub clone URLs are supported");
+	}
+	if (!parent) {
+		throw new Error("Clone location is outside allowed local roots");
+	}
 
 	await mkdir(parent, { recursive: true });
 	const repoName = inferRepoName(url);

@@ -28,10 +28,19 @@ interface NativeDiffResponse {
 	diff: ParsedDiff;
 }
 
+const MAX_NATIVE_DIFF_LINES = 2000;
+
 export async function computeNativeDiff(
 	before: string,
 	after: string
 ): Promise<ParsedDiff | null> {
+	if (
+		before.split("\n", MAX_NATIVE_DIFF_LINES + 1).length >
+			MAX_NATIVE_DIFF_LINES ||
+		after.split("\n", MAX_NATIVE_DIFF_LINES + 1).length > MAX_NATIVE_DIFF_LINES
+	) {
+		return null;
+	}
 	const result = await runNativeCore<
 		{ op: "diff"; before: string; after: string },
 		NativeDiffResponse

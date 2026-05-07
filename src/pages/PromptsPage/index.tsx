@@ -14,6 +14,8 @@ import {
 	radius,
 	shadow,
 } from "../../tokens.stylex.ts";
+import { filterPrompts } from "../../lib/prompt-utils.ts";
+import { listenDocumentEvent, setInputValue } from "../../lib/react-events.ts";
 import { PromptDetailPanel } from "./PromptDetailPanel.tsx";
 import type { Prompt } from "./support.ts";
 import { CATEGORIES } from "./support.ts";
@@ -177,23 +179,7 @@ export function PromptsPage() {
 		} catch {}
 	};
 
-	const filtered = prompts.filter((p) => {
-		if (filter !== "all") {
-			if (filter === "builtin" && !p.isBuiltIn) return false;
-			if (filter === "custom" && p.isBuiltIn) return false;
-			if (filter !== "builtin" && filter !== "custom" && p.category !== filter)
-				return false;
-		}
-		if (search) {
-			const q = search.toLowerCase();
-			return (
-				p.name.toLowerCase().includes(q) ||
-				p.command.toLowerCase().includes(q) ||
-				p.description.toLowerCase().includes(q)
-			);
-		}
-		return true;
-	});
+	const filtered = filterPrompts(prompts, filter, search);
 
 	return (
 		<div {...stylex.props(styles.root)}>
@@ -205,7 +191,7 @@ export function PromptsPage() {
 					<input
 						type="text"
 						value={search}
-						onChange={(e) => setSearch(e.target.value)}
+						onChange={setInputValue.bind(null, setSearch)}
 						placeholder="Search..."
 						{...stylex.props(styles.searchInput)}
 					/>
@@ -347,8 +333,7 @@ function FilterDropdown({
 			if (ref.current && !ref.current.contains(e.target as Node))
 				setOpen(false);
 		};
-		document.addEventListener("mousedown", handler);
-		return () => document.removeEventListener("mousedown", handler);
+		return listenDocumentEvent("mousedown", handler);
 	}, [open]);
 
 	const activeLabel =

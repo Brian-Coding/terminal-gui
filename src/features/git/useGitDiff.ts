@@ -37,7 +37,7 @@ export function useGitDiff() {
 	const loadDiff = useCallback((req: DiffRequest) => {
 		const id = ++requestCounter;
 		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 12000);
+		const timeout = setTimeout(controller.abort.bind(controller), 12000);
 		activeId.current = id;
 		setRequest(req);
 		setLoading(true);

@@ -1,4 +1,9 @@
 import type { GitFileEntry, GitProjectStatus } from "./useGitStatus.ts";
+import {
+	isStagedChange,
+	isUnstagedTrackedChange,
+	isUntrackedChange,
+} from "../../lib/git-file-utils.ts";
 
 export interface ChangeCheckpoint {
 	id: string;
@@ -68,11 +73,9 @@ export function buildRepoExplainPrompt(project: GitProjectStatus) {
 }
 
 export function buildCommitMessage(project: GitProjectStatus) {
-	const staged = project.files.filter((file) => file.staged);
-	const modified = project.files.filter(
-		(file) => !file.staged && file.status !== "?"
-	);
-	const untracked = project.files.filter((file) => file.status === "?");
+	const staged = project.files.filter(isStagedChange);
+	const modified = project.files.filter(isUnstagedTrackedChange);
+	const untracked = project.files.filter(isUntrackedChange);
 	const parts = [
 		staged.length ? `${staged.length} staged` : null,
 		modified.length ? `${modified.length} modified` : null,

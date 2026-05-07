@@ -18,7 +18,7 @@ import {
 	IconTerminal,
 	IconWrench,
 } from "../ui/Icons.tsx";
-import type { ChatMessage } from "./agent-chat-shared.ts";
+import type { ChatMessage } from "../../features/chat/agent-chat-shared.ts";
 import {
 	extractToolActivities,
 	getStatusToolName,

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { stopPropagation } from "../../../../src/lib/react-events.ts";
 import { Icons } from "./Icons";
 
 type TerminalLine = {
@@ -124,7 +125,7 @@ function SingleTerminalPane({
 			{/* Input line - each pane gets its own input */}
 			<div
 				className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-t border-inferay-border bg-inferay-bg/50"
-				onClick={(e) => e.stopPropagation()}
+				onClick={stopPropagation}
 			>
 				<span className="text-inferay-accent text-[10px] select-none">❯</span>
 				<input
@@ -292,7 +293,7 @@ export function TerminalPanel({
 					</>
 				) : (
 					<SingleTerminalPane
-						pane={terminalPanes[activePane]}
+						pane={terminalPanes[activePane]!}
 						isActive={true}
 					/>
 				)}

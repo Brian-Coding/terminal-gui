@@ -1,3 +1,5 @@
+import { hasRole } from "../../lib/data.ts";
+
 export type ChatStateMessage = {
 	id: string;
 	role: "user" | "assistant" | "tool" | "system" | "btw";
@@ -42,12 +44,8 @@ export function mergeSyncedMessages(
 	localMessages: ChatStateMessage[],
 	serverMessages: ChatStateMessage[]
 ): ChatStateMessage[] {
-	const localUserMsgs = localMessages.filter(
-		(message) => message.role === "user"
-	);
-	const serverUserMsgs = serverMessages.filter(
-		(message) => message.role === "user"
-	);
+	const localUserMsgs = localMessages.filter(hasRole.bind(null, "user"));
+	const serverUserMsgs = serverMessages.filter(hasRole.bind(null, "user"));
 	const displayTextMap = new Map<number, string>();
 
 	for (let i = 0; i < serverUserMsgs.length && i < localUserMsgs.length; i++) {

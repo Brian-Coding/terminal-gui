@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BundledLanguage, BundledTheme, Highlighter } from "shiki";
+import { incrementNumber } from "../lib/data.ts";
 
 // Map file extensions to Shiki language IDs
 const EXTENSION_TO_LANG: Record<string, BundledLanguage> = {
@@ -134,16 +135,17 @@ export function useShikiHighlighter({
 			return;
 		}
 
-		let cancelled = false;
+		const controller = new AbortController();
+		const { signal } = controller;
 		setIsReady(false);
 
 		async function init() {
 			try {
 				const hl = await getHighlighter();
-				if (cancelled) return;
+				if (signal.aborted) return;
 
 				await ensureLanguage(hl, language);
-				if (cancelled) return;
+				if (signal.aborted) return;
 
 				highlighterRef.current = hl;
 				langRef.current = language;
@@ -158,7 +160,7 @@ export function useShikiHighlighter({
 				}
 
 				setIsReady(true);
-				setHighlightVersion((v) => v + 1); // Force re-render with highlighted content
+				setHighlightVersion(incrementNumber);
 			} catch {
 				setIsReady(true); // Continue without highlighting
 			}
@@ -166,9 +168,7 @@ export function useShikiHighlighter({
 
 		init();
 
-		return () => {
-			cancelled = true;
-		};
+		return controller.abort.bind(controller);
 	}, [enabled, filePath, language, theme]);
 
 	// Highlight visible lines when range changes
@@ -194,7 +194,7 @@ export function useShikiHighlighter({
 
 		// Force re-render if new lines were highlighted
 		if (newLinesHighlighted) {
-			setHighlightVersion((v) => v + 1);
+			setHighlightVersion(incrementNumber);
 		}
 	}, [isReady, visibleRange, lines, theme]);
 
@@ -255,15 +255,16 @@ export function useShikiSnippet(
 			return;
 		}
 
-		let cancelled = false;
+		const controller = new AbortController();
+		const { signal } = controller;
 
 		async function highlight() {
 			try {
 				const hl = await getHighlighter();
-				if (cancelled) return;
+				if (signal.aborted) return;
 
 				await ensureLanguage(hl, language);
-				if (cancelled) return;
+				if (signal.aborted) return;
 
 				const result = new Map<number, string>();
 
@@ -280,12 +281,12 @@ export function useShikiSnippet(
 					);
 				}
 
-				if (!cancelled) {
+				if (!signal.aborted) {
 					setHighlighted(result);
 					setIsReady(true);
 				}
 			} catch {
-				if (!cancelled) {
+				if (!signal.aborted) {
 					setIsReady(true);
 				}
 			}
@@ -293,9 +294,7 @@ export function useShikiSnippet(
 
 		highlight();
 
-		return () => {
-			cancelled = true;
-		};
+		return controller.abort.bind(controller);
 	}, [lines, language, enabled, isReady]);
 
 	return { highlighted, isReady };

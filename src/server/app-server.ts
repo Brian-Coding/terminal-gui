@@ -1,10 +1,17 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { noop } from "../lib/data.ts";
 import { PROJECT_ROOT } from "../lib/path-utils.ts";
 import { buildApiRoutes } from "./routes/api.ts";
 import { handlePromptRequest } from "./routes/prompts.ts";
 import { TerminalService } from "./routes/terminal.ts";
+import {
+	isTrustedLocalOrigin,
+	isTrustedLocalRequest,
+	isWithinDirectory,
+	localAuthCookieHeader,
+} from "./security.ts";
 import { ChatService } from "./services/agent-chat.ts";
 import { CheckpointService } from "./services/checkpoint.ts";
 import { PidTracker } from "./services/pid-tracker.ts";
@@ -16,10 +23,9 @@ const publicDir = resolve(PROJECT_ROOT, "public");
 const distDir = existsSync(resolve(PROJECT_ROOT, "dist"))
 	? resolve(PROJECT_ROOT, "dist")
 	: resolve(PROJECT_ROOT, "views");
-const CORS_HEADERS = {
-	"Access-Control-Allow-Origin": "*",
+const BASE_CORS_HEADERS = {
 	"Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-	"Access-Control-Allow-Headers": "Content-Type",
+	"Access-Control-Allow-Headers": "Content-Type,X-Inferay-Auth",
 };
 
 const g = globalThis as typeof globalThis & {
@@ -41,16 +47,30 @@ function staticFile(
 		return new Response(file, {
 			headers: {
 				"Content-Type": contentType,
-				...CORS_HEADERS,
+				"Set-Cookie": localAuthCookieHeader(),
+				...createCorsHeaders(),
 				...extraHeaders,
 			},
 		});
 	};
 }
 
-function withCors(response: Response): Response {
+function createCorsHeaders(req?: Request): Record<string, string> {
+	const origin = req?.headers.get("origin") ?? null;
+	const headers = { ...BASE_CORS_HEADERS };
+	if (isTrustedLocalOrigin(origin)) {
+		return {
+			...headers,
+			"Access-Control-Allow-Origin": origin!,
+			Vary: "Origin",
+		};
+	}
+	return headers;
+}
+
+function withCors(response: Response, req?: Request): Response {
 	const headers = new Headers(response.headers);
-	for (const [key, value] of Object.entries(CORS_HEADERS)) {
+	for (const [key, value] of Object.entries(createCorsHeaders(req))) {
 		headers.set(key, value);
 	}
 
@@ -68,14 +88,21 @@ function addCorsToRoutes(
 		Object.entries(routes).map(([path, methods]) => [
 			path,
 			Object.fromEntries(
-				Object.entries(methods).map(([method, handler]) => [
-					method,
-					async (...args: Parameters<typeof handler>) =>
-						withCors(await handler(...args)),
-				])
+				Object.entries(methods).map(([method, handler]) => {
+					const routeHandler = handler as (req: Request) => Promise<Response>;
+					return [
+						method,
+						async (req: Request) => {
+							if (!isTrustedLocalRequest(req)) {
+								return new Response("Forbidden", { status: 403 });
+							}
+							return withCors(await routeHandler(req), req);
+						},
+					];
+				})
 			),
 		])
-	) as ReturnType<typeof buildApiRoutes>;
+	) as unknown as ReturnType<typeof buildApiRoutes>;
 }
 
 async function hasViteBuild() {
@@ -96,6 +123,7 @@ async function serveRendererIndex(): Promise<Response | null> {
 			headers: {
 				"Content-Type": "text/html",
 				"Cache-Control": "no-cache",
+				"Set-Cookie": localAuthCookieHeader(),
 			},
 		});
 	}
@@ -121,6 +149,7 @@ async function serveRendererIndex(): Promise<Response | null> {
 			headers: {
 				"Content-Type": "text/html",
 				"Cache-Control": "no-cache",
+				"Set-Cookie": localAuthCookieHeader(),
 			},
 		}
 	);
@@ -131,6 +160,7 @@ async function serveDistFile(pathname: string): Promise<Response | null> {
 		distDir,
 		pathname.startsWith("/") ? pathname.slice(1) : pathname
 	);
+	if (!isWithinDirectory(filePath, distDir)) return null;
 	const file = Bun.file(filePath);
 	if (!(await file.exists())) return null;
 
@@ -154,14 +184,20 @@ async function serveDistFile(pathname: string): Promise<Response | null> {
 		: "no-cache";
 
 	return new Response(file, {
-		headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
+		headers: {
+			"Content-Type": contentType,
+			"Cache-Control": cacheControl,
+			...(contentType === "text/html"
+				? { "Set-Cookie": localAuthCookieHeader() }
+				: {}),
+		},
 	});
 }
 
 export function shutdownAppServices() {
 	TerminalService.destroyAll();
 	ChatService.destroyAll();
-	PidTracker.flush().catch(() => {});
+	PidTracker.flush().catch(noop);
 }
 
 export function installShutdownHandlers() {
@@ -189,16 +225,21 @@ export async function startAppServer(port = 4001) {
 
 	const server = Bun.serve({
 		port,
+		hostname: "127.0.0.1",
 		idleTimeout: 255,
 		routes: {
 			"/logo.png": staticFile(publicDir, "logo.png", "image/png"),
 			"/app-icon.png": staticFile(publicDir, "app-icon.png", "image/png"),
 			...corsApiRoutes,
 			"/api/restart": {
-				POST: async () => {
+				POST: async (req) => {
+					if (!isTrustedLocalRequest(req)) {
+						return new Response("Forbidden", { status: 403 });
+					}
 					setTimeout(() => process.exit(0), 50);
 					return withCors(
-						Response.json({ ok: true, message: "Restarting..." })
+						Response.json({ ok: true, message: "Restarting..." }),
+						req
 					);
 				},
 			},
@@ -208,13 +249,19 @@ export async function startAppServer(port = 4001) {
 			const url = new URL(req.url);
 
 			if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+				if (!isTrustedLocalRequest(req)) {
+					return new Response("Forbidden", { status: 403 });
+				}
 				return new Response(null, {
 					status: 204,
-					headers: CORS_HEADERS,
+					headers: createCorsHeaders(req),
 				});
 			}
 
 			if (url.pathname === "/ws") {
+				if (!isTrustedLocalRequest(req)) {
+					return new Response("Forbidden", { status: 403 });
+				}
 				const upgraded = server.upgrade(req, {
 					data: { subscriptions: new Set() },
 				});
@@ -222,16 +269,24 @@ export async function startAppServer(port = 4001) {
 				return new Response("WebSocket upgrade failed", { status: 400 });
 			}
 
+			if (
+				url.pathname.startsWith("/api/prompts/") &&
+				!isTrustedLocalRequest(req)
+			) {
+				return new Response("Forbidden", { status: 403 });
+			}
 			const promptResponse = handlePromptRequest(req);
-			if (promptResponse) return withCors(await promptResponse);
+			if (promptResponse) {
+				return withCors(await promptResponse, req);
+			}
 
 			if (viteBuildPresent) {
 				const distResponse = await serveDistFile(url.pathname);
-				if (distResponse) return withCors(distResponse);
+				if (distResponse) return withCors(distResponse, req);
 
 				if (!url.pathname.startsWith("/api/")) {
 					const indexResponse = await serveRendererIndex();
-					if (indexResponse) return withCors(indexResponse);
+					if (indexResponse) return withCors(indexResponse, req);
 				}
 			}
 

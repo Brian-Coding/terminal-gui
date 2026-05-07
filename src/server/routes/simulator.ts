@@ -13,6 +13,7 @@ import {
 	shutdownSimulator,
 	startBaguetteServer,
 } from "../services/simulator-service.ts";
+import { isString } from "../../lib/data.ts";
 
 function darwinOnly(routes: Record<string, unknown>) {
 	return process.platform === "darwin" ? routes : {};
@@ -66,9 +67,7 @@ export function simulatorRoutes() {
 				if (!Array.isArray(body.folders)) {
 					return errorResponse("folders must be an array", 400);
 				}
-				const folders = body.folders.filter(
-					(item): item is string => typeof item === "string"
-				);
+				const folders = body.folders.filter(isString);
 				return Response.json({
 					ok: true,
 					folders: await setSimulatorProjectFolders(folders),

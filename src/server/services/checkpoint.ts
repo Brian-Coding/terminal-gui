@@ -1,7 +1,9 @@
 import { mkdir, readdir, unlink } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { atomicWriteJson } from "../../lib/atomic-write.ts";
+import { hasId } from "../../lib/data.ts";
 import { readJson } from "../../lib/route-helpers.ts";
+import { isWithinDirectory, resolveAllowedLocalPath } from "../security.ts";
 
 interface FileSnapshot {
 	relativePath: string;
@@ -241,7 +243,7 @@ const pending = new Map<string, string>();
 
 function findCheckpoint(checkpointId: string): Checkpoint | null {
 	for (const list of checkpoints.values()) {
-		const cp = list.find((c) => c.id === checkpointId);
+		const cp = list.find(hasId.bind(null, checkpointId));
 		if (cp) return cp;
 	}
 	return null;
@@ -260,26 +262,31 @@ export const CheckpointService = {
 		cwd: string,
 		userMessage: string
 	): Promise<string> {
+		const safeCwd = resolveAllowedLocalPath(cwd);
+		if (!safeCwd) throw new Error("Checkpoint cwd is outside allowed roots");
 		const id = crypto.randomUUID();
-		const gitRoot = await getGitRoot(cwd);
+		const gitRoot = await getGitRoot(safeCwd);
 
 		let cwdRelative = "";
 		let headSha: string | null = null;
 		let beforeSnapshot: Record<string, string | null>;
 
 		if (gitRoot) {
-			cwdRelative = relative(gitRoot, cwd);
+			if (!isWithinDirectory(safeCwd, gitRoot)) {
+				throw new Error("Checkpoint cwd is outside git root");
+			}
+			cwdRelative = relative(gitRoot, safeCwd);
 			if (cwdRelative === ".") cwdRelative = "";
 			headSha = await getHeadSha(gitRoot);
 			beforeSnapshot = await captureGitSnapshot(gitRoot, cwdRelative);
 		} else {
-			beforeSnapshot = await captureFileSnapshot(cwd);
+			beforeSnapshot = await captureFileSnapshot(safeCwd);
 		}
 
 		const checkpoint: Checkpoint = {
 			id,
 			paneId,
-			cwd,
+			cwd: safeCwd,
 			gitRoot,
 			cwdRelative,
 			headSha,
@@ -340,11 +347,15 @@ export const CheckpointService = {
 	},
 
 	async revertToCheckpoint(
-		checkpointId: string
+		checkpointId: string,
+		paneId: string
 	): Promise<{ ok: boolean; restoredFiles: string[]; error?: string }> {
 		const cp = findCheckpoint(checkpointId);
 		if (!cp)
 			return { ok: false, restoredFiles: [], error: "Checkpoint not found" };
+		if (cp.paneId !== paneId) {
+			return { ok: false, restoredFiles: [], error: "Checkpoint not found" };
+		}
 		if (cp.changedFiles.length === 0) return { ok: true, restoredFiles: [] };
 
 		const root = cp.gitRoot || cp.cwd;
@@ -397,8 +408,9 @@ export const CheckpointService = {
 			let oldestTime = Infinity,
 				oldestPane = "";
 			for (const [paneId, list] of checkpoints) {
-				if (list.length > 0 && list[0].timestamp < oldestTime) {
-					oldestTime = list[0].timestamp;
+				const oldest = list[0];
+				if (oldest && oldest.timestamp < oldestTime) {
+					oldestTime = oldest.timestamp;
 					oldestPane = paneId;
 				}
 			}

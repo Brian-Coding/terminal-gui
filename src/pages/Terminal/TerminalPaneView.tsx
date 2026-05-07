@@ -16,6 +16,11 @@ import type {
 	TerminalTheme,
 } from "../../features/terminal/terminal-utils.ts";
 import { useXtermTerminal } from "../../hooks/useXtermTerminal.ts";
+import {
+	activateOnEnterOrSpace,
+	focusRef,
+	stopPropagationAndCall,
+} from "../../lib/react-events.ts";
 import { color, font } from "../../tokens.stylex.ts";
 
 interface TerminalPaneViewProps {
@@ -149,10 +154,10 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					{isSelected && <div {...stylex.props(styles.selectedDot)} />}
 					<IconButton
 						type="button"
-						onClick={(e) => {
-							e.stopPropagation();
-							onClose(pane.id);
-						}}
+						onClick={stopPropagationAndCall.bind(
+							null,
+							onClose.bind(null, pane.id)
+						)}
 						className="electrobun-webkit-app-region-no-drag"
 						variant="danger"
 						size="xs"
@@ -171,10 +176,11 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					overflow: "hidden",
 					padding: 0,
 				}}
-				onClick={() => termRef.current?.focus()}
-				onKeyDown={(e) => {
-					if (e.key === "Enter" || e.key === " ") termRef.current?.focus();
-				}}
+				onClick={focusRef.bind(null, termRef)}
+				onKeyDown={activateOnEnterOrSpace.bind(
+					null,
+					focusRef.bind(null, termRef)
+				)}
 				tabIndex={0}
 				role="button"
 			/>

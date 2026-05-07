@@ -4,6 +4,7 @@ import {
 	writeStoredValue,
 } from "./stored-json.ts";
 import type { ThemeId } from "../features/terminal/terminal-utils.ts";
+import { hasId } from "./data.ts";
 
 interface AppThemeColors {
 	readonly black: string;
@@ -370,7 +371,7 @@ function getAppThemeById(id: AppThemeId): AppTheme {
 	if (id === "custom") {
 		return { id: "custom", name: "Custom", colors: loadAppCustomTheme() };
 	}
-	return APP_THEMES.find((t) => t.id === id) ?? DEFAULT_THEME;
+	return APP_THEMES.find(hasId.bind(null, id)) ?? DEFAULT_THEME;
 }
 
 export function applyAppTheme(id: AppThemeId): void {
@@ -388,7 +389,7 @@ export function applyAppTheme(id: AppThemeId): void {
 	const light =
 		id === "custom"
 			? isLightColor(theme.colors.black)
-			: APP_THEMES.find((t) => t.id === id)?.light;
+			: APP_THEMES.find(hasId.bind(null, id))?.light;
 	root.style.colorScheme = light ? "light" : "dark";
 	meta?.setAttribute("content", theme.colors.black);
 }

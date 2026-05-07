@@ -1,3 +1,5 @@
+import { basename, trimText as trimSummary } from "../../lib/format.ts";
+
 export type AgentEvent =
 	| {
 			type: "session";
@@ -55,21 +57,13 @@ export type AgentEvent =
 			event: unknown;
 	  };
 
-function basename(value: string): string {
-	return value.split("/").pop() || value;
-}
-
-function trimSummary(value: string, max = 64): string {
-	return value.length > max ? `${value.slice(0, max)}...` : value;
-}
-
 export function summarizeToolInput(toolName: string, input: unknown): string {
 	if (!input || typeof input !== "object") return toolName;
 	const payload = input as Record<string, unknown>;
 	const command = payload.command ?? payload.cmd;
-	if (typeof command === "string" && command) return trimSummary(command);
+	if (typeof command === "string" && command) return trimSummary(command, 64);
 	const query = payload.query;
-	if (typeof query === "string" && query) return trimSummary(query);
+	if (typeof query === "string" && query) return trimSummary(query, 64);
 	const path = payload.path ?? payload.file ?? payload.file_path;
 	if (typeof path === "string" && path) return basename(path);
 	const files = payload.files ?? payload.changes;

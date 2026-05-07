@@ -5,6 +5,9 @@ import { basename, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Subprocess } from "bun";
 import { $ } from "bun";
+import { compareName, isString, uniqueTrimmedStrings } from "../../lib/data.ts";
+import { isBootedSimulatorDevice } from "../../lib/simulator-utils.ts";
+import { resolveAllowedLocalPath } from "../security.ts";
 import { ConfigManager } from "./config-manager.ts";
 
 export interface SimulatorDevice {
@@ -105,10 +108,6 @@ function toDisplayPath(path: string): string {
 		: cleaned;
 }
 
-function uniqueStrings(values: string[]): string[] {
-	return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-}
-
 async function pathExists(path: string): Promise<boolean> {
 	try {
 		return (await stat(path)).isDirectory();
@@ -142,14 +141,10 @@ async function getWorkspacePaths(): Promise<string[]> {
 async function getProjectSearchRoots(): Promise<string[]> {
 	const config = await configManager.load();
 	const simulatorFolders = Array.isArray(config.simulator_project_folders)
-		? config.simulator_project_folders.filter(
-				(item): item is string => typeof item === "string"
-			)
+		? config.simulator_project_folders.filter(isString)
 		: [];
 	const configured = Array.isArray(config.search_folders)
-		? config.search_folders.filter(
-				(item): item is string => typeof item === "string"
-			)
+		? config.search_folders.filter(isString)
 		: [];
 	const roots = new Set<string>();
 	for (const root of [
@@ -210,23 +205,19 @@ async function findSimulatorBuildTargets(
 export async function getSimulatorProjectFolders(): Promise<string[]> {
 	const config = await configManager.load();
 	return Array.isArray(config.simulator_project_folders)
-		? config.simulator_project_folders.filter(
-				(item): item is string => typeof item === "string"
-			)
+		? config.simulator_project_folders.filter(isString)
 		: [];
 }
 
 export async function setSimulatorProjectFolders(
 	folders: string[]
 ): Promise<string[]> {
-	const normalized = uniqueStrings(folders.map(toDisplayPath));
+	const normalized = uniqueTrimmedStrings(folders.map(toDisplayPath));
 	const config = await configManager.update({
 		simulator_project_folders: normalized,
 	});
 	return Array.isArray(config.simulator_project_folders)
-		? config.simulator_project_folders.filter(
-				(item): item is string => typeof item === "string"
-			)
+		? config.simulator_project_folders.filter(isString)
 		: normalized;
 }
 
@@ -255,11 +246,9 @@ export async function pickSimulatorProjectFolder(): Promise<string | null> {
 export async function autoDetectSimulatorProjectFolders(): Promise<string[]> {
 	const config = await configManager.load();
 	const configured = Array.isArray(config.search_folders)
-		? config.search_folders.filter(
-				(item): item is string => typeof item === "string"
-			)
+		? config.search_folders.filter(isString)
 		: [];
-	const candidates = uniqueStrings([
+	const candidates = uniqueTrimmedStrings([
 		"~/Desktop",
 		"~/Desktop/Code",
 		"~/Desktop/HatchingPoint",
@@ -277,7 +266,7 @@ export async function autoDetectSimulatorProjectFolders(): Promise<string[]> {
 			detected.add(toDisplayPath(target.path));
 		}
 	}
-	const merged = uniqueStrings([
+	const merged = uniqueTrimmedStrings([
 		...(await getSimulatorProjectFolders()),
 		...detected,
 	]);
@@ -531,9 +520,7 @@ export async function listSimulatorProjects(): Promise<SimulatorProject[]> {
 		}
 	}
 
-	const bootedDevice = (await listSimulators()).find(
-		(device) => device.state === "Booted"
-	);
+	const bootedDevice = (await listSimulators()).find(isBootedSimulatorDevice);
 	const installedApps = bootedDevice
 		? await getInstalledApps(bootedDevice.udid)
 		: [];
@@ -572,19 +559,21 @@ export async function listSimulatorProjects(): Promise<SimulatorProject[]> {
 		});
 	}
 
-	return projects.sort((a, b) => a.name.localeCompare(b.name));
+	return projects.sort(compareName);
 }
 
 export async function openXcodeProject(
 	appPath: string
 ): Promise<string | null> {
-	const targets = await findSimulatorBuildTargets(appPath, 2);
+	const safeAppPath = resolveAllowedLocalPath(appPath);
+	if (!safeAppPath) return null;
+	const targets = await findSimulatorBuildTargets(safeAppPath, 2);
 	const target =
 		targets[0] ??
-		(appPath.endsWith(".xcodeproj")
-			? { path: dirname(appPath), projectPath: appPath }
-			: appPath.endsWith(".xcworkspace")
-				? { path: dirname(appPath), workspacePath: appPath }
+		(safeAppPath.endsWith(".xcodeproj")
+			? { path: dirname(safeAppPath), projectPath: safeAppPath }
+			: safeAppPath.endsWith(".xcworkspace")
+				? { path: dirname(safeAppPath), workspacePath: safeAppPath }
 				: null);
 	const openPath = target?.workspacePath ?? target?.projectPath;
 	if (!openPath) return null;
@@ -646,12 +635,16 @@ export async function buildInstallLaunchProject({
 	appBundlePath?: string;
 	error?: string;
 }> {
+	const safeAppPath = resolveAllowedLocalPath(appPath);
+	if (!safeAppPath) {
+		return { ok: false, error: "Project path is outside allowed local roots" };
+	}
 	const target =
-		(await findSimulatorBuildTargets(appPath, 2))[0] ??
-		(appPath.endsWith(".xcodeproj")
-			? { path: dirname(appPath), projectPath: appPath }
-			: appPath.endsWith(".xcworkspace")
-				? { path: dirname(appPath), workspacePath: appPath }
+		(await findSimulatorBuildTargets(safeAppPath, 2))[0] ??
+		(safeAppPath.endsWith(".xcodeproj")
+			? { path: dirname(safeAppPath), projectPath: safeAppPath }
+			: safeAppPath.endsWith(".xcworkspace")
+				? { path: dirname(safeAppPath), workspacePath: safeAppPath }
 				: null);
 	if (!target) return { ok: false, error: "No Xcode project found" };
 	const schemes = await getSchemes(target);

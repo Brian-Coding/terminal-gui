@@ -21,6 +21,7 @@ import {
 	saveTerminalState,
 	type ThemeId,
 } from "../../features/terminal/terminal-utils.ts";
+import { setInputValue } from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
 interface TerminalSettingsPanelProps {
@@ -216,7 +217,7 @@ function SearchFoldersSection() {
 					ref={inputRef}
 					type="text"
 					value={newFolder}
-					onChange={(e) => setNewFolder(e.target.value)}
+					onChange={setInputValue.bind(null, setNewFolder)}
 					onKeyDown={(e) => {
 						if (e.key === "Enter") addFolder();
 					}}

@@ -19,10 +19,17 @@ import {
 } from "../../lib/app-navigation.tsx";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
+	appendPaneToGroup,
 	createTerminalPane,
+	listenTerminalLayoutMode,
+	loadTerminalLayoutMode,
 	loadTerminalState,
 	saveTerminalState,
 } from "../../features/terminal/terminal-utils.ts";
+import {
+	listenDocumentEvent,
+	listenWindowEvent,
+} from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { Button } from "../ui/Button.tsx";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
@@ -33,8 +40,15 @@ import {
 	IconLayoutGrid,
 	IconLayoutRows,
 	IconPlus,
-	IconTarget,
+	IconWorkflow,
 } from "../ui/Icons.tsx";
+
+const GRID_SIZE_OPTIONS = [
+	{ id: "1", label: "1" },
+	{ id: "2", label: "2" },
+	{ id: "3", label: "3" },
+	{ id: "4", label: "4" },
+];
 
 function loadShellState() {
 	const terminalState = loadTerminalState();
@@ -80,30 +94,18 @@ export function TerminalShellHeader() {
 	const [shellState, setShellState] = useState(loadShellState);
 	const [showNewMenu, setShowNewMenu] = useState(false);
 	const newMenuRef = useRef<HTMLDivElement>(null);
-	const [layoutMode, setLayoutMode] = useState<"grid" | "rows">(() =>
-		readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows"
-	);
+	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
 
 	const refreshShellState = useCallback(() => {
 		setShellState(loadShellState());
 	}, []);
 
-	useEffect(() => {
-		window.addEventListener("terminal-shell-change", refreshShellState);
-		return () =>
-			window.removeEventListener("terminal-shell-change", refreshShellState);
-	}, [refreshShellState]);
+	useEffect(
+		listenWindowEvent.bind(null, "terminal-shell-change", refreshShellState),
+		[refreshShellState]
+	);
 
-	useEffect(() => {
-		const handleShellChange = () => {
-			setLayoutMode(
-				readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows"
-			);
-		};
-		window.addEventListener("terminal-shell-change", handleShellChange);
-		return () =>
-			window.removeEventListener("terminal-shell-change", handleShellChange);
-	}, []);
+	useEffect(listenTerminalLayoutMode.bind(null, setLayoutMode), []);
 
 	useEffect(() => {
 		if (!showNewMenu) return;
@@ -115,8 +117,7 @@ export function TerminalShellHeader() {
 				setShowNewMenu(false);
 			}
 		};
-		document.addEventListener("mousedown", handleClick);
-		return () => document.removeEventListener("mousedown", handleClick);
+		return listenDocumentEvent("mousedown", handleClick);
 	}, [showNewMenu]);
 
 	const updateMainView = useCallback(
@@ -138,14 +139,8 @@ export function TerminalShellHeader() {
 			const pane = createTerminalPane(agentKind, undefined, true);
 			saveTerminalState({
 				...terminalState,
-				groups: terminalState.groups.map((group) =>
-					group.id === selectedGroupId
-						? {
-								...group,
-								panes: [...group.panes, pane],
-								selectedPaneId: pane.id,
-							}
-						: group
+				groups: terminalState.groups.map(
+					appendPaneToGroup.bind(null, selectedGroupId, pane)
 				),
 			});
 			window.dispatchEvent(new Event("terminal-shell-change"));
@@ -213,10 +208,10 @@ export function TerminalShellHeader() {
 					);
 				})}
 				<ViewTab
-					active={location.pathname === "/goals"}
-					icon={<IconTarget size={12} />}
-					label="Goals"
-					onClick={() => navigate("/goals")}
+					active={location.pathname === "/automations"}
+					icon={<IconWorkflow size={12} />}
+					label="Automations"
+					onClick={() => navigate("/automations")}
 				/>
 			</div>
 			{isTerminalRoute && (
@@ -233,10 +228,7 @@ export function TerminalShellHeader() {
 											<span {...stylex.props(styles.gridLabel)}>Col</span>
 											<DropdownButton
 												value={String(selectedGroup.columns)}
-												options={[1, 2, 3, 4].map((n) => ({
-													id: String(n),
-													label: String(n),
-												}))}
+												options={GRID_SIZE_OPTIONS}
 												onChange={(id) =>
 													updateSelectedGroupGrid({ columns: Number(id) })
 												}
@@ -247,10 +239,7 @@ export function TerminalShellHeader() {
 											<span {...stylex.props(styles.gridLabel)}>Row</span>
 											<DropdownButton
 												value={String(selectedGroup.rows)}
-												options={[1, 2, 3, 4].map((n) => ({
-													id: String(n),
-													label: String(n),
-												}))}
+												options={GRID_SIZE_OPTIONS}
 												onChange={(id) =>
 													updateSelectedGroupGrid({ rows: Number(id) })
 												}

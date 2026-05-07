@@ -29,7 +29,8 @@ import {
 	loadTerminalState,
 	saveTerminalState,
 } from "../../features/terminal/terminal-utils.ts";
-import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
+import { lacksValue } from "../../lib/data.ts";
+import { fetchJsonOr, sendJsonWithBusy } from "../../lib/fetch-json.ts";
 import type { ForgeAccount, GithubRepo } from "../../lib/forge-types.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
@@ -129,14 +130,13 @@ export function OnboardingPage() {
 		}
 	}, [accounts, loadRepos]);
 
-	const connectGithub = async () => {
-		setConnecting(true);
-		try {
-			await sendJson("/api/forge/connect", { provider: "github" });
-		} finally {
-			setConnecting(false);
-		}
-	};
+	const connectGithub = sendJsonWithBusy.bind(
+		null,
+		setConnecting,
+		"/api/forge/connect",
+		{ provider: "github" },
+		undefined
+	);
 
 	const refreshAccounts = async () => {
 		const found = await loadAccounts();
@@ -165,7 +165,7 @@ export function OnboardingPage() {
 	};
 
 	const removeFolder = (folder: string) => {
-		setLocalFolders((prev) => prev.filter((f) => f !== folder));
+		setLocalFolders((prev) => prev.filter(lacksValue.bind(null, folder)));
 	};
 
 	const toggleRepo = (fullName: string) => {
@@ -237,7 +237,11 @@ export function OnboardingPage() {
 			/>
 
 			{/* All steps rendered simultaneously — CSS transitions only */}
-			<IntroStep step={step} onNext={() => setStep("github")} onSkip={finish} />
+			<IntroStep
+				step={step}
+				onNext={setStep.bind(null, "github")}
+				onSkip={finish}
+			/>
 			<GithubStep
 				step={step}
 				accounts={accounts}
@@ -245,8 +249,8 @@ export function OnboardingPage() {
 				connecting={connecting}
 				onConnect={connectGithub}
 				onRefresh={refreshAccounts}
-				onBack={() => setStep("intro")}
-				onNext={() => setStep("projects")}
+				onBack={setStep.bind(null, "intro")}
+				onNext={setStep.bind(null, "projects")}
 			/>
 			<ProjectsStep
 				step={step}
@@ -260,7 +264,7 @@ export function OnboardingPage() {
 				isAddingFolder={isAddingFolder}
 				onPickFolder={pickFolder}
 				onRemoveFolder={removeFolder}
-				onBack={() => setStep("github")}
+				onBack={setStep.bind(null, "github")}
 				onComplete={completeOnboarding}
 			/>
 		</main>

@@ -10,10 +10,13 @@ export function checkpointRoutes() {
 			},
 		},
 
-		"/api/checkpoints/revert/:checkpointId": {
-			POST: async (req: Request & { params: { checkpointId: string } }) => {
+		"/api/checkpoints/revert/:paneId/:checkpointId": {
+			POST: async (
+				req: Request & { params: { paneId: string; checkpointId: string } }
+			) => {
 				const result = await CheckpointService.revertToCheckpoint(
-					req.params.checkpointId
+					req.params.checkpointId,
+					req.params.paneId
 				);
 				return Response.json(result);
 			},

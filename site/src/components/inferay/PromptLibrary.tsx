@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { filterPrompts } from "../../../../src/lib/prompt-utils.ts";
 import { Icons } from "./Icons";
 
 type Prompt = {
@@ -476,23 +477,7 @@ export function PromptLibrary() {
 	const [isEditing, setIsEditing] = useState(false);
 	const [isCreating, setIsCreating] = useState(false);
 
-	const filtered = prompts.filter((p) => {
-		if (filter !== "all") {
-			if (filter === "builtin" && !p.isBuiltIn) return false;
-			if (filter === "custom" && p.isBuiltIn) return false;
-			if (filter !== "builtin" && filter !== "custom" && p.category !== filter)
-				return false;
-		}
-		if (search) {
-			const q = search.toLowerCase();
-			return (
-				p.name.toLowerCase().includes(q) ||
-				p.command.toLowerCase().includes(q) ||
-				p.description.toLowerCase().includes(q)
-			);
-		}
-		return true;
-	});
+	const filtered = filterPrompts(prompts, filter, search);
 
 	const handleSelect = (p: Prompt) => {
 		if (isEditing || isCreating) {

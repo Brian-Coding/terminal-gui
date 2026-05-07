@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
 
 import { spawn } from "node:child_process";
-import { existsSync, watch } from "node:fs";
+import { watch } from "node:fs";
 import { resolve } from "node:path";
+import { resolveExitCode, targetExists } from "./watch-utils.ts";
 
 const ROOT = process.cwd();
 const watchTargets = [
 	{ path: resolve(ROOT, "src"), recursive: true },
 	{ path: resolve(ROOT, "scripts", "build-renderer.ts"), recursive: false },
-].filter((target) => existsSync(target.path));
+].filter(targetExists);
 
 let debounce: ReturnType<typeof setTimeout> | null = null;
 let building = false;
@@ -25,8 +26,8 @@ function runBuild(): Promise<number> {
 			cwd: ROOT,
 			stdio: "inherit",
 		});
-		proc.on("exit", (code) => resolve(code ?? 0));
-		proc.on("error", () => resolve(1));
+		proc.on("exit", resolveExitCode.bind(null, resolve));
+		proc.on("error", resolve.bind(null, 1));
 	});
 }
 

@@ -12,6 +12,10 @@ import {
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
 import {
+	activateOnEnterOrSpace,
+	stopPropagationAndCall,
+} from "../../lib/react-events.ts";
+import {
 	color,
 	controlSize,
 	font,
@@ -79,10 +83,11 @@ export const AgentSidebar = memo(function AgentSidebar({
 							key={pane.id}
 							role="button"
 							tabIndex={0}
-							onClick={() => onSelectPane(pane.id)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter" || e.key === " ") onSelectPane(pane.id);
-							}}
+							onClick={onSelectPane.bind(null, pane.id)}
+							onKeyDown={activateOnEnterOrSpace.bind(
+								null,
+								onSelectPane.bind(null, pane.id)
+							)}
 							{...stylex.props(
 								styles.paneRow,
 								isSelected ? styles.paneRowSelected : styles.paneRowIdle
@@ -105,10 +110,10 @@ export const AgentSidebar = memo(function AgentSidebar({
 							<IconButton
 								variant="danger"
 								size="xs"
-								onClick={(e) => {
-									e.stopPropagation();
-									onRemovePane(pane.id);
-								}}
+								onClick={stopPropagationAndCall.bind(
+									null,
+									onRemovePane.bind(null, pane.id)
+								)}
 								className="shrink-0"
 							>
 								<IconX size={10} />
@@ -154,7 +159,7 @@ export const CollapsedAgentBar = memo(function CollapsedAgentBar({
 						<button
 							type="button"
 							key={pane.id}
-							onClick={() => onSelectPane(pane.id)}
+							onClick={onSelectPane.bind(null, pane.id)}
 							{...stylex.props(
 								styles.collapsedPane,
 								isSelected

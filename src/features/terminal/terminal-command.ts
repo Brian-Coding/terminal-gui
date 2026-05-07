@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { isNonEmptyString } from "../../lib/data.ts";
 import type { AgentKind, ChatAgentKind } from "../agents/agents.ts";
 
 const isWin = process.platform === "win32";
@@ -27,87 +28,54 @@ function findInNvmVersions(binaryName: string): string | null {
 	return null;
 }
 
-function getClaudePathCandidates(): string[] {
+function getAgentPathCandidates(kind: ChatAgentKind): string[] {
 	const nvmBin = process.env.NVM_BIN;
-	const candidates = [
-		process.env.CLAUDE_PATH,
-		homeDir ? join(homeDir, ".local", "bin", "claude") : null,
-		homeDir ? join(homeDir, ".bun", "bin", "claude") : null,
-		nvmBin ? join(nvmBin, "claude") : null,
-		findInNvmVersions("claude"),
-		homeDir ? join(homeDir, ".npm-global", "bin", "claude") : null,
-		"/usr/local/bin/claude",
-		"/opt/homebrew/bin/claude",
-	];
+	const isClaude = kind === "claude";
+	const binary = isClaude ? "claude" : "codex";
+	const candidates = isClaude
+		? [
+				process.env.CLAUDE_PATH,
+				homeDir ? join(homeDir, ".local", "bin", binary) : null,
+				homeDir ? join(homeDir, ".bun", "bin", binary) : null,
+				nvmBin ? join(nvmBin, binary) : null,
+				findInNvmVersions(binary),
+				homeDir ? join(homeDir, ".npm-global", "bin", binary) : null,
+				"/usr/local/bin/claude",
+				"/opt/homebrew/bin/claude",
+			]
+		: [
+				process.env.CODEX_PATH,
+				nvmBin ? join(nvmBin, binary) : null,
+				findInNvmVersions(binary),
+				homeDir ? join(homeDir, ".npm-global", "bin", binary) : null,
+				homeDir ? join(homeDir, ".local", "bin", binary) : null,
+				homeDir ? join(homeDir, ".bun", "bin", binary) : null,
+				"/opt/homebrew/bin/codex",
+				"/usr/local/bin/codex",
+			];
 
-	return candidates
-		.filter((candidate): candidate is string => Boolean(candidate))
-		.map(withExecutableExtension);
+	return candidates.filter(isNonEmptyString).map(withExecutableExtension);
 }
 
-export function resolveClaudeBinary(): string {
-	for (const candidate of getClaudePathCandidates()) {
+export function resolveAgentBinary(kind: ChatAgentKind): string {
+	for (const candidate of getAgentPathCandidates(kind)) {
 		if (existsSync(candidate)) {
 			return candidate;
 		}
-		// On Windows, also try .exe if the candidate was .cmd
-		if (isWin && candidate.endsWith(".cmd")) {
+		if (kind === "claude" && isWin && candidate.endsWith(".cmd")) {
 			const exeCandidate = candidate.replace(/\.cmd$/, ".exe");
 			if (existsSync(exeCandidate)) return exeCandidate;
 		}
 	}
-	return isWin ? "claude.cmd" : "claude";
+	const binary = kind === "claude" ? "claude" : "codex";
+	return isWin ? `${binary}.cmd` : binary;
 }
 
-export function createClaudeEnv(): Record<string, string> {
+export function createAgentEnv(kind: ChatAgentKind): Record<string, string> {
 	const env = { ...process.env } as Record<string, string>;
-	delete env.CLAUDECODE;
-
+	if (kind === "claude") delete env.CLAUDECODE;
 	const pathEntries = (env.PATH || "").split(delimiter).filter(Boolean);
-	for (const candidate of getClaudePathCandidates()) {
-		const candidateDir = dirname(candidate);
-		if (candidateDir && !pathEntries.includes(candidateDir)) {
-			pathEntries.unshift(candidateDir);
-		}
-	}
-	if (pathEntries.length > 0) {
-		env.PATH = pathEntries.join(delimiter);
-	}
-
-	return env;
-}
-
-function getCodexPathCandidates(): string[] {
-	const nvmBin = process.env.NVM_BIN;
-	const candidates = [
-		process.env.CODEX_PATH,
-		nvmBin ? join(nvmBin, "codex") : null,
-		findInNvmVersions("codex"),
-		homeDir ? join(homeDir, ".npm-global", "bin", "codex") : null,
-		homeDir ? join(homeDir, ".local", "bin", "codex") : null,
-		homeDir ? join(homeDir, ".bun", "bin", "codex") : null,
-		"/opt/homebrew/bin/codex",
-		"/usr/local/bin/codex",
-	];
-
-	return candidates
-		.filter((candidate): candidate is string => Boolean(candidate))
-		.map(withExecutableExtension);
-}
-
-export function resolveCodexBinary(): string {
-	for (const candidate of getCodexPathCandidates()) {
-		if (existsSync(candidate)) {
-			return candidate;
-		}
-	}
-	return isWin ? "codex.cmd" : "codex";
-}
-
-export function createCodexEnv(): Record<string, string> {
-	const env = { ...process.env } as Record<string, string>;
-	const pathEntries = (env.PATH || "").split(delimiter).filter(Boolean);
-	for (const candidate of getCodexPathCandidates()) {
+	for (const candidate of getAgentPathCandidates(kind)) {
 		const candidateDir = dirname(candidate);
 		if (candidateDir && !pathEntries.includes(candidateDir)) {
 			pathEntries.unshift(candidateDir);
@@ -126,19 +94,10 @@ async function hasCli(kind: ChatAgentKind): Promise<boolean> {
 	const cached = availabilityCache[kind];
 	if (cached != null) return cached;
 
-	if (kind === "claude") {
-		for (const candidate of getClaudePathCandidates()) {
-			if (existsSync(candidate)) {
-				availabilityCache[kind] = true;
-				return true;
-			}
-		}
-	} else {
-		for (const candidate of getCodexPathCandidates()) {
-			if (existsSync(candidate)) {
-				availabilityCache[kind] = true;
-				return true;
-			}
+	for (const candidate of getAgentPathCandidates(kind)) {
+		if (existsSync(candidate)) {
+			availabilityCache[kind] = true;
+			return true;
 		}
 	}
 
@@ -170,7 +129,7 @@ export async function resolveInteractiveAgentCommand(
 		return {
 			ok: true,
 			cmd: available
-				? [resolveClaudeBinary(), "--dangerously-skip-permissions"]
+				? [resolveAgentBinary("claude"), "--dangerously-skip-permissions"]
 				: [
 						process.execPath,
 						"run",
@@ -186,6 +145,9 @@ export async function resolveInteractiveAgentCommand(
 
 	return {
 		ok: true,
-		cmd: [resolveCodexBinary(), "--dangerously-bypass-approvals-and-sandbox"],
+		cmd: [
+			resolveAgentBinary("codex"),
+			"--dangerously-bypass-approvals-and-sandbox",
+		],
 	};
 }

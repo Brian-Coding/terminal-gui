@@ -1,6 +1,6 @@
 import {
-	createClaudeEnv,
-	resolveClaudeBinary,
+	createAgentEnv,
+	resolveAgentBinary,
 } from "../../../features/terminal/terminal-command.ts";
 import type { AgentEvent } from "../events.ts";
 import { summarizeToolInput } from "../events.ts";
@@ -112,13 +112,12 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 						ctx.emitChatEvent(event);
 					};
 					const args = [
-						resolveClaudeBinary(),
+						resolveAgentBinary("claude"),
 						"-p",
 						prompt,
 						"--output-format",
 						"stream-json",
 						"--verbose",
-						"--dangerously-skip-permissions",
 					];
 					if (ctx.model) {
 						args.push("--model", ctx.model);
@@ -130,7 +129,7 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 						stdout: "pipe",
 						stderr: "pipe",
 						cwd: ctx.cwd,
-						env: createClaudeEnv(),
+						env: createAgentEnv("claude"),
 					});
 
 					const stderrPromise = drainStreamToString(

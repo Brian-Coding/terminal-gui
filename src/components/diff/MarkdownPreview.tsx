@@ -48,26 +48,25 @@ function MermaidBlock({ code }: { code: string }) {
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
-		let cancelled = false;
+		const controller = new AbortController();
+		const { signal } = controller;
 		const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 		loadMermaid()
 			.then(() => {
-				if (cancelled || !ref.current) return;
+				if (signal.aborted || !ref.current) return;
 				const m = (window as Record<string, unknown>).mermaid as {
 					render: (id: string, code: string) => Promise<{ svg: string }>;
 				};
 				return m.render(id, code);
 			})
 			.then((result) => {
-				if (cancelled || !ref.current || !result) return;
+				if (signal.aborted || !ref.current || !result) return;
 				ref.current.innerHTML = result.svg;
 			})
 			.catch((err) => {
-				if (!cancelled) setError(String(err));
+				if (!signal.aborted) setError(String(err));
 			});
-		return () => {
-			cancelled = true;
-		};
+		return controller.abort.bind(controller);
 	}, [code]);
 
 	if (error)
@@ -204,6 +203,10 @@ function ListItemRenderer({ item }: { item: MdListItem }) {
 	);
 }
 
+function renderListItem(item: MdListItem, key: number) {
+	return <ListItemRenderer key={key} item={item} />;
+}
+
 function BlockRenderer({ block }: { block: MdBlock }) {
 	switch (block.type) {
 		case "heading":
@@ -284,27 +287,21 @@ function BlockRenderer({ block }: { block: MdBlock }) {
 		case "checklist":
 			return (
 				<ul {...stylex.props(styles.checklist)}>
-					{(block.items ?? []).map((item, k) => (
-						<ListItemRenderer key={k} item={item} />
-					))}
+					{(block.items ?? []).map(renderListItem)}
 				</ul>
 			);
 
 		case "ul":
 			return (
 				<ul {...stylex.props(styles.unorderedList)}>
-					{(block.items ?? []).map((item, k) => (
-						<ListItemRenderer key={k} item={item} />
-					))}
+					{(block.items ?? []).map(renderListItem)}
 				</ul>
 			);
 
 		case "ol":
 			return (
 				<ol {...stylex.props(styles.orderedList)}>
-					{(block.items ?? []).map((item, k) => (
-						<ListItemRenderer key={k} item={item} />
-					))}
+					{(block.items ?? []).map(renderListItem)}
 				</ol>
 			);
 

@@ -1,6 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useMemo, useState } from "react";
 import { useShikiSnippet } from "../../hooks/useShikiHighlighter.ts";
+import { contentOf } from "../../lib/data.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { IconChevronRight, IconFilePlus } from "../ui/Icons.tsx";
 
@@ -40,13 +41,14 @@ function computeDiffHunks(
 
 	for (let i = 0; i <= oldLines.length; i++) {
 		lcs[i] = [];
+		const row = lcs[i]!;
 		for (let j = 0; j <= newLines.length; j++) {
 			if (i === 0 || j === 0) {
-				lcs[i][j] = 0;
+				row[j] = 0;
 			} else if (oldLines[i - 1] === newLines[j - 1]) {
-				lcs[i][j] = lcs[i - 1]![j - 1]! + 1;
+				row[j] = lcs[i - 1]![j - 1]! + 1;
 			} else {
-				lcs[i][j] = Math.max(lcs[i - 1]![j]!, lcs[i]![j - 1]!);
+				row[j] = Math.max(lcs[i - 1]![j]!, row[j - 1]!);
 			}
 		}
 	}
@@ -485,7 +487,7 @@ export function GroupedEditDiff({
 			hunks={hunks}
 			stats={stats}
 			allLines={allLines}
-			resetKey={`${filePath}:${edits.length}:${edits.map((edit) => edit.content).join("\u0000")}`}
+			resetKey={`${filePath}:${edits.length}:${edits.map(contentOf).join("\u0000")}`}
 		/>
 	);
 }

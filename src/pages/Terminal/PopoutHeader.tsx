@@ -17,6 +17,13 @@ import {
 	IconTrash,
 	IconX,
 } from "../../components/ui/Icons.tsx";
+import {
+	activateOnEnterOrSpace,
+	listenDocumentEvent,
+	setInputValue,
+	stopPropagation,
+	stopPropagationAndCall,
+} from "../../lib/react-events.ts";
 import type { RunningPort } from "../../hooks/useRunningPorts.ts";
 import {
 	type AgentKind,
@@ -202,8 +209,7 @@ export const PopoutHeader = memo(function PopoutHeader(
 			if (Object.keys(updates).length > 0)
 				setMenus((p) => ({ ...p, ...updates }));
 		};
-		document.addEventListener("mousedown", handleClick);
-		return () => document.removeEventListener("mousedown", handleClick);
+		return listenDocumentEvent("mousedown", handleClick);
 	}, [
 		menus.newMenu,
 		menus.layoutMenu,
@@ -250,13 +256,13 @@ export const PopoutHeader = memo(function PopoutHeader(
 								{editingGroupId === g.id ? (
 									<input
 										value={editingGroupName}
-										onChange={(e) => setEditingGroupName(e.target.value)}
+										onChange={setInputValue.bind(null, setEditingGroupName)}
 										onBlur={() => commitRename(g.id)}
 										onKeyDown={(e) => {
 											if (e.key === "Enter") commitRename(g.id);
 											if (e.key === "Escape") setEditingGroupId(null);
 										}}
-										onClick={(e) => e.stopPropagation()}
+										onClick={stopPropagation}
 										{...stylex.props(styles.groupInput)}
 									/>
 								) : (
@@ -355,10 +361,11 @@ export const PopoutHeader = memo(function PopoutHeader(
 						<button
 							key={pane.id}
 							type="button"
-							onClick={() => onSelectPane(pane.id)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter" || e.key === " ") onSelectPane(pane.id);
-							}}
+							onClick={onSelectPane.bind(null, pane.id)}
+							onKeyDown={activateOnEnterOrSpace.bind(
+								null,
+								onSelectPane.bind(null, pane.id)
+							)}
 							{...stylex.props(
 								styles.paneTab,
 								isSelected && styles.paneTabActive
@@ -370,10 +377,10 @@ export const PopoutHeader = memo(function PopoutHeader(
 							</span>
 							<IconButton
 								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									onRemovePane(pane.id);
-								}}
+								onClick={stopPropagationAndCall.bind(
+									null,
+									onRemovePane.bind(null, pane.id)
+								)}
 								variant="ghost"
 								size="xs"
 							>

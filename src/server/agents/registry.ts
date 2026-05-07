@@ -1,5 +1,6 @@
 import type { ChatAgentKind } from "../../features/agents/agents.ts";
 import { getAgentDefinition } from "../../features/agents/agents.ts";
+import { hasId } from "../../lib/data.ts";
 import { claudeAdapter } from "./adapters/claude.ts";
 import { codexAdapter } from "./adapters/codex.ts";
 import type { AgentAdapter } from "./types.ts";
@@ -21,7 +22,7 @@ export function resolveAgentModel(
 	if (!definition.models.length) return undefined;
 	if (
 		requestedModel &&
-		definition.models.some((model) => model.id === requestedModel)
+		definition.models.some(hasId.bind(null, requestedModel))
 	) {
 		return requestedModel;
 	}

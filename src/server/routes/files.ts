@@ -3,6 +3,11 @@ import { mkdir, readdir, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import { tryRoute } from "../../lib/route-helpers.ts";
+import {
+	isAllowedLocalPath,
+	isWithinDirectory,
+	resolveRealAllowedLocalPath,
+} from "../security.ts";
 
 const IMAGE_EXTENSIONS = new Set([
 	".png",
@@ -10,12 +15,13 @@ const IMAGE_EXTENSIONS = new Set([
 	".jpeg",
 	".gif",
 	".webp",
-	".svg",
 	".bmp",
 	".ico",
 ]);
 
 const TMP_DIR = resolve(PROJECT_ROOT, "data/.tmp");
+const MAX_TEMP_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_SERVED_FILE_BYTES = 20 * 1024 * 1024;
 
 export function fileRoutes() {
 	return {
@@ -25,13 +31,12 @@ export function fileRoutes() {
 				const cwd = url.searchParams.get("cwd") || PROJECT_ROOT;
 				const query = (url.searchParams.get("q") || "").toLowerCase();
 				const limit = Math.min(
-					Number(url.searchParams.get("limit") || "20"),
+					Number(url.searchParams.get("limit") || "20") || 20,
 					50
 				);
 
-				const homeDir = process.env.HOME || "/Users";
 				const resolvedCwd = resolve(cwd);
-				if (!resolvedCwd.startsWith(homeDir)) {
+				if (!isAllowedLocalPath(resolvedCwd)) {
 					return Response.json({ error: "Invalid directory" }, { status: 400 });
 				}
 
@@ -79,9 +84,24 @@ export function fileRoutes() {
 				const file = formData.get("file") as File | null;
 				if (!file)
 					return Response.json({ error: "No file provided" }, { status: 400 });
+				if (file.size > MAX_TEMP_UPLOAD_BYTES) {
+					return Response.json({ error: "File too large" }, { status: 413 });
+				}
+				const ext = file.name
+					.substring(file.name.lastIndexOf("."))
+					.toLowerCase();
+				if (!IMAGE_EXTENSIONS.has(ext)) {
+					return Response.json(
+						{ error: "Unsupported file type" },
+						{ status: 400 }
+					);
+				}
 				await mkdir(TMP_DIR, { recursive: true });
 				const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
 				const filePath = resolve(TMP_DIR, `${Date.now()}-${safeName}`);
+				if (!isWithinDirectory(filePath, TMP_DIR)) {
+					return Response.json({ error: "Invalid file name" }, { status: 400 });
+				}
 				await Bun.write(filePath, file);
 				return Response.json({ path: filePath });
 			}),
@@ -124,7 +144,7 @@ export function fileRoutes() {
 				if (!filePath)
 					return Response.json({ error: "No path provided" }, { status: 400 });
 				const resolved = resolve(filePath);
-				if (!resolved.startsWith(TMP_DIR))
+				if (!isWithinDirectory(resolved, TMP_DIR))
 					return Response.json({ error: "Access denied" }, { status: 403 });
 				const { unlink } = await import("node:fs/promises");
 				await unlink(resolved);
@@ -140,15 +160,24 @@ export function fileRoutes() {
 					return Response.json({ error: "No path provided" }, { status: 400 });
 				}
 
-				const resolvedPath = resolve(filePath);
-				const homeDir = process.env.HOME || "/Users";
-
-				// Allow serving files from temp directory or user's home directory
+				const resolvedPath = await resolveRealAllowedLocalPath(filePath);
+				if (!resolvedPath) {
+					return Response.json({ error: "Access denied" }, { status: 403 });
+				}
 				if (
-					!resolvedPath.startsWith(TMP_DIR) &&
-					!resolvedPath.startsWith(homeDir)
+					!isWithinDirectory(resolvedPath, TMP_DIR) &&
+					!isWithinDirectory(resolvedPath, PROJECT_ROOT)
 				) {
 					return Response.json({ error: "Access denied" }, { status: 403 });
+				}
+				const ext = resolvedPath
+					.substring(resolvedPath.lastIndexOf("."))
+					.toLowerCase();
+				if (!IMAGE_EXTENSIONS.has(ext)) {
+					return Response.json(
+						{ error: "Unsupported file type" },
+						{ status: 400 }
+					);
 				}
 
 				if (!existsSync(resolvedPath)) {
@@ -156,10 +185,13 @@ export function fileRoutes() {
 				}
 
 				const file = Bun.file(resolvedPath);
+				if (file.size > MAX_SERVED_FILE_BYTES) {
+					return Response.json({ error: "File too large" }, { status: 413 });
+				}
 				return new Response(file, {
 					headers: {
 						"Content-Type": file.type || "application/octet-stream",
-						"Cache-Control": "public, max-age=3600",
+						"Cache-Control": "no-store",
 					},
 				});
 			}),

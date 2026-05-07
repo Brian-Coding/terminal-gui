@@ -82,11 +82,12 @@ export const TerminalGrid = memo(function TerminalGrid(
 	useLayoutEffect(() => {
 		const el = containerRef.current?.parentElement;
 		if (!el) return;
-		const ro = new ResizeObserver(([entry]) =>
-			setContainerHeight(entry.contentRect.height)
-		);
+		const ro = new ResizeObserver(([entry]) => {
+			if (!entry) return;
+			setContainerHeight(entry.contentRect.height);
+		});
 		ro.observe(el);
-		return () => ro.disconnect();
+		return ro.disconnect.bind(ro);
 	}, []);
 
 	const handleHeaderDragStart = useCallback(

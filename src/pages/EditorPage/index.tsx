@@ -11,7 +11,7 @@ import {
 	type AgentChatHandle,
 	AgentChatView,
 } from "../../components/chat/AgentChatView.tsx";
-import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
+import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
 import {
 	ChangeFileSidebar,
 	type SelectedFile,
@@ -29,22 +29,34 @@ import {
 import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
+import {
+	isStagedChange,
+	isUnstagedTrackedChange,
+	isUntrackedChange,
+	orderGitFiles,
+	orderProjectGitFiles,
+} from "../../lib/git-file-utils.ts";
+import {
+	listenWindowEvent,
+	setupTerminalThemePanelShortcut,
+} from "../../lib/react-events.ts";
 import { useGitChangeActions } from "../../features/git/useGitChangeActions.ts";
 import { type DiffRequest, useGitDiff } from "../../features/git/useGitDiff.ts";
 import {
 	useCommitDetails,
 	useGitGraph,
 } from "../../features/git/useGitGraph.ts";
-import {
-	type GitFileEntry,
-	type GitProjectStatus,
-	useGitStatus,
-} from "../../features/git/useGitStatus.ts";
+import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
 import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
 } from "../../lib/app-theme.ts";
+import {
+	incrementNumber,
+	isNonEmptyString,
+	toggleBoolean,
+} from "../../lib/data.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import {
 	loadTerminalState,
@@ -100,14 +112,6 @@ function stableSessions(next: Session[]): Session[] {
 	return next;
 }
 
-function getAllFiles(project: GitProjectStatus | null): GitFileEntry[] {
-	if (!project) return [];
-	return [
-		...project.files.filter((f) => !f.staged),
-		...project.files.filter((f) => f.staged),
-	];
-}
-
 function loadZenMode() {
 	return readStoredValue("terminal-editor-zen") === "true";
 }
@@ -140,7 +144,7 @@ export function EditorPage() {
 	} | null>(null);
 
 	const [sessionVersion, setSessionVersion] = useState(0);
-	const terminalState = useMemo(() => loadTerminalState(), [sessionVersion]);
+	const terminalState = useMemo(loadTerminalState, [sessionVersion]);
 	const themeId =
 		terminalState?.themeId ?? mapAppThemeToTerminalTheme(loadAppThemeId());
 	const allSessions = useMemo(
@@ -154,11 +158,7 @@ export function EditorPage() {
 	);
 	const { sessions: liveAgentSessions } = useAgentSessions();
 	const trackedDirs = useMemo(
-		() => [
-			...new Set(
-				sessions.map((s) => s.cwd).filter((cwd): cwd is string => Boolean(cwd))
-			),
-		],
+		() => [...new Set(sessions.map((s) => s.cwd).filter(isNonEmptyString))],
 		[sessions]
 	);
 	const {
@@ -174,10 +174,8 @@ export function EditorPage() {
 		clear: clearDiff,
 	} = useGitDiff();
 
-	const refresh = useCallback(() => setTick((v) => v + 1), []);
-	useEffect(() => {
-		wsClient.connect();
-	}, []);
+	const refresh = useCallback(() => setTick(incrementNumber), []);
+	useEffect(wsClient.connect.bind(wsClient), []);
 
 	useEffect(() => {
 		const id = setInterval(refresh, 5000);
@@ -243,11 +241,17 @@ export function EditorPage() {
 		refetchStatus: refetchGit,
 	});
 	const project = session?.cwd ? (projectMap.get(session.cwd) ?? null) : null;
-	const files = useMemo(() => getAllFiles(project), [project]);
-	const staged = project?.files.filter((f) => f.staged) ?? [];
-	const modified =
-		project?.files.filter((f) => !f.staged && f.status !== "?") ?? [];
-	const untracked = project?.files.filter((f) => f.status === "?") ?? [];
+	const files = useMemo(
+		(orderProjectGitFiles<{
+			path: string;
+			staged: boolean;
+			status: string;
+		}>).bind(null, project),
+		[project]
+	);
+	const staged = project?.files.filter(isStagedChange) ?? [];
+	const modified = project?.files.filter(isUnstagedTrackedChange) ?? [];
+	const untracked = project?.files.filter(isUntrackedChange) ?? [];
 	const selectedFile = session ? (selectedFiles[session.paneId] ?? null) : null;
 	const {
 		commits: graphCommits,
@@ -294,7 +298,7 @@ export function EditorPage() {
 		),
 		onDiffLoaded: useCallback(() => {
 			refresh();
-			setTimeout(() => setScrollToChange((v) => v + 1), 50);
+			setTimeout(setScrollToChange, 50, incrementNumber);
 		}, [refresh]),
 	});
 
@@ -307,25 +311,15 @@ export function EditorPage() {
 	useEffect(() => {
 		const syncEditorShellState = () => {
 			setZenMode(loadZenMode());
-			setSessionVersion((v) => v + 1);
+			setSessionVersion(incrementNumber);
 			// Re-read selected pane (sidebar may have changed it)
 			const storedPane = readStoredValue("editor-selected-pane");
 			if (storedPane) setSelectedPaneId(storedPane);
 		};
-		window.addEventListener("terminal-shell-change", syncEditorShellState);
-		return () =>
-			window.removeEventListener("terminal-shell-change", syncEditorShellState);
+		return listenWindowEvent("terminal-shell-change", syncEditorShellState);
 	}, []);
 
-	useEffect(() => {
-		const handleSettingsOpen = () => setShowSettings(true);
-		window.addEventListener("terminal-open-theme-panel", handleSettingsOpen);
-		return () =>
-			window.removeEventListener(
-				"terminal-open-theme-panel",
-				handleSettingsOpen
-			);
-	}, []);
+	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
 
 	useEffect(() => {
 		if (diff && !diffLoading) checkPendingScroll();
@@ -414,8 +408,7 @@ export function EditorPage() {
 				cycleFile(-1);
 			}
 		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
+		return listenWindowEvent("keydown", onKey);
 	}, [cycleFile]);
 
 	const closePane = useCallback(
@@ -571,7 +564,7 @@ export function EditorPage() {
 							<span {...stylex.props(styles.spacer)} />
 							<IconButton
 								type="button"
-								onClick={() => setShowSettings(true)}
+								onClick={setShowSettings.bind(null, true)}
 								variant="ghost"
 								size="xs"
 								title="Settings"
@@ -624,7 +617,7 @@ export function EditorPage() {
 								sidebarVisible={sidebarVisible}
 								onStageFile={stageFile}
 								onUnstageFile={unstageFile}
-								onToggleSidebar={() => setSidebarVisible((value) => !value)}
+								onToggleSidebar={setSidebarVisible.bind(null, toggleBoolean)}
 								onMainViewModeChange={setMainViewMode}
 								onDiffViewModeChange={setDiffViewMode}
 							/>
@@ -637,8 +630,8 @@ export function EditorPage() {
 			{showSettings && (
 				<TerminalSettingsPanel
 					themeId={themeId}
-					onThemeChange={() => setSessionVersion((v) => v + 1)}
-					onClose={() => setShowSettings(false)}
+					onThemeChange={() => setSessionVersion(incrementNumber)}
+					onClose={setShowSettings.bind(null, false)}
 				/>
 			)}
 		</div>

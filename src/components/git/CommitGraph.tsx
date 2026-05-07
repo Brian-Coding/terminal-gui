@@ -1,6 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { GraphNode, GraphRow } from "../../features/git/useGitGraph";
+import { toggleBoolean } from "../../lib/data.ts";
 import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import {
@@ -604,7 +605,7 @@ export const CommitGraph = memo(function CommitGraph({
 				graphWidth={graphWidth}
 				columns={columns}
 				isColumnsOpen={isColumnsOpen}
-				onToggleColumnsMenu={() => setIsColumnsOpen((o) => !o)}
+				onToggleColumnsMenu={setIsColumnsOpen.bind(null, toggleBoolean)}
 				onToggleColumn={toggleColumn}
 			/>
 

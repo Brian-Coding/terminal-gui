@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import { stopPropagation } from "../../../../src/lib/react-events.ts";
 import { Icons } from "./Icons";
 import { models } from "./data";
 
-// Claude Avatar component for consistency
-function ClaudeAvatar({ size = "sm" }: { size?: "sm" | "md" | "lg" }) {
+export function ClaudeAvatar({ size = "sm" }: { size?: "sm" | "md" | "lg" }) {
 	const sizeClasses = {
 		sm: "w-5 h-5 text-[8px]",
 		md: "w-6 h-6 text-[9px]",
@@ -27,7 +27,7 @@ export function ModelSelector({
 	onSelect: (id: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const current = models.find((m) => m.id === selectedModel) || models[0];
+	const current = models.find((m) => m.id === selectedModel) ?? models[0]!;
 
 	return (
 		<div className="relative">
@@ -73,8 +73,7 @@ export function ModelSelector({
 	);
 }
 
-// Command Bar
-function CommandBar({ onClose }: { onClose: () => void }) {
+export function CommandBar({ onClose }: { onClose: () => void }) {
 	const [query, setQuery] = useState("");
 	const commands = [
 		{ icon: <Icons.File />, label: "Open file...", shortcut: "⌘P" },
@@ -91,7 +90,7 @@ function CommandBar({ onClose }: { onClose: () => void }) {
 		>
 			<div
 				className="w-full max-w-lg rounded-xl border border-inferay-border bg-inferay-bg shadow-2xl overflow-hidden"
-				onClick={(e) => e.stopPropagation()}
+				onClick={stopPropagation}
 			>
 				<div className="flex items-center gap-3 px-4 py-3 border-b border-inferay-border">
 					<Icons.Search />

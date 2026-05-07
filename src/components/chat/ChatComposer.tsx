@@ -7,6 +7,8 @@ import {
 	getAgentDefinition,
 } from "../../features/agents/agents.ts";
 import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
+import { hasId } from "../../lib/data.ts";
+import { setInputValue, stopPropagation } from "../../lib/react-events.ts";
 import {
 	color,
 	colorValues,
@@ -29,7 +31,7 @@ import type {
 	AttachedImageInfo,
 	QueuedMessageInfo,
 	SlashCommand,
-} from "./agent-chat-shared.ts";
+} from "../../features/chat/agent-chat-shared.ts";
 import { Markdown } from "./ChatRichContent.tsx";
 import { renderInputHighlights } from "./chat-token-decorators.tsx";
 
@@ -40,6 +42,13 @@ type AgentOption = {
 };
 
 const HIGHLIGHT_CHAR_LIMIT = 6000;
+const CLOSED_MD_PREVIEW = {
+	show: false,
+	path: "",
+	content: null,
+	loading: false,
+	error: null,
+};
 
 export function ChatComposer({
 	showInput,
@@ -181,7 +190,7 @@ export function ChatComposer({
 	const saveQueuedEdit = (id: string) => {
 		const trimmed = editingQueueText.trim();
 		if (trimmed) {
-			const item = queueRef.current?.find((q) => q.id === id);
+			const item = queueRef.current?.find(hasId.bind(null, id));
 			if (item) {
 				item.text = trimmed;
 				item.displayText = trimmed;
@@ -330,7 +339,10 @@ export function ChatComposer({
 													type="text"
 													ref={(el) => el?.focus()}
 													value={editingQueueText}
-													onChange={(e) => setEditingQueueText(e.target.value)}
+													onChange={setInputValue.bind(
+														null,
+														setEditingQueueText
+													)}
 													onKeyDown={(e) => {
 														if (e.key === "Enter") {
 															saveQueuedEdit(qm.id);
@@ -563,33 +575,14 @@ export function ChatComposer({
 			{mdPreview.show && (
 				<div
 					{...stylex.props(styles.modalBackdrop)}
-					onClick={() =>
-						setMdPreview({
-							show: false,
-							path: "",
-							content: null,
-							loading: false,
-							error: null,
-						})
-					}
+					onClick={setMdPreview.bind(null, CLOSED_MD_PREVIEW)}
 				>
-					<div
-						{...stylex.props(styles.modal)}
-						onClick={(e) => e.stopPropagation()}
-					>
+					<div {...stylex.props(styles.modal)} onClick={stopPropagation}>
 						<div {...stylex.props(styles.modalHeader)}>
 							<span {...stylex.props(styles.modalTitle)}>{mdPreview.path}</span>
 							<IconButton
 								type="button"
-								onClick={() =>
-									setMdPreview({
-										show: false,
-										path: "",
-										content: null,
-										loading: false,
-										error: null,
-									})
-								}
+								onClick={setMdPreview.bind(null, CLOSED_MD_PREVIEW)}
 								variant="ghost"
 								size="xs"
 							>

@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import { IconCamera, IconTrash } from "../../components/ui/Icons.tsx";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
+import { lacksPath } from "../../lib/data.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
@@ -57,7 +58,7 @@ export function ImagesPage() {
 				await fetch(`/api/delete-temp?path=${encodeURIComponent(img.path)}`, {
 					method: "DELETE",
 				});
-				setImages((prev) => prev.filter((i) => i.path !== img.path));
+				setImages((prev) => prev.filter(lacksPath.bind(null, img.path)));
 				if (selected?.path === img.path) setSelected(null);
 			} catch {}
 		},

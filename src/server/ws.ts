@@ -106,7 +106,8 @@ export const websocketHandler = {
 			// Checkpoint protocol
 			else if (msg.type === "checkpoint:revert") {
 				const result = await CheckpointService.revertToCheckpoint(
-					msg.checkpointId
+					msg.checkpointId,
+					msg.paneId
 				);
 				ws.send(
 					JSON.stringify({

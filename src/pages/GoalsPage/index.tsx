@@ -2,7 +2,9 @@ import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useState } from "react";
 import { Markdown } from "../../components/chat/ChatRichContent.tsx";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
+import { hasPaneId } from "../../lib/data.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
+import { basename, formatElapsedMs } from "../../lib/format.ts";
 import {
 	color,
 	controlSize,
@@ -48,20 +50,6 @@ interface GoalInfo {
 	checks: string[];
 }
 
-function formatElapsed(ms: number) {
-	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	if (minutes < 1) return `${seconds}s`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 1) return `${minutes}m ${seconds}s`;
-	return `${hours}h ${minutes % 60}m`;
-}
-
-function getFolder(path: string) {
-	return path.split("/").filter(Boolean).pop() || path;
-}
-
 export function GoalsPage() {
 	const [goals, setGoals] = useState<GoalInfo[]>([]);
 	const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
@@ -82,17 +70,14 @@ export function GoalsPage() {
 	}, [loadGoals]);
 
 	const selectedGoal =
-		goals.find((goal) => goal.paneId === selectedGoalId) ?? goals[0] ?? null;
+		goals.find(hasPaneId.bind(null, selectedGoalId)) ?? goals[0] ?? null;
 
 	useEffect(() => {
 		if (goals.length === 0) {
 			setSelectedGoalId(null);
 			return;
 		}
-		if (
-			!selectedGoalId ||
-			!goals.some((goal) => goal.paneId === selectedGoalId)
-		) {
+		if (!selectedGoalId || !goals.some(hasPaneId.bind(null, selectedGoalId))) {
 			setSelectedGoalId(goals[0]!.paneId);
 		}
 	}, [goals, selectedGoalId]);
@@ -125,11 +110,11 @@ export function GoalsPage() {
 									{goal.objective}
 								</span>
 								<span {...stylex.props(styles.goalMeta)}>
-									{getFolder(goal.cwd)}
+									{basename(goal.cwd.replace(/\/+$/, "")) || goal.cwd}
 									<span {...stylex.props(styles.metaDivider)} />
 									{goal.turns} turns
 									<span {...stylex.props(styles.metaDivider)} />
-									{formatElapsed(goal.elapsedMs)}
+									{formatElapsedMs(goal.elapsedMs)}
 								</span>
 							</span>
 							<GoalStatus goal={goal} />
@@ -149,7 +134,8 @@ export function GoalsPage() {
 							<div {...stylex.props(styles.detailHeader)}>
 								<div {...stylex.props(styles.detailTitleBlock)}>
 									<span {...stylex.props(styles.detailKicker)}>
-										{getFolder(selectedGoal.cwd)}
+										{basename(selectedGoal.cwd.replace(/\/+$/, "")) ||
+											selectedGoal.cwd}
 									</span>
 									<h2 {...stylex.props(styles.detailTitle)}>
 										{selectedGoal.objective}

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 
+import { removePidFromList } from "../lib/data.ts";
 import { fetchJsonOr, sendJson } from "../lib/fetch-json.ts";
 
 import { usePollingResource } from "./usePollingResource.ts";
@@ -33,7 +34,7 @@ export function useRunningPorts(pollInterval = 10000) {
 			try {
 				const res = await sendJson("/api/terminal/ports/kill", { pid });
 				if (res.ok) {
-					setPorts((prev) => prev.filter((p) => p.pid !== pid));
+					setPorts(removePidFromList<RunningPort>(pid));
 					setTimeout(() => {
 						if (mountedRef.current) {
 							void refetchPorts();

@@ -1,3 +1,4 @@
+import { hasId } from "../../lib/data.ts";
 import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
 
 export type ChatAgentKind = "claude" | "codex";
@@ -175,13 +176,11 @@ function normalizeDefaultChatSettings(
 		agentKind === FALLBACK_DEFAULT_CHAT_SETTINGS.agentKind
 			? FALLBACK_DEFAULT_CHAT_SETTINGS.model
 			: definition.defaultModel;
-	const model = definition.models.some(
-		(option) => option.id === settings?.model
-	)
+	const model = definition.models.some(hasId.bind(null, settings?.model))
 		? settings!.model!
 		: fallbackModel;
 	const reasoningLevel = CODEX_REASONING_LEVELS.some(
-		(level) => level.id === settings?.reasoningLevel
+		hasId.bind(null, settings?.reasoningLevel)
 	)
 		? settings!.reasoningLevel!
 		: FALLBACK_DEFAULT_CHAT_SETTINGS.reasoningLevel;

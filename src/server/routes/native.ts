@@ -1,5 +1,6 @@
 import { platform } from "node:os";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
+import { resolveAllowedLocalPath } from "../security.ts";
 import { resolveNativeCoreBinary } from "../services/native-core.ts";
 import { computeNativeDiff } from "../services/native-diff.ts";
 
@@ -13,7 +14,7 @@ async function openPath(path: string, reveal: boolean) {
 			: os === "win32"
 				? reveal
 					? ["explorer.exe", `/select,${path}`]
-					: ["cmd.exe", "/c", "start", "", path]
+					: ["explorer.exe", path]
 				: ["xdg-open", reveal ? path.replace(/\/[^/]*$/, "") || path : path];
 	const proc = Bun.spawn(command, {
 		stdout: "ignore",
@@ -59,7 +60,11 @@ export function nativeRoutes() {
 				if (typeof body.path !== "string" || !body.path.trim()) {
 					return badRequest("Missing path");
 				}
-				const ok = await openPath(body.path, Boolean(body.reveal));
+				const resolvedPath = resolveAllowedLocalPath(body.path);
+				if (!resolvedPath) {
+					return Response.json({ error: "Access denied" }, { status: 403 });
+				}
+				const ok = await openPath(resolvedPath, Boolean(body.reveal));
 				return Response.json({ ok });
 			}),
 		},

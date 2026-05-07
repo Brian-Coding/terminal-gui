@@ -19,6 +19,8 @@ import {
 } from "../../components/ui/Icons.tsx";
 import type { DiffLine, HunkDiff } from "../../features/git/useGitDiff.ts";
 import { useShikiHighlighter } from "../../hooks/useShikiHighlighter.ts";
+import { contentOf } from "../../lib/data.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
 import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
 import {
 	color,
@@ -713,7 +715,7 @@ function VirtualPanel({
 			setViewH(e[0]?.contentRect.height ?? 600)
 		);
 		obs.observe(el);
-		return () => obs.disconnect();
+		return obs.disconnect.bind(obs);
 	}, [scrollRef]);
 
 	const lastAppliedScrollRef = useRef(-1);
@@ -766,7 +768,7 @@ function VirtualPanel({
 		lines.length,
 		Math.ceil((scrollTop + viewH) / LINE_H) + OVERSCAN
 	);
-	const lineContents = useMemo(() => lines.map((l) => l.content), [lines]);
+	const lineContents = useMemo(() => lines.map(contentOf), [lines]);
 	const { getHighlightedLine, isReady: shikiReady } = useShikiHighlighter({
 		filePath: filePath ?? `file.${ext}`,
 		lines: lineContents,
@@ -943,7 +945,7 @@ const DiffMinimap = memo(function DiffMinimap({
 			setContainerHeight(e[0]?.contentRect.height ?? 0)
 		);
 		obs.observe(el);
-		return () => obs.disconnect();
+		return obs.disconnect.bind(obs);
 	}, []);
 
 	if (totalHeight <= 0 || lines.length === 0 || containerHeight <= 0) {
@@ -1131,8 +1133,7 @@ export const GitDiffView = memo(function GitDiffView({
 			}
 		};
 
-		window.addEventListener("keydown", handleKeyDown);
-		return () => window.removeEventListener("keydown", handleKeyDown);
+		return listenWindowEvent("keydown", handleKeyDown);
 	}, [goToNextChange, goToPrevChange]);
 
 	useEffect(() => {
@@ -1282,7 +1283,7 @@ export const GitDiffView = memo(function GitDiffView({
 	const markdownContent = isMarkdown
 		? diff.newLines
 				.filter((l) => l.type !== "hunk" && l.type !== "spacer")
-				.map((l) => l.content)
+				.map(contentOf)
 				.join("\n")
 		: "";
 

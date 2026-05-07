@@ -8,6 +8,8 @@ import {
 	IconX,
 } from "../../components/ui/Icons.tsx";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
+import { basename } from "../../lib/format.ts";
+import { setInputValue } from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
 interface QuickPick {
@@ -123,7 +125,7 @@ export function InlineDirectoryPicker({
 		};
 		fetchQuickPicks();
 		setTimeout(() => inputRef.current?.focus(), 10);
-		return () => controller.abort();
+		return controller.abort.bind(controller);
 	}, []);
 
 	useEffect(() => {
@@ -221,8 +223,6 @@ export function InlineDirectoryPicker({
 		return path;
 	};
 
-	const nameFromPath = (path: string) => path.split("/").pop() || path;
-
 	const showResults = true;
 
 	if (hideInput) {
@@ -233,7 +233,7 @@ export function InlineDirectoryPicker({
 						<button
 							type="button"
 							key={pick.path}
-							onClick={() => handleItemClick(pick.path)}
+							onClick={handleItemClick.bind(null, pick.path)}
 							{...stylex.props(
 								styles.resultRow,
 								i === selectedIndex && styles.resultRowActive
@@ -265,12 +265,10 @@ export function InlineDirectoryPicker({
 					<div {...stylex.props(styles.selectedBar)}>
 						{selectedPaths.slice(0, 4).map((p) => (
 							<span key={p} {...stylex.props(styles.selectedTag)}>
-								<span {...stylex.props(styles.truncate)}>
-									{nameFromPath(p)}
-								</span>
+								<span {...stylex.props(styles.truncate)}>{basename(p)}</span>
 								<button
 									type="button"
-									onClick={() => togglePath(p)}
+									onClick={togglePath.bind(null, p)}
 									{...stylex.props(styles.tagRemove)}
 								>
 									<IconX size={8} />
@@ -298,7 +296,7 @@ export function InlineDirectoryPicker({
 								type="button"
 								key={pick.path}
 								onMouseDown={(e) => e.preventDefault()}
-								onClick={() => handleItemClick(pick.path)}
+								onClick={handleItemClick.bind(null, pick.path)}
 								{...stylex.props(
 									styles.resultRowCompact,
 									i === selectedIndex && styles.resultRowActiveAccent
@@ -333,10 +331,10 @@ export function InlineDirectoryPicker({
 							{selectedPaths.map((p, i) => (
 								<span key={p} {...stylex.props(styles.selectedTagStrong)}>
 									{i === 0 ? "● " : ""}
-									{nameFromPath(p)}
+									{basename(p)}
 									<button
 										type="button"
-										onClick={() => togglePath(p)}
+										onClick={togglePath.bind(null, p)}
 										{...stylex.props(styles.tagRemove)}
 									>
 										<IconX size={8} />
@@ -354,7 +352,7 @@ export function InlineDirectoryPicker({
 						ref={inputRef}
 						type="text"
 						value={query}
-						onChange={(e) => setQuery(e.target.value)}
+						onChange={setInputValue.bind(null, setQuery)}
 						onKeyDown={handleKeyDown}
 						placeholder="Search folder..."
 						autoComplete="off"

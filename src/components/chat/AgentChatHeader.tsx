@@ -4,7 +4,7 @@ import { getAgentDefinition } from "../../features/agents/agents.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import { IconGitBranch, IconX } from "../ui/Icons.tsx";
-import type { AgentChatSession } from "./agent-chat-shared.ts";
+import type { AgentChatSession } from "../../features/chat/agent-chat-shared.ts";
 
 interface AgentChatHeaderProps {
 	paneId: string;

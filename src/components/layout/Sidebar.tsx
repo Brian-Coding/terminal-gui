@@ -12,7 +12,20 @@ import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
 import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
+import {
+	hasId,
+	hasRole,
+	lacksId,
+	noop,
+	toggleBoolean,
+} from "../../lib/data.ts";
 import { fetchJsonOr, postJson } from "../../lib/fetch-json.ts";
+import {
+	listenWindowEvent,
+	setInputValue,
+	stopPropagation,
+	stopPropagationAndCall,
+} from "../../lib/react-events.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import {
 	readStoredBoolean,
@@ -33,7 +46,7 @@ import {
 	loadStoredMessages,
 	loadStoredSummary,
 	saveStoredSummary,
-} from "../chat/chat-session-store.ts";
+} from "../../features/chat/chat-session-store.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import {
 	IconChevronRight,
@@ -80,7 +93,7 @@ function deriveSummary(paneId: string): string | null {
 	const messages = loadStoredMessages<{ role: string; content: string }>(
 		paneId
 	);
-	const firstUser = messages.find((m) => m.role === "user");
+	const firstUser = messages.find(hasRole.bind(null, "user"));
 	if (!firstUser?.content) return null;
 	// Fire off AI title generation in background
 	if (!pendingTitleRequests.has(paneId)) {
@@ -95,7 +108,7 @@ function deriveSummary(paneId: string): string | null {
 					window.dispatchEvent(new Event("terminal-shell-change"));
 				}
 			})
-			.catch(() => {})
+			.catch(noop)
 			.finally(() => pendingTitleRequests.delete(paneId));
 	}
 	// Return a temporary placeholder from the first line while AI generates
@@ -214,7 +227,7 @@ function WorkspaceItem({
 	const handleClick = () => {
 		if (isActive) {
 			// Already active — toggle expand/collapse
-			setExpanded((prev) => !prev);
+			setExpanded(toggleBoolean);
 		} else {
 			// Select this workspace and expand
 			onSelect();
@@ -231,8 +244,8 @@ function WorkspaceItem({
 						? styles.collapsedWorkspaceActive
 						: styles.collapsedWorkspaceIdle
 				)}
-				onMouseEnter={() => setHovered(true)}
-				onMouseLeave={() => setHovered(false)}
+				onMouseEnter={setHovered.bind(null, true)}
+				onMouseLeave={setHovered.bind(null, false)}
 			>
 				<button
 					type="button"
@@ -250,10 +263,7 @@ function WorkspaceItem({
 				{canDelete && hovered && (
 					<button
 						type="button"
-						onClick={(e) => {
-							e.stopPropagation();
-							onDelete();
-						}}
+						onClick={stopPropagationAndCall.bind(null, onDelete)}
 						{...stylex.props(styles.collapsedWorkspaceDelete)}
 						title="Delete workspace"
 					>
@@ -270,8 +280,8 @@ function WorkspaceItem({
 				styles.workspaceWrap,
 				isActive && expanded && styles.workspaceWrapActive
 			)}
-			onMouseEnter={() => setHovered(true)}
-			onMouseLeave={() => setHovered(false)}
+			onMouseEnter={setHovered.bind(null, true)}
+			onMouseLeave={setHovered.bind(null, false)}
 		>
 			<div
 				{...stylex.props(
@@ -286,9 +296,9 @@ function WorkspaceItem({
 						<input
 							ref={inputRef}
 							value={editValue}
-							onChange={(e) => setEditValue(e.target.value)}
+							onChange={setInputValue.bind(null, setEditValue)}
 							onBlur={commitRename}
-							onClick={(e) => e.stopPropagation()}
+							onClick={stopPropagation}
 							onKeyDown={(e) => {
 								if (e.key === "Enter") commitRename();
 								if (e.key === "Escape") setEditing(false);
@@ -318,10 +328,7 @@ function WorkspaceItem({
 				{canDelete && hovered && !editing && (
 					<button
 						type="button"
-						onClick={(e) => {
-							e.stopPropagation();
-							onDelete();
-						}}
+						onClick={stopPropagationAndCall.bind(null, onDelete)}
 						{...stylex.props(styles.workspaceDelete)}
 						title="Delete workspace"
 					>
@@ -347,7 +354,7 @@ function WorkspaceItem({
 										key={pane.id}
 										pane={pane}
 										isActive={isActive && pane.id === selectedPaneId}
-										onClick={() => onSelectPane(pane.id)}
+										onClick={onSelectPane.bind(null, pane.id)}
 									/>
 								))}
 							</div>
@@ -392,8 +399,7 @@ export function Sidebar() {
 
 	useEffect(() => {
 		const refresh = () => setWorkspaces(loadWorkspaces());
-		window.addEventListener("terminal-shell-change", refresh);
-		return () => window.removeEventListener("terminal-shell-change", refresh);
+		return listenWindowEvent("terminal-shell-change", refresh);
 	}, [loadWorkspaces]);
 
 	const selectWorkspace = useCallback(
@@ -439,7 +445,7 @@ export function Sidebar() {
 		const state = loadTerminalState();
 		if (!state) return;
 		const selectedGroup =
-			state.groups.find((group) => group.id === state.selectedGroupId) ??
+			state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
 			state.groups[0];
 		const pane = createPendingAgentChatPane();
 		const group = {
@@ -463,7 +469,7 @@ export function Sidebar() {
 		const state = loadTerminalState();
 		if (!state) return;
 		if (state.groups.length <= 1) return;
-		const filtered = state.groups.filter((g) => g.id !== groupId);
+		const filtered = state.groups.filter(lacksId.bind(null, groupId));
 		const newSelected =
 			state.selectedGroupId === groupId
 				? (filtered[0]?.id ?? null)
@@ -539,10 +545,10 @@ export function Sidebar() {
 			}
 		}
 		void loadGithubAccount();
-		window.addEventListener("focus", loadGithubAccount);
+		const removeFocusListener = listenWindowEvent("focus", loadGithubAccount);
 		return () => {
 			cancelled = true;
-			window.removeEventListener("focus", loadGithubAccount);
+			removeFocusListener();
 		};
 	}, []);
 

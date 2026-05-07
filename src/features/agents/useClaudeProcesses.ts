@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 
+import { removePidFromList, runIfMounted } from "../../lib/data.ts";
 import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
 
 import { usePollingResource } from "../../hooks/usePollingResource.ts";
@@ -39,12 +40,11 @@ export function useClaudeProcesses(pollInterval = 10000) {
 					pid,
 				});
 				if (res.ok) {
-					setProcesses((prev) => prev.filter((p) => p.pid !== pid));
-					setTimeout(() => {
-						if (mountedRef.current) {
-							void refetchProcesses();
-						}
-					}, 1000);
+					setProcesses(removePidFromList<ClaudeProcess>(pid));
+					setTimeout(
+						runIfMounted.bind(null, mountedRef, refetchProcesses),
+						1000
+					);
 				}
 			} catch (e) {
 				console.error("Failed to kill claude process:", e);
@@ -57,11 +57,7 @@ export function useClaudeProcesses(pollInterval = 10000) {
 		try {
 			await sendJson("/api/terminal/claude-processes/kill-all");
 		} catch {}
-		setTimeout(() => {
-			if (mountedRef.current) {
-				void refetchProcesses();
-			}
-		}, 2000);
+		setTimeout(runIfMounted.bind(null, mountedRef, refetchProcesses), 2000);
 	}, [mountedRef, refetchProcesses, setProcesses]);
 	return { processes, killProcess, killAll, refetch: refetchProcesses };
 }

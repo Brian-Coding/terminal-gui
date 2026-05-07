@@ -1,10 +1,12 @@
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
-	createCodexEnv,
-	resolveCodexBinary,
+	createAgentEnv,
+	resolveAgentBinary,
 } from "../../../features/terminal/terminal-command.ts";
+import { noop } from "../../../lib/data.ts";
+import { basename, trimText as trimSummary } from "../../../lib/format.ts";
 import { summarizeToolInput } from "../events.ts";
 import {
 	drainStreamToString,
@@ -43,24 +45,20 @@ function extractText(value: any): string {
 	return "";
 }
 
-function basename(value: string): string {
-	return value.split("/").pop() || value;
-}
-
-function trimSummary(value: string, max = 48): string {
-	return value.length > max ? `${value.slice(0, max)}...` : value;
+function safePaneFileStem(paneId: string): string {
+	return paneId.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "pane";
 }
 
 function summarizeToolEvent(toolName: string, payload: any): string {
 	if (!payload) return toolName;
 	if (typeof payload.command === "string" && payload.command) {
-		return trimSummary(payload.command);
+		return trimSummary(payload.command, 48);
 	}
 	if (typeof payload.cmd === "string" && payload.cmd) {
-		return trimSummary(payload.cmd);
+		return trimSummary(payload.cmd, 48);
 	}
 	if (typeof payload.query === "string" && payload.query) {
-		return trimSummary(payload.query);
+		return trimSummary(payload.query, 48);
 	}
 	if (typeof payload.path === "string" && payload.path) {
 		return basename(payload.path);
@@ -91,9 +89,9 @@ function summarizeToolEvent(toolName: string, payload: any): string {
 }
 
 function handleCodexEvent(
-	event: any,
 	ctx: AgentRunContext,
-	state: CodexRunState
+	state: CodexRunState,
+	event: any
 ) {
 	const closeTool = () => {
 		if (!state.toolOpen) return;
@@ -287,17 +285,13 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 	displayName: "Codex",
 
 	createState(ctx) {
+		const paneFileStem = safePaneFileStem(ctx.paneId);
 		return {
 			outputPath: resolve(
 				tmpdir(),
-				`inferay-codex-${ctx.paneId}-${Date.now()}.txt`
+				`inferay-codex-${paneFileStem}-${Date.now()}.txt`
 			),
-			debugLogPath: resolve(
-				process.cwd(),
-				"data",
-				"codex-debug",
-				`codex-events-${ctx.paneId}-${Date.now()}.json`
-			),
+			debugLogPath: "",
 			assistantOpen: false,
 			toolOpen: false,
 			sawAssistantStream: false,
@@ -309,14 +303,18 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 
 	createHandle(prompt, ctx, state): AgentHandle {
 		let proc: ReturnType<typeof Bun.spawn> | null = null;
+		const killProcess = () => {
+			try {
+				proc?.kill();
+			} catch {}
+		};
 
 		return {
 			async run() {
-				const codexCmd = resolveCodexBinary();
+				const codexCmd = resolveAgentBinary("codex");
 				const baseArgs = [
 					"--json",
 					"--skip-git-repo-check",
-					"--dangerously-bypass-approvals-and-sandbox",
 					"--output-last-message",
 					state.outputPath,
 				];
@@ -337,7 +335,7 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 					stdout: "pipe",
 					stderr: "pipe",
 					cwd: ctx.cwd,
-					env: createCodexEnv(),
+					env: createAgentEnv("codex"),
 				});
 
 				const stderrPromise = drainStreamToString(
@@ -346,21 +344,17 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
 				const decoder = new TextDecoder();
 				let leftover = "";
-				const rawEvents: any[] = [];
 
 				while (true) {
 					const { done, value } = await reader.read();
 					if (done) break;
 					leftover += decoder.decode(value, { stream: true });
-					leftover = parseNdjsonLines(leftover, (event) => {
-						rawEvents.push(event);
-						handleCodexEvent(event, ctx, state);
-					});
+					leftover = parseNdjsonLines(
+						leftover,
+						handleCodexEvent.bind(null, ctx, state)
+					);
 				}
-				flushNdjsonLeftover(leftover, (event) => {
-					rawEvents.push(event);
-					handleCodexEvent(event, ctx, state);
-				});
+				flushNdjsonLeftover(leftover, handleCodexEvent.bind(null, ctx, state));
 
 				const exitCode = await proc.exited;
 				proc = null;
@@ -388,31 +382,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 						state.lastAssistantMessage = assistantText;
 					}
 				} finally {
-					await unlink(state.outputPath).catch(() => {});
+					await unlink(state.outputPath).catch(noop);
 				}
-				await mkdir(resolve(process.cwd(), "data", "codex-debug"), {
-					recursive: true,
-				});
-				await writeFile(
-					state.debugLogPath,
-					JSON.stringify(
-						{
-							createdAt: new Date().toISOString(),
-							paneId: ctx.paneId,
-							cwd: ctx.cwd,
-							referencePaths: ctx.referencePaths ?? [],
-							model: ctx.model ?? null,
-							reasoningLevel: ctx.reasoningLevel ?? null,
-							exitCode,
-							stderr: stderrText,
-							lastAssistantMessage: assistantText,
-							events: rawEvents,
-						},
-						null,
-						2
-					)
-				);
-
 				if (
 					assistantText &&
 					!state.sawAssistantStream &&
@@ -435,17 +406,8 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				return { lastAssistantMessage: state.lastAssistantMessage };
 			},
 
-			stop() {
-				try {
-					proc?.kill();
-				} catch {}
-			},
-
-			kill() {
-				try {
-					proc?.kill();
-				} catch {}
-			},
+			stop: killProcess,
+			kill: killProcess,
 		};
 	},
 };

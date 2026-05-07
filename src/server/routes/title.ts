@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
+import { resolveAllowedLocalPath } from "../security.ts";
 import { runAgentOnce } from "../services/agent-once.ts";
 
 const execFileAsync = promisify(execFile);
@@ -92,7 +93,14 @@ export function titleRoutes() {
 				if (typeof body.cwd !== "string" || !body.cwd.trim()) {
 					return badRequest("Missing cwd");
 				}
-				const message = await generateCommitMessage(body.cwd);
+				const cwd = resolveAllowedLocalPath(body.cwd);
+				if (!cwd) {
+					return Response.json(
+						{ error: "Path is outside allowed local roots" },
+						{ status: 403 }
+					);
+				}
+				const message = await generateCommitMessage(cwd);
 				if (!message) {
 					return Response.json(
 						{

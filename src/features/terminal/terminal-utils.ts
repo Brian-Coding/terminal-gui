@@ -6,8 +6,14 @@ import {
 } from "../agents/agents.ts";
 
 import { sendJson } from "../../lib/fetch-json.ts";
+import { hasId, noop } from "../../lib/data.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
 
-import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
+import {
+	readStoredJson,
+	readStoredValue,
+	writeStoredJson,
+} from "../../lib/stored-json.ts";
 
 export type { AgentKind } from "../agents/agents.ts";
 
@@ -41,6 +47,40 @@ const THEME_IDS = {
 } as const;
 
 export type ThemeId = (typeof THEME_IDS)[keyof typeof THEME_IDS];
+export type TerminalLayoutMode = "grid" | "rows";
+
+export function loadTerminalLayoutMode(): TerminalLayoutMode {
+	return readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows";
+}
+
+export function syncTerminalLayoutMode(
+	setLayoutMode: (mode: TerminalLayoutMode) => void
+): void {
+	setLayoutMode(loadTerminalLayoutMode());
+}
+
+export function listenTerminalLayoutMode(
+	setLayoutMode: (mode: TerminalLayoutMode) => void
+): () => void {
+	return listenWindowEvent(
+		"terminal-shell-change",
+		syncTerminalLayoutMode.bind(null, setLayoutMode)
+	);
+}
+
+export function appendPaneToGroup(
+	selectedGroupId: string,
+	pane: TerminalPaneModel,
+	group: TerminalGroupModel
+): TerminalGroupModel {
+	return group.id === selectedGroupId
+		? {
+				...group,
+				panes: [...group.panes, pane],
+				selectedPaneId: pane.id,
+			}
+		: group;
+}
 
 // Compact: [id, name, bg, fg, cursor, separator]
 // prettier-ignore
@@ -190,7 +230,7 @@ export function loadTerminalState(): TerminalSavedState | null {
 export function saveTerminalState(state: TerminalSavedState): void {
 	_cachedTerminalState = state;
 	writeStoredJson(TERMINAL_STORAGE_KEY, state);
-	sendJson("/api/terminal/state", state).catch(() => {});
+	sendJson("/api/terminal/state", state).catch(noop);
 }
 
 /**
@@ -287,7 +327,7 @@ export function migrateGroup(
 ): TerminalGroupModel {
 	const panes =
 		group.panes.length > 0 ? group.panes : [createPendingAgentChatPane()];
-	const selectedPaneId = panes.some((pane) => pane.id === group.selectedPaneId)
+	const selectedPaneId = panes.some(hasId.bind(null, group.selectedPaneId))
 		? group.selectedPaneId
 		: (panes[0]?.id ?? null);
 	return {
@@ -439,8 +479,8 @@ export function getThemeById(themeId: string): TerminalTheme {
 		return { id: "custom" as ThemeId, name: "Custom", ...c };
 	}
 	return (
-		TERMINAL_THEMES.find((t) => t.id === themeId) ??
-		TERMINAL_THEMES.find((t) => t.id === DEFAULT_THEME_ID) ??
+		TERMINAL_THEMES.find(hasId.bind(null, themeId)) ??
+		TERMINAL_THEMES.find(hasId.bind(null, DEFAULT_THEME_ID)) ??
 		TERMINAL_THEMES[0]
 	);
 }

@@ -1,4 +1,5 @@
 import type { ChatAgentKind } from "../../features/agents/agents.ts";
+import { noop } from "../../lib/data.ts";
 import { getAgentAdapter, resolveAgentModel } from "../agents/registry.ts";
 import type { AgentRunContext } from "../agents/types.ts";
 
@@ -65,9 +66,9 @@ export async function runAgentOnce({
 			if (event.type === "result") resultText = event.text;
 			if (event.type === "text-delta") streamedText += event.text;
 		},
-		emitStatus: () => {},
-		emitActivity: () => {},
-		emitSystemMessage: () => {},
+		emitStatus: noop,
+		emitActivity: noop,
+		emitSystemMessage: noop,
 	};
 
 	const state = adapter.createState(ctx);

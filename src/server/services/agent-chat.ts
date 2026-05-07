@@ -1,8 +1,8 @@
 import type { ServerWebSocket } from "bun";
 import type { ChatAgentKind } from "../../features/agents/agents.ts";
 import {
-	createClaudeEnv,
-	resolveClaudeBinary,
+	createAgentEnv,
+	resolveAgentBinary,
 } from "../../features/terminal/terminal-command.ts";
 import type { AgentEvent } from "../agents/events.ts";
 import { getAgentAdapter, resolveAgentModel } from "../agents/registry.ts";
@@ -12,6 +12,7 @@ import {
 	parseNdjsonLines,
 } from "../agents/stream-utils.ts";
 import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
+import { resolveAllowedLocalPath } from "../security.ts";
 import { CheckpointService } from "./checkpoint.ts";
 
 interface ServerChatMessage {
@@ -312,12 +313,16 @@ function normalizeReferencePaths(paths?: string[]): string[] {
 	const normalized: string[] = [];
 	for (const path of paths) {
 		if (typeof path !== "string") continue;
-		const trimmed = path.trim();
-		if (!trimmed || seen.has(trimmed)) continue;
-		seen.add(trimmed);
-		normalized.push(trimmed);
+		const resolved = resolveAllowedLocalPath(path.trim());
+		if (!resolved || seen.has(resolved)) continue;
+		seen.add(resolved);
+		normalized.push(resolved);
 	}
 	return normalized;
+}
+
+function normalizeCwd(cwd?: string): string {
+	return (cwd ? resolveAllowedLocalPath(cwd) : null) ?? process.cwd();
 }
 
 async function finalizeCheckpoint(
@@ -694,6 +699,7 @@ export const ChatService = {
 		systemPrefix?: string
 	) {
 		const nextReferencePaths = normalizeReferencePaths(referencePaths);
+		const nextCwd = normalizeCwd(cwd);
 		let session = sessions.get(paneId);
 		if (!session) {
 			session = {
@@ -704,7 +710,7 @@ export const ChatService = {
 				sessionId: clientSessionId || null,
 				clients: new Set([ws]),
 				currentHandle: null,
-				cwd: cwd || process.cwd(),
+				cwd: nextCwd,
 				referencePaths: nextReferencePaths,
 				messageBuffer: new ChatMessageBuffer(),
 				cleanupTimer: null,
@@ -722,7 +728,7 @@ export const ChatService = {
 		session.model = resolveAgentModel(agentKind, model);
 		if (reasoningLevel !== undefined) session.reasoningLevel = reasoningLevel;
 		session.clients.add(ws);
-		if (cwd) session.cwd = cwd;
+		if (cwd) session.cwd = nextCwd;
 		if (referencePaths) session.referencePaths = nextReferencePaths;
 		if (!session.sessionId && clientSessionId)
 			updateSessionId(session, paneId, clientSessionId);
@@ -819,8 +825,8 @@ export const ChatService = {
 		ws: ServerWebSocket<any>,
 		cwd?: string
 	) {
-		const effectiveCwd = cwd || process.cwd();
-		const claudeCmd = resolveClaudeBinary();
+		const effectiveCwd = normalizeCwd(cwd);
+		const claudeCmd = resolveAgentBinary("claude");
 
 		sendTo(ws, { type: "chat:btw:start", paneId, question: text });
 
@@ -828,20 +834,12 @@ export const ChatService = {
 
 		try {
 			const proc = Bun.spawn(
-				[
-					claudeCmd,
-					"-p",
-					text,
-					"--output-format",
-					"stream-json",
-					"--verbose",
-					"--dangerously-skip-permissions",
-				],
+				[claudeCmd, "-p", text, "--output-format", "stream-json", "--verbose"],
 				{
 					stdout: "pipe",
 					stderr: "pipe",
 					cwd: effectiveCwd,
-					env: createClaudeEnv(),
+					env: createAgentEnv("claude"),
 				}
 			);
 			const stderrPromise = drainStreamToString(

@@ -91,7 +91,7 @@ export function useGitChangeActions({
 		if (!cwd || !commitMessage.trim() || isCommitting) return;
 		setIsCommitting(true);
 		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 35_000);
+		const timeout = setTimeout(controller.abort.bind(controller), 35_000);
 		try {
 			const response = await fetch("/api/git/commit", {
 				method: "POST",

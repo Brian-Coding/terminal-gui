@@ -10,9 +10,7 @@ export function readStoredJson<T>(key: string, fallback: T): T {
 export function writeStoredJson<T>(key: string, value: T) {
 	try {
 		localStorage.setItem(key, JSON.stringify(value));
-	} catch {
-		// Ignore storage write failures.
-	}
+	} catch {}
 }
 
 export function readStoredValue(
@@ -29,9 +27,13 @@ export function readStoredValue(
 export function writeStoredValue(key: string, value: string): void {
 	try {
 		localStorage.setItem(key, value);
-	} catch {
-		// Ignore storage write failures.
-	}
+	} catch {}
+}
+
+export function removeStoredValue(key: string): void {
+	try {
+		localStorage.removeItem(key);
+	} catch {}
 }
 
 export function readStoredBoolean(key: string, fallback = false): boolean {

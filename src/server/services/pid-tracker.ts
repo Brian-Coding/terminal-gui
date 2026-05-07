@@ -1,7 +1,7 @@
-import { resolve } from "path";
 import { atomicWriteJson } from "../../lib/atomic-write.ts";
+import { userDataPath } from "../../lib/user-data.ts";
 
-const PID_FILE = resolve(import.meta.dir, "../../data/pids.json");
+const PID_FILE = userDataPath("runtime-pids.json");
 const isWin = process.platform === "win32";
 
 const _g = globalThis as any;
@@ -20,12 +20,13 @@ function scheduleSave(): void {
 	saveTimer = setTimeout(() => {
 		saveTimer = null;
 		saveChain = saveChain
-			.then(() => writePids())
+			.then(writePids)
 			.catch((e) => console.error("[PID] save error:", e));
 	}, 200);
 }
 
 async function treeKill(pid: number): Promise<void> {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return;
 	try {
 		if (isWin) {
 			const proc = Bun.spawn(["taskkill", "/T", "/F", "/PID", String(pid)], {
@@ -41,11 +42,13 @@ async function treeKill(pid: number): Promise<void> {
 
 export const PidTracker = {
 	trackPid(pid: number): void {
+		if (!Number.isSafeInteger(pid) || pid <= 0) return;
 		activePids.add(pid);
 		scheduleSave();
 	},
 
 	untrackPid(pid: number): void {
+		if (!Number.isSafeInteger(pid) || pid <= 0) return;
 		activePids.delete(pid);
 		scheduleSave();
 	},
@@ -54,9 +57,15 @@ export const PidTracker = {
 		try {
 			const file = Bun.file(PID_FILE);
 			if (await file.exists()) {
-				const pids: number[] = await file.json();
-				if (pids.length > 0) {
-					await Promise.all(pids.map(treeKill));
+				const pids = (await file.json()) as unknown;
+				if (Array.isArray(pids) && pids.length > 0) {
+					await Promise.all(
+						pids
+							.filter(
+								(pid): pid is number => Number.isSafeInteger(pid) && pid > 0
+							)
+							.map(treeKill)
+					);
 				}
 			}
 		} catch (e) {
@@ -72,7 +81,7 @@ export const PidTracker = {
 			saveTimer = null;
 		}
 		saveChain = saveChain
-			.then(() => writePids())
+			.then(writePids)
 			.catch((e) => console.error("[PID] flush error:", e));
 		return saveChain;
 	},

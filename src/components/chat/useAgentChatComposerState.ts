@@ -1,7 +1,11 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	loadStoredQueue,
+	saveStoredQueue,
+} from "../../features/chat/chat-session-store.ts";
+import { hasPath, lacksId, lacksPath } from "../../lib/data.ts";
 import { wsClient } from "../../lib/websocket.ts";
-import { loadStoredQueue, saveStoredQueue } from "./chat-session-store.ts";
 
 interface QueuedMessage {
 	id: string;
@@ -111,7 +115,7 @@ export function useAgentChatComposerState(paneId: string) {
 
 	const removeQueuedMessage = useCallback(
 		(id: string) => {
-			setQueuedMessages(queueRef.current.filter((q) => q.id !== id));
+			setQueuedMessages(queueRef.current.filter(lacksId.bind(null, id)));
 		},
 		[setQueuedMessages]
 	);
@@ -148,9 +152,9 @@ export function useAgentChatComposerState(paneId: string) {
 
 	const removeAttachedImage = useCallback((path: string) => {
 		setAttachedImages((prev) => {
-			const target = prev.find((img) => img.path === path);
+			const target = prev.find(hasPath.bind(null, path));
 			if (target) URL.revokeObjectURL(target.previewUrl);
-			return prev.filter((img) => img.path !== path);
+			return prev.filter(lacksPath.bind(null, path));
 		});
 	}, []);
 

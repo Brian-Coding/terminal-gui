@@ -3,6 +3,7 @@ import { memo } from "react";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import { IconCircle, IconRobot, IconX } from "../../components/ui/Icons.tsx";
 import type { ClaudeProcess } from "../../features/agents/useClaudeProcesses.ts";
+import { basename } from "../../lib/format.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { CollapsibleSidebarSection } from "./CollapsibleSidebarSection.tsx";
 
@@ -19,11 +20,6 @@ function formatElapsed(elapsed: string): string {
 	if (parts.length === 3) return `${parts[0]}h ${parts[1]}m`;
 	if (parts.length === 4) return `${parts[0]}d ${parts[1]}h`;
 	return elapsed;
-}
-
-function cwdLabel(cwd: string): string {
-	if (!cwd) return "unknown";
-	return cwd.split("/").pop() || cwd;
 }
 
 export const ClaudeProcessesSidebar = memo(function ClaudeProcessesSidebar({
@@ -90,7 +86,7 @@ export const ClaudeProcessesSidebar = memo(function ClaudeProcessesSidebar({
 					</div>
 					<div {...stylex.props(styles.content)}>
 						<p {...stylex.props(styles.title)} title={p.cwd || `PID ${p.pid}`}>
-							{cwdLabel(p.cwd) || `PID ${p.pid}`}
+							{p.cwd ? basename(p.cwd) : "unknown"}
 						</p>
 						<p {...stylex.props(styles.metaText, styles.truncate)}>
 							{p.cpu}% CPU · {formatRss(p.rss)} · {formatElapsed(p.elapsed)}

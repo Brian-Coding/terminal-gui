@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import React, { useCallback, useMemo, useState } from "react";
+import { noop } from "../../lib/data.ts";
 import {
 	color,
 	controlSize,
@@ -35,7 +36,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 				setCopied(true);
 				setTimeout(() => setCopied(false), 1500);
 			})
-			.catch(() => {});
+			.catch(noop);
 	}, [text]);
 	const copyButtonProps = stylex.props(
 		styles.copyButton,

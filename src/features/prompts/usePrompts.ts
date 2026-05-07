@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson, postJson, sendJson } from "../../lib/fetch-json.ts";
+import { lacksObjectId } from "../../lib/data.ts";
 import type { Prompt } from "../../pages/PromptsPage/support.ts";
 
 let promptsCache: Prompt[] | null = null;
@@ -80,7 +81,7 @@ export function usePrompts() {
 		if (!response.ok) {
 			throw new Error(`Request failed: ${response.status}`);
 		}
-		const updated = (promptsCache ?? []).filter((prompt) => prompt._id !== id);
+		const updated = (promptsCache ?? []).filter(lacksObjectId.bind(null, id));
 		updatePromptsCache(updated);
 		setPrompts(updated);
 	}, []);

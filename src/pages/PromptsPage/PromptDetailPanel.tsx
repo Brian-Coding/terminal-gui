@@ -2,6 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import { IconPencil, IconTrash, IconX } from "../../components/ui/Icons.tsx";
 import { measureTextHeight } from "../../lib/pretext-utils.ts";
+import { setInputValue } from "../../lib/react-events.ts";
 import {
 	color,
 	controlSize,
@@ -60,7 +61,7 @@ function AutoTextarea({
 		<textarea
 			ref={ref}
 			value={value}
-			onChange={(e) => onChange(e.target.value)}
+			onChange={setInputValue.bind(null, onChange)}
 			placeholder={placeholder}
 			{...stylex.props(styles.templateTextarea)}
 			style={{ minHeight: 100, maxHeight: 300 }}
@@ -160,13 +161,15 @@ export function PromptDetailPanel({
 						</>
 					) : (
 						<>
-							<button
-								type="button"
-								onClick={onStartEditing}
-								{...stylex.props(styles.iconButton)}
-							>
-								<IconPencil size={12} />
-							</button>
+							{selectedPrompt && !selectedPrompt.isBuiltIn && (
+								<button
+									type="button"
+									onClick={onStartEditing}
+									{...stylex.props(styles.iconButton)}
+								>
+									<IconPencil size={12} />
+								</button>
+							)}
 							{selectedPrompt && !selectedPrompt.isBuiltIn && (
 								<button
 									type="button"

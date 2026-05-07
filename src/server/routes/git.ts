@@ -1,6 +1,11 @@
 import { resolve } from "node:path";
+import { rangeContainsLine } from "../../lib/data.ts";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import { unwatchDirectory, watchDirectory } from "../services/file-watcher.ts";
+import {
+	resolveAllowedChildPath,
+	resolveRealAllowedLocalPath,
+} from "../security.ts";
 import {
 	commit,
 	type GitStatusResult,
@@ -21,6 +26,15 @@ import {
 	getNativeGitGraph,
 	getNativeGitStatuses,
 } from "../services/native-git.ts";
+import {
+	forbidden,
+	getDiffParams,
+	isChangedGitFile,
+	safeCwd,
+	safeFilePath,
+	safeHash,
+	safeLimit,
+} from "./git-route-input.ts";
 
 interface DiffLine {
 	number: number | null;
@@ -66,24 +80,13 @@ function tooLargeDiff(message: string, isNew = false): HunkDiff {
 	};
 }
 
-function getDiffParams(req: Request) {
-	const url = new URL(req.url);
-	const cwd = url.searchParams.get("cwd");
-	const file = url.searchParams.get("file");
-	if (!cwd || !file) return null;
-	return {
-		cwd,
-		file,
-		staged: url.searchParams.get("staged") === "true",
-	};
-}
-
 async function getHunkDiff(
 	cwd: string,
 	filePath: string,
 	staged: boolean
 ): Promise<HunkDiff> {
-	const fullPath = resolve(cwd, filePath);
+	const fullPath = await resolveRealAllowedLocalPath(resolve(cwd, filePath));
+	if (!fullPath) return tooLargeDiff("Access denied");
 
 	if (isImageFile(filePath)) {
 		return {
@@ -226,11 +229,6 @@ async function getHunkDiff(
 		}
 	}
 
-	const isRemoved = (n: number) =>
-		removedRanges.some((r) => n >= r.start && n <= r.end);
-	const isAdded = (n: number) =>
-		addedRanges.some((r) => n >= r.start && n <= r.end);
-
 	const oldLines: DiffLine[] = [];
 	const newLines: DiffLine[] = [];
 	let oldIdx = 0;
@@ -239,8 +237,12 @@ async function getHunkDiff(
 	while (oldIdx < oldFileLines.length || newIdx < newFileLines.length) {
 		const oldLineNum = oldIdx + 1;
 		const newLineNum = newIdx + 1;
-		const oldIsRemoved = oldIdx < oldFileLines.length && isRemoved(oldLineNum);
-		const newIsAdded = newIdx < newFileLines.length && isAdded(newLineNum);
+		const oldIsRemoved =
+			oldIdx < oldFileLines.length &&
+			rangeContainsLine(removedRanges, oldLineNum);
+		const newIsAdded =
+			newIdx < newFileLines.length &&
+			rangeContainsLine(addedRanges, newLineNum);
 
 		if (oldIsRemoved && newIsAdded) {
 			oldLines.push({
@@ -311,7 +313,7 @@ export function gitRoutes() {
 		"/api/git/status": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
+				const cwd = safeCwd(url.searchParams.get("cwd"));
 				if (!cwd) return badRequest("Missing cwd parameter");
 				const nativeProjects = await getNativeGitStatuses([cwd]);
 				const nativeStatus = nativeProjects?.[0] ?? null;
@@ -335,9 +337,10 @@ export function gitRoutes() {
 				const seen = new Set<string>();
 				const unique: string[] = [];
 				for (const cwd of body.cwds) {
-					if (!seen.has(cwd)) {
-						seen.add(cwd);
-						unique.push(cwd);
+					const safe = safeCwd(cwd);
+					if (safe && !seen.has(safe)) {
+						seen.add(safe);
+						unique.push(safe);
 					}
 				}
 				const nativeStatuses = await getNativeGitStatuses(unique);
@@ -353,6 +356,12 @@ export function gitRoutes() {
 			GET: tryRoute(async (req) => {
 				const params = getDiffParams(req);
 				if (!params) return badRequest("Missing cwd or file parameter");
+				if (!(await isChangedGitFile(params.cwd, params.file))) {
+					return Response.json(
+						{ error: "File is not changed" },
+						{ status: 404 }
+					);
+				}
 				const diff = await getDiff(params.cwd, params.file, params.staged);
 				return Response.json({ diff });
 			}),
@@ -362,6 +371,12 @@ export function gitRoutes() {
 			GET: tryRoute(async (req) => {
 				const params = getDiffParams(req);
 				if (!params) return badRequest("Missing cwd or file parameter");
+				if (!(await isChangedGitFile(params.cwd, params.file))) {
+					return Response.json(
+						{ error: "File is not changed" },
+						{ status: 404 }
+					);
+				}
 				const result = await getHunkDiff(
 					params.cwd,
 					params.file,
@@ -375,9 +390,18 @@ export function gitRoutes() {
 			GET: tryRoute(async (req) => {
 				const params = getDiffParams(req);
 				if (!params) return badRequest("Missing cwd or file parameter");
+				if (!(await isChangedGitFile(params.cwd, params.file))) {
+					return Response.json(
+						{ error: "File is not changed" },
+						{ status: 404 }
+					);
+				}
 				const { cwd, file, staged } = params;
-
-				const fullPath = resolve(cwd, file);
+				const childPath = resolveAllowedChildPath(cwd, file);
+				const fullPath = childPath
+					? await resolveRealAllowedLocalPath(childPath)
+					: null;
+				if (!fullPath) return forbidden();
 
 				if (isImageFile(file)) {
 					return Response.json({
@@ -437,7 +461,7 @@ export function gitRoutes() {
 		"/api/git/branches": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
+				const cwd = safeCwd(url.searchParams.get("cwd"));
 				if (!cwd) return badRequest("Missing cwd parameter");
 				const branches = await getBranches(cwd);
 				return Response.json({ branches });
@@ -447,8 +471,8 @@ export function gitRoutes() {
 		"/api/git/log": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
-				const limit = Number(url.searchParams.get("limit") || 20);
+				const cwd = safeCwd(url.searchParams.get("cwd"));
+				const limit = safeLimit(url.searchParams.get("limit"), 20, 200);
 				if (!cwd) return badRequest("Missing cwd parameter");
 				const log = await getLog(cwd, limit);
 				return Response.json({ log });
@@ -458,8 +482,8 @@ export function gitRoutes() {
 		"/api/git/graph": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
-				const limit = Number(url.searchParams.get("limit") || 50);
+				const cwd = safeCwd(url.searchParams.get("cwd"));
+				const limit = safeLimit(url.searchParams.get("limit"), 50, 500);
 				if (!cwd) return badRequest("Missing cwd parameter");
 				const nativeCommits = await getNativeGitGraph(cwd, limit);
 				if (nativeCommits) {
@@ -473,9 +497,10 @@ export function gitRoutes() {
 		"/api/git/blame": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
+				const cwd = safeCwd(url.searchParams.get("cwd"));
 				const file = url.searchParams.get("file");
-				if (!cwd || !file) return badRequest("Missing cwd or file parameter");
+				if (!cwd || !safeFilePath(file))
+					return badRequest("Missing cwd or file parameter");
 				const blame = await getBlame(cwd, file);
 				return Response.json({ blame });
 			}),
@@ -484,10 +509,11 @@ export function gitRoutes() {
 		"/api/git/file-history": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
+				const cwd = safeCwd(url.searchParams.get("cwd"));
 				const file = url.searchParams.get("file");
-				const limit = Number(url.searchParams.get("limit") || 20);
-				if (!cwd || !file) return badRequest("Missing cwd or file parameter");
+				const limit = safeLimit(url.searchParams.get("limit"), 20, 200);
+				if (!cwd || !safeFilePath(file))
+					return badRequest("Missing cwd or file parameter");
 				const history = await getFileHistory(cwd, file, limit);
 				return Response.json({ history });
 			}),
@@ -496,9 +522,10 @@ export function gitRoutes() {
 		"/api/git/commit-details": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd");
+				const cwd = safeCwd(url.searchParams.get("cwd"));
 				const hash = url.searchParams.get("hash");
-				if (!cwd || !hash) return badRequest("Missing cwd or hash parameter");
+				if (!cwd || !safeHash(hash))
+					return badRequest("Missing cwd or hash parameter");
 				const details = await getCommitDetails(cwd, hash);
 				return Response.json({ details });
 			}),
@@ -507,10 +534,13 @@ export function gitRoutes() {
 		"/api/git/stage": {
 			POST: tryRoute(async (req) => {
 				const body = (await req.json()) as { cwd: string; file?: string };
-				if (!body.cwd) return badRequest("Missing cwd parameter");
+				const cwd = safeCwd(body.cwd);
+				if (!cwd) return badRequest("Missing cwd parameter");
+				if (body.file && !safeFilePath(body.file))
+					return badRequest("Invalid file parameter");
 				const success = body.file
-					? await stageFile(body.cwd, body.file)
-					: await stageAll(body.cwd);
+					? await stageFile(cwd, body.file)
+					: await stageAll(cwd);
 				return Response.json({ success });
 			}),
 		},
@@ -518,10 +548,13 @@ export function gitRoutes() {
 		"/api/git/unstage": {
 			POST: tryRoute(async (req) => {
 				const body = (await req.json()) as { cwd: string; file?: string };
-				if (!body.cwd) return badRequest("Missing cwd parameter");
+				const cwd = safeCwd(body.cwd);
+				if (!cwd) return badRequest("Missing cwd parameter");
+				if (body.file && !safeFilePath(body.file))
+					return badRequest("Invalid file parameter");
 				const success = body.file
-					? await unstageFile(body.cwd, body.file)
-					: await unstageAll(body.cwd);
+					? await unstageFile(cwd, body.file)
+					: await unstageAll(cwd);
 				return Response.json({ success });
 			}),
 		},
@@ -529,9 +562,10 @@ export function gitRoutes() {
 		"/api/git/commit": {
 			POST: tryRoute(async (req) => {
 				const body = (await req.json()) as { cwd: string; message: string };
-				if (!body.cwd) return badRequest("Missing cwd parameter");
+				const cwd = safeCwd(body.cwd);
+				if (!cwd) return badRequest("Missing cwd parameter");
 				if (!body.message) return badRequest("Missing message parameter");
-				const result = await commit(body.cwd, body.message);
+				const result = await commit(cwd, body.message);
 				return Response.json(result);
 			}),
 		},
@@ -539,8 +573,9 @@ export function gitRoutes() {
 		"/api/git/watch": {
 			POST: tryRoute(async (req) => {
 				const body = (await req.json()) as { cwd: string };
-				if (!body.cwd) return badRequest("Missing cwd parameter");
-				watchDirectory(body.cwd);
+				const cwd = safeCwd(body.cwd);
+				if (!cwd) return badRequest("Missing cwd parameter");
+				watchDirectory(cwd);
 				return Response.json({ ok: true });
 			}),
 		},
@@ -548,8 +583,9 @@ export function gitRoutes() {
 		"/api/git/unwatch": {
 			POST: tryRoute(async (req) => {
 				const body = (await req.json()) as { cwd: string };
-				if (!body.cwd) return badRequest("Missing cwd parameter");
-				unwatchDirectory(body.cwd);
+				const cwd = safeCwd(body.cwd);
+				if (!cwd) return badRequest("Missing cwd parameter");
+				unwatchDirectory(cwd);
 				return Response.json({ ok: true });
 			}),
 		},

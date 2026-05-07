@@ -1,4 +1,13 @@
 import { resolve } from "node:path";
+import {
+	isStagedChange,
+	isUnstagedTrackedChange,
+	isUntrackedChange,
+} from "../../lib/git-file-utils.ts";
+import {
+	isSafeRelativePath,
+	resolveRealAllowedLocalPath,
+} from "../security.ts";
 
 export interface GitFileEntry {
 	status: string; // M, A, D, ?, R, C, U
@@ -166,11 +175,9 @@ export async function getStatus(cwd: string): Promise<GitStatusResult | null> {
 		}
 	}
 
-	const stagedCount = files.filter((f) => f.staged).length;
-	const unstagedCount = files.filter(
-		(f) => !f.staged && f.status !== "?"
-	).length;
-	const untrackedCount = files.filter((f) => f.status === "?").length;
+	const stagedCount = files.filter(isStagedChange).length;
+	const unstagedCount = files.filter(isUnstagedTrackedChange).length;
+	const untrackedCount = files.filter(isUntrackedChange).length;
 	const name = cwd.split("/").pop() || cwd;
 
 	return {
@@ -192,6 +199,7 @@ export async function getDiff(
 	filePath: string,
 	staged: boolean
 ): Promise<string> {
+	if (!isSafeRelativePath(filePath) || !(await isGitRepo(cwd))) return "";
 	const args = staged
 		? ["diff", "--cached", "--", filePath]
 		: ["diff", "--", filePath];
@@ -200,11 +208,20 @@ export async function getDiff(
 
 	// For untracked files, read the file content and format as a diff
 	if (result === null || result.trim() === "") {
-		const fullPath = resolve(cwd, filePath);
+		const status = await runSafe(
+			["status", "--porcelain", "--", filePath],
+			cwd
+		);
+		if (!status?.split("\n").some((line) => line.startsWith("?? "))) {
+			return "";
+		}
+		const fullPath = await resolveRealAllowedLocalPath(resolve(cwd, filePath));
+		if (!fullPath) return "";
 		try {
 			const file = Bun.file(fullPath);
-			if (await file.exists()) {
+			if ((await file.exists()) && file.size <= 120_000) {
 				const content = await file.text();
+				if (content.includes("\0")) return "";
 				const lines = content.split("\n");
 				const diffLines = lines.map((l) => `+${l}`);
 				return [

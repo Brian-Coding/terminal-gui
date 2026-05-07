@@ -1,7 +1,10 @@
-import React from "react";
+import type React from "react";
 
-export const Icons = {
-	Terminal: () => (
+type IconProps = { className?: string };
+type IconComponent = (props: IconProps) => React.ReactElement;
+
+const iconNodes = {
+	Terminal: (
 		<svg
 			width="16"
 			height="16"
@@ -14,7 +17,7 @@ export const Icons = {
 			<line x1="12" y1="19" x2="20" y2="19" />
 		</svg>
 	),
-	Code: () => (
+	Code: (
 		<svg
 			width="16"
 			height="16"
@@ -27,7 +30,7 @@ export const Icons = {
 			<polyline points="8 6 2 12 8 18" />
 		</svg>
 	),
-	Git: () => (
+	Git: (
 		<svg
 			width="16"
 			height="16"
@@ -41,7 +44,7 @@ export const Icons = {
 			<path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12" />
 		</svg>
 	),
-	Graph: () => (
+	Graph: (
 		<svg
 			width="16"
 			height="16"
@@ -57,7 +60,7 @@ export const Icons = {
 			<path d="M6.5 7.5L10.5 10.5M13.5 10.5L17.5 7.5M12 14V16" />
 		</svg>
 	),
-	Timeline: () => (
+	Timeline: (
 		<svg
 			width="16"
 			height="16"
@@ -70,7 +73,7 @@ export const Icons = {
 			<polyline points="12 6 12 12 16 14" />
 		</svg>
 	),
-	Focus: () => (
+	Focus: (
 		<svg
 			width="16"
 			height="16"
@@ -83,7 +86,7 @@ export const Icons = {
 			<path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
 		</svg>
 	),
-	Settings: () => (
+	Settings: (
 		<svg
 			width="16"
 			height="16"
@@ -96,7 +99,7 @@ export const Icons = {
 			<path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
 		</svg>
 	),
-	Search: () => (
+	Search: (
 		<svg
 			width="14"
 			height="14"
@@ -109,7 +112,7 @@ export const Icons = {
 			<path d="M21 21l-4.35-4.35" />
 		</svg>
 	),
-	Command: () => (
+	Command: (
 		<svg
 			width="14"
 			height="14"
@@ -121,7 +124,7 @@ export const Icons = {
 			<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z" />
 		</svg>
 	),
-	Split: () => (
+	Split: (
 		<svg
 			width="14"
 			height="14"
@@ -134,7 +137,7 @@ export const Icons = {
 			<line x1="12" y1="3" x2="12" y2="21" />
 		</svg>
 	),
-	Expand: () => (
+	Expand: (
 		<svg
 			width="14"
 			height="14"
@@ -149,7 +152,7 @@ export const Icons = {
 			<line x1="3" y1="21" x2="10" y2="14" />
 		</svg>
 	),
-	Collapse: () => (
+	Collapse: (
 		<svg
 			width="14"
 			height="14"
@@ -164,7 +167,7 @@ export const Icons = {
 			<line x1="3" y1="21" x2="10" y2="14" />
 		</svg>
 	),
-	File: () => (
+	File: (
 		<svg
 			width="12"
 			height="12"
@@ -177,7 +180,7 @@ export const Icons = {
 			<polyline points="14 2 14 8 20 8" />
 		</svg>
 	),
-	Edit: () => (
+	Edit: (
 		<svg
 			width="10"
 			height="10"
@@ -190,7 +193,7 @@ export const Icons = {
 			<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
 		</svg>
 	),
-	Bash: () => (
+	Bash: (
 		<svg
 			width="10"
 			height="10"
@@ -203,7 +206,7 @@ export const Icons = {
 			<line x1="12" y1="19" x2="20" y2="19" />
 		</svg>
 	),
-	Eye: () => (
+	Eye: (
 		<svg
 			width="10"
 			height="10"
@@ -216,7 +219,7 @@ export const Icons = {
 			<circle cx="12" cy="12" r="3" />
 		</svg>
 	),
-	Send: () => (
+	Send: (
 		<svg
 			width="12"
 			height="12"
@@ -229,7 +232,7 @@ export const Icons = {
 			<polygon points="22 2 15 22 11 13 2 9 22 2" />
 		</svg>
 	),
-	Close: () => (
+	Close: (
 		<svg
 			width="10"
 			height="10"
@@ -242,7 +245,7 @@ export const Icons = {
 			<line x1="6" y1="6" x2="18" y2="18" />
 		</svg>
 	),
-	Chevron: () => (
+	Chevron: (
 		<svg
 			width="10"
 			height="10"
@@ -254,7 +257,7 @@ export const Icons = {
 			<polyline points="9 18 15 12 9 6" />
 		</svg>
 	),
-	Plus: () => (
+	Plus: (
 		<svg
 			width="12"
 			height="12"
@@ -267,21 +270,7 @@ export const Icons = {
 			<line x1="5" y1="12" x2="19" y2="12" />
 		</svg>
 	),
-	ArrowDown: ({ className }: { className?: string }) => (
-		<svg
-			width="12"
-			height="12"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			strokeWidth="2"
-			className={className}
-		>
-			<line x1="12" y1="5" x2="12" y2="19" />
-			<polyline points="19 12 12 19 5 12" />
-		</svg>
-	),
-	Pause: () => (
+	Pause: (
 		<svg
 			width="10"
 			height="10"
@@ -294,7 +283,7 @@ export const Icons = {
 			<rect x="14" y="4" width="4" height="16" rx="1" />
 		</svg>
 	),
-	Play: () => (
+	Play: (
 		<svg
 			width="10"
 			height="10"
@@ -305,7 +294,7 @@ export const Icons = {
 			<polygon points="5 3 19 12 5 21 5 3" />
 		</svg>
 	),
-	Move: () => (
+	Move: (
 		<svg
 			width="10"
 			height="10"
@@ -322,7 +311,7 @@ export const Icons = {
 			<line x1="12" y1="2" x2="12" y2="22" />
 		</svg>
 	),
-	Stack: () => (
+	Stack: (
 		<svg
 			width="14"
 			height="14"
@@ -335,7 +324,7 @@ export const Icons = {
 			<rect x="4" y="14" width="16" height="6" rx="1" />
 		</svg>
 	),
-	Context: () => (
+	Context: (
 		<svg
 			width="14"
 			height="14"
@@ -350,7 +339,7 @@ export const Icons = {
 			<rect x="14" y="14" width="7" height="7" rx="1" />
 		</svg>
 	),
-	Layers: () => (
+	Layers: (
 		<svg
 			width="14"
 			height="14"
@@ -364,7 +353,7 @@ export const Icons = {
 			<polyline points="2 12 12 17 22 12" />
 		</svg>
 	),
-	Minimap: () => (
+	Minimap: (
 		<svg
 			width="14"
 			height="14"
@@ -385,7 +374,7 @@ export const Icons = {
 			/>
 		</svg>
 	),
-	Sparkle: () => (
+	Sparkle: (
 		<svg
 			width="14"
 			height="14"
@@ -398,7 +387,7 @@ export const Icons = {
 			<path d="M19 15L20 18L23 19L20 20L19 23L18 20L15 19L18 18L19 15Z" />
 		</svg>
 	),
-	Undo: () => (
+	Undo: (
 		<svg
 			width="12"
 			height="12"
@@ -411,7 +400,7 @@ export const Icons = {
 			<path d="M3 13c0-4.97 4.03-9 9-9s9 4.03 9 9-4.03 9-9 9c-2.12 0-4.07-.74-5.6-1.97" />
 		</svg>
 	),
-	Redo: () => (
+	Redo: (
 		<svg
 			width="12"
 			height="12"
@@ -424,7 +413,7 @@ export const Icons = {
 			<path d="M21 13c0-4.97-4.03-9-9-9s-9 4.03-9 9 4.03 9 9 9c2.12 0 4.07-.74 5.6-1.97" />
 		</svg>
 	),
-	Branch: () => (
+	Branch: (
 		<svg
 			width="12"
 			height="12"
@@ -439,7 +428,7 @@ export const Icons = {
 			<path d="M18 9a9 9 0 0 1-9 9" />
 		</svg>
 	),
-	Check: () => (
+	Check: (
 		<svg
 			width="10"
 			height="10"
@@ -451,7 +440,7 @@ export const Icons = {
 			<polyline points="20 6 9 17 4 12" />
 		</svg>
 	),
-	Clock: () => (
+	Clock: (
 		<svg
 			width="12"
 			height="12"
@@ -464,12 +453,12 @@ export const Icons = {
 			<polyline points="12 6 12 12 16 14" />
 		</svg>
 	),
-	Zap: () => (
+	Zap: (
 		<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
 			<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
 		</svg>
 	),
-	Link: () => (
+	Link: (
 		<svg
 			width="10"
 			height="10"
@@ -482,7 +471,7 @@ export const Icons = {
 			<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
 		</svg>
 	),
-	User: () => (
+	User: (
 		<svg
 			width="14"
 			height="14"
@@ -495,7 +484,7 @@ export const Icons = {
 			<circle cx="12" cy="7" r="4" />
 		</svg>
 	),
-	Folder: () => (
+	Folder: (
 		<svg
 			width="12"
 			height="12"
@@ -507,7 +496,7 @@ export const Icons = {
 			<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
 		</svg>
 	),
-	FolderOpen: () => (
+	FolderOpen: (
 		<svg
 			width="12"
 			height="12"
@@ -520,7 +509,7 @@ export const Icons = {
 			<path d="M2 10h20" />
 		</svg>
 	),
-	FilePlus: () => (
+	FilePlus: (
 		<svg
 			width="10"
 			height="10"
@@ -535,7 +524,7 @@ export const Icons = {
 			<line x1="9" y1="15" x2="15" y2="15" />
 		</svg>
 	),
-	Book: () => (
+	Book: (
 		<svg
 			width="12"
 			height="12"
@@ -548,7 +537,7 @@ export const Icons = {
 			<path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
 		</svg>
 	),
-	Image: () => (
+	Image: (
 		<svg
 			width="14"
 			height="14"
@@ -562,7 +551,7 @@ export const Icons = {
 			<polyline points="21 15 16 10 5 21" />
 		</svg>
 	),
-	Chat: () => (
+	Chat: (
 		<svg
 			width="14"
 			height="14"
@@ -574,7 +563,7 @@ export const Icons = {
 			<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
 		</svg>
 	),
-	Workflow: () => (
+	Workflow: (
 		<svg
 			width="14"
 			height="14"
@@ -589,7 +578,7 @@ export const Icons = {
 			<path d="M9 6h6M6 9v6l6 3M18 9v3l-6 6" />
 		</svg>
 	),
-	Profile: () => (
+	Profile: (
 		<svg
 			width="14"
 			height="14"
@@ -600,6 +589,37 @@ export const Icons = {
 		>
 			<circle cx="12" cy="8" r="4" />
 			<path d="M4 20c0-4 4-6 8-6s8 2 8 6" />
+		</svg>
+	),
+} as const;
+
+function createStaticIcons<T extends Record<string, React.ReactElement>>(
+	nodes: T
+) {
+	const icons = {} as { [K in keyof T]: IconComponent };
+	for (const name of Object.keys(nodes) as Array<keyof T>) {
+		const node = nodes[name]!;
+		icons[name] = function Icon(_props: IconProps) {
+			return node;
+		};
+	}
+	return icons;
+}
+
+export const Icons = {
+	...createStaticIcons(iconNodes),
+	ArrowDown: ({ className }: IconProps) => (
+		<svg
+			width="12"
+			height="12"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="2"
+			className={className}
+		>
+			<line x1="12" y1="5" x2="12" y2="19" />
+			<polyline points="19 12 12 19 5 12" />
 		</svg>
 	),
 };

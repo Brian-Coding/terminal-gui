@@ -2,6 +2,11 @@ import * as stylex from "@stylexjs/stylex";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { hasId } from "../../lib/data.ts";
+import {
+	activateOnEnterOrSpacePreventDefault,
+	setInputValue,
+} from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { IconChevronDown } from "./Icons.tsx";
 
@@ -28,6 +33,15 @@ interface DropdownButtonProps {
 	menuPlacement?: "auto" | "top" | "bottom";
 }
 
+function selectDropdownOption(
+	onChange: (id: string) => void,
+	setOpen: (v: boolean) => void,
+	id: string
+) {
+	onChange(id);
+	setOpen(false);
+}
+
 function DropdownCustomOption({
 	opt,
 	isSelected,
@@ -45,17 +59,11 @@ function DropdownCustomOption({
 		<div
 			role="button"
 			tabIndex={0}
-			onClick={() => {
-				onChange(opt.id);
-				setOpen(false);
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					e.preventDefault();
-					onChange(opt.id);
-					setOpen(false);
-				}
-			}}
+			onClick={selectDropdownOption.bind(null, onChange, setOpen, opt.id)}
+			onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
+				null,
+				selectDropdownOption.bind(null, onChange, setOpen, opt.id)
+			)}
 			className="cursor-pointer"
 		>
 			{renderOption(opt, isSelected)}
@@ -147,7 +155,7 @@ export function DropdownButton({
 		}
 		setOpen(!open);
 	};
-	const selected = options.find((o) => o.id === value);
+	const selected = options.find(hasId.bind(null, value));
 	const buttonProps = stylex.props(
 		styles.button,
 		fullWidth ? styles.fullWidth : null,
@@ -168,7 +176,7 @@ export function DropdownButton({
 				ref={searchRef}
 				type="text"
 				value={search}
-				onChange={(e) => setSearch(e.target.value)}
+				onChange={setInputValue.bind(null, setSearch)}
 				placeholder="Search..."
 				{...stylex.props(styles.searchInput)}
 				onKeyDown={(e) => {
@@ -203,10 +211,12 @@ export function DropdownButton({
 						<button
 							type="button"
 							key={opt.id}
-							onClick={() => {
-								onChange(opt.id);
-								setOpen(false);
-							}}
+							onClick={selectDropdownOption.bind(
+								null,
+								onChange,
+								setOpen,
+								opt.id
+							)}
 							{...stylex.props(
 								styles.option,
 								opt.id === value ? styles.optionSelected : null

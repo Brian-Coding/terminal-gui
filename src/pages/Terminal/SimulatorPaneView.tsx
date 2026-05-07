@@ -25,6 +25,14 @@ import {
 	IconSimulator,
 	IconSwift,
 } from "../../components/ui/Icons.tsx";
+import {
+	hasId,
+	hasUdid,
+	noop,
+	runAsync,
+	toggleBoolean,
+} from "../../lib/data.ts";
+import { isBootedSimulatorDevice } from "../../lib/simulator-utils.ts";
 import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
 import { color, controlSize, font, radius } from "../../tokens.stylex.ts";
 
@@ -435,7 +443,7 @@ function FarmTile({
 	onBoot: () => void;
 }) {
 	const [state, setState] = useState<StreamState>("idle");
-	const booted = device.state === "Booted";
+	const booted = isBootedSimulatorDevice(device);
 	const deviceState = stateForDevice(device.state);
 	const live = booted && streaming && state === "live";
 	return (
@@ -542,25 +550,22 @@ export function SimulatorPaneView() {
 		() => new Set(["live", "boot", "off"])
 	);
 	const selectedDevice = useMemo(
-		() => devices.find((device) => device.udid === selectedUdid) ?? devices[0],
+		() => devices.find(hasUdid.bind(null, selectedUdid)) ?? devices[0],
 		[devices, selectedUdid]
 	);
 	const viewportDevice = useMemo(
 		() =>
 			selectedDevice?.state === "Booted"
 				? selectedDevice
-				: (devices.find((device) => device.state === "Booted") ??
-					selectedDevice),
+				: (devices.find(isBootedSimulatorDevice) ?? selectedDevice),
 		[devices, selectedDevice]
 	);
 	const selectedProject = useMemo(
-		() =>
-			projects.find((project) => project.id === selectedProjectId) ??
-			projects[0],
+		() => projects.find(hasId.bind(null, selectedProjectId)) ?? projects[0],
 		[projects, selectedProjectId]
 	);
 	const launchedProject = useMemo(
-		() => projects.find((project) => project.id === launchedProjectId) ?? null,
+		() => projects.find(hasId.bind(null, launchedProjectId)) ?? null,
 		[launchedProjectId, projects]
 	);
 	const projectById = useMemo(
@@ -591,7 +596,7 @@ export function SimulatorPaneView() {
 		);
 	}, [projectSearch, projects]);
 	const selectedLaunchDevice = useMemo(
-		() => devices.find((device) => device.udid === selectedUdid) ?? null,
+		() => devices.find(hasUdid.bind(null, selectedUdid)) ?? null,
 		[devices, selectedUdid]
 	);
 	const farmCounts = useMemo(() => {
@@ -628,31 +633,29 @@ export function SimulatorPaneView() {
 			setProjects(nextProjects);
 			setStatus(statusJson);
 			setSelectedUdid((current) => {
-				if (current && nextDevices.some((device) => device.udid === current)) {
+				if (current && nextDevices.some(hasUdid.bind(null, current))) {
 					return current;
 				}
 				return (
-					nextDevices.find((device) => device.state === "Booted")?.udid ??
+					nextDevices.find(isBootedSimulatorDevice)?.udid ??
 					nextDevices[0]?.udid ??
 					null
 				);
 			});
 			setSelectedProjectId((current) => {
-				if (current && nextProjects.some((project) => project.id === current)) {
+				if (current && nextProjects.some(hasId.bind(null, current))) {
 					return current;
 				}
 				return nextProjects[0]?.id ?? null;
 			});
 			setLaunchedProjectId((current) => {
 				const runningProject = nextProjects.find((project) => project.running);
-				const hasBootedDevice = nextDevices.some(
-					(device) => device.state === "Booted"
-				);
+				const hasBootedDevice = nextDevices.some(isBootedSimulatorDevice);
 				const nextId =
 					runningProject?.id ??
 					(hasBootedDevice &&
 					current &&
-					nextProjects.some((project) => project.id === current)
+					nextProjects.some(hasId.bind(null, current))
 						? current
 						: null);
 				if (nextId) {
@@ -665,9 +668,7 @@ export function SimulatorPaneView() {
 		} catch {}
 	}, []);
 
-	useEffect(() => {
-		refresh();
-	}, [refresh]);
+	useEffect(runAsync.bind(null, refresh), [refresh]);
 
 	const shutdownSelectedSimulator = useCallback(
 		async (device?: SimulatorDevice) => {
@@ -677,7 +678,7 @@ export function SimulatorPaneView() {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ udid: target.udid }),
-			}).catch(() => {});
+			}).catch(noop);
 			if (target.udid === viewportDevice?.udid) {
 				setLaunchedProjectId(null);
 				localStorage.removeItem(SIMULATOR_LAUNCHED_PROJECT_KEY);
@@ -696,7 +697,7 @@ export function SimulatorPaneView() {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ udid: target.udid }),
-			}).catch(() => {});
+			}).catch(noop);
 			await refresh();
 		},
 		[refresh, selectedDevice, selectedLaunchDevice]
@@ -890,7 +891,7 @@ export function SimulatorPaneView() {
 															{progress
 																? `${launchPhaseLabel(progress.phase)} on ${
 																		devices.find(
-																			(device) => device.udid === progress.udid
+																			hasUdid.bind(null, progress.udid)
 																		)?.name ?? "selected simulator"
 																	}`
 																: project.running
@@ -1024,9 +1025,10 @@ export function SimulatorPaneView() {
 														type="button"
 														size="sm"
 														variant={farmPreviewStreams ? "secondary" : "ghost"}
-														onClick={() =>
-															setFarmPreviewStreams((current) => !current)
-														}
+														onClick={setFarmPreviewStreams.bind(
+															null,
+															toggleBoolean
+														)}
 													>
 														Previews {farmPreviewStreams ? "On" : "Off"}
 													</Button>
@@ -1067,7 +1069,10 @@ export function SimulatorPaneView() {
 																		device.udid === selectedDevice?.udid &&
 																			styles.farmListRowActive
 																	)}
-																	onClick={() => setSelectedUdid(device.udid)}
+																	onClick={setSelectedUdid.bind(
+																		null,
+																		device.udid
+																	)}
 																>
 																	<span
 																		{...stylex.props(
@@ -1116,13 +1121,18 @@ export function SimulatorPaneView() {
 																}
 																appName={projectNameForDevice(device)}
 																active={device.udid === selectedDevice?.udid}
-																onFocus={() => setSelectedUdid(device.udid)}
-																onKill={() =>
-																	void shutdownSelectedSimulator(device)
-																}
-																onBoot={() =>
-																	void bootSelectedSimulator(device)
-																}
+																onFocus={setSelectedUdid.bind(
+																	null,
+																	device.udid
+																)}
+																onKill={shutdownSelectedSimulator.bind(
+																	null,
+																	device
+																)}
+																onBoot={bootSelectedSimulator.bind(
+																	null,
+																	device
+																)}
 															/>
 														))
 													)}

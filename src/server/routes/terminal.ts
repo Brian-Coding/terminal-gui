@@ -5,15 +5,24 @@ import type { ServerWebSocket } from "bun";
 import type { AgentKind } from "../../features/agents/agents.ts";
 import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import {
+	compareName,
+	comparePort,
+	hasPid,
+	hasPpid,
+	isFirstPath,
+	ppidNotIn,
+} from "../../lib/data.ts";
+import {
 	badRequest,
 	readJson,
 	tryRoute,
 	writeJson,
 } from "../../lib/route-helpers.ts";
 import {
-	createClaudeEnv,
+	createAgentEnv,
 	resolveInteractiveAgentCommand,
 } from "../../features/terminal/terminal-command.ts";
+import { isAllowedLocalPath, resolveAllowedLocalPath } from "../security.ts";
 import { ChatService } from "../services/agent-chat.ts";
 import { ConfigManager } from "../services/config-manager.ts";
 import { PidTracker } from "../services/pid-tracker.ts";
@@ -135,12 +144,16 @@ export const TerminalService = {
 
 			const spawnEnv =
 				agentKind === "claude"
-					? { ...createClaudeEnv(), TERM: "xterm-256color" }
+					? { ...createAgentEnv("claude"), TERM: "xterm-256color" }
 					: { ...process.env, TERM: "xterm-256color" };
+			const spawnCwd = cwd ? resolveAllowedLocalPath(cwd) : process.cwd();
+			if (!spawnCwd) {
+				return { ok: false, error: "Invalid working directory" };
+			}
 			const proc = Bun.spawn(resolved.cmd, {
 				terminal,
 				env: spawnEnv,
-				cwd: cwd || process.cwd(),
+				cwd: spawnCwd,
 			});
 
 			const session: TerminalSession = {
@@ -273,28 +286,35 @@ async function getConfiguredSearchPaths(): Promise<string[]> {
 			resolve(home, "dev"),
 		];
 	}
-	return folders.map((f: string) =>
-		f.startsWith("~/") ? resolve(home, f.slice(2)) : resolve(f)
-	);
+	return folders
+		.map((f: string) =>
+			f.startsWith("~/") ? resolve(home, f.slice(2)) : resolve(f)
+		)
+		.filter(isAllowedLocalPath);
 }
 
 async function listDirectories(
 	basePath: string
 ): Promise<Array<{ name: string; path: string }>> {
+	const safeBasePath = resolveAllowedLocalPath(basePath);
+	if (!safeBasePath) return [];
 	const results: Array<{ name: string; path: string }> = [];
 	try {
-		const entries = await readdir(basePath, { withFileTypes: true });
+		const entries = await readdir(safeBasePath, { withFileTypes: true });
 		for (const entry of entries) {
 			if (
 				entry.isDirectory() &&
 				!entry.name.startsWith(".") &&
 				isRealFolder(entry.name)
 			) {
-				results.push({ name: entry.name, path: resolve(basePath, entry.name) });
+				results.push({
+					name: entry.name,
+					path: resolve(safeBasePath, entry.name),
+				});
 			}
 		}
 	} catch {}
-	return results.sort((a, b) => a.name.localeCompare(b.name));
+	return results.sort(compareName);
 }
 
 async function searchDirectories(
@@ -344,11 +364,7 @@ async function searchDirectories(
 
 	const seen = new Set<string>();
 	return [...exactMatches, ...prefixMatches, ...containsMatches]
-		.filter((r) => {
-			if (seen.has(r.path)) return false;
-			seen.add(r.path);
-			return true;
-		})
+		.filter(isFirstPath.bind(null, seen))
 		.slice(0, 20);
 }
 
@@ -406,11 +422,7 @@ async function findQuickPicks(): Promise<
 	results.sort((a, b) => b.mtime - a.mtime);
 	const seen = new Set<string>();
 	return results
-		.filter((r) => {
-			if (seen.has(r.path)) return false;
-			seen.add(r.path);
-			return true;
-		})
+		.filter(isFirstPath.bind(null, seen))
 		.slice(0, 8)
 		.map(({ name, path, isGitRepo }) => ({ name, path, isGitRepo }));
 }
@@ -464,15 +476,18 @@ async function getRunningPorts(): Promise<RunningPort[]> {
 				if (!line.includes("LISTENING")) continue;
 				const parts = line.trim().split(/\s+/);
 				if (parts.length < 5) continue;
-				const portMatch = parts[1].match(/:(\d+)$/);
+				const localAddress = parts[1];
+				const pidText = parts[4];
+				if (!localAddress || !pidText) continue;
+				const portMatch = localAddress.match(/:(\d+)$/);
 				if (!portMatch) continue;
-				const port = parseInt(portMatch[1], 10);
-				const pid = parseInt(parts[4], 10);
+				const port = parseInt(portMatch[1]!, 10);
+				const pid = parseInt(pidText, 10);
 				if (seenPorts.has(port) || !isDevPort(port)) continue;
 				seenPorts.add(port);
 				ports.push({ port, pid, command: "unknown", name: `port ${port}` });
 			}
-			return ports.sort((a, b) => a.port - b.port);
+			return ports.sort(comparePort);
 		}
 
 		const output = (
@@ -486,11 +501,14 @@ async function getRunningPorts(): Promise<RunningPort[]> {
 			if (parts.length < 9) continue;
 
 			const command = parts[0];
-			const pid = parseInt(parts[1], 10);
-			const portMatch = parts[8].match(/:(\d+)$/);
+			const pidText = parts[1];
+			const nameText = parts[8];
+			if (!command || !pidText || !nameText) continue;
+			const pid = parseInt(pidText, 10);
+			const portMatch = nameText.match(/:(\d+)$/);
 			if (!portMatch) continue;
 
-			const port = parseInt(portMatch[1], 10);
+			const port = parseInt(portMatch[1]!, 10);
 			if (seenPorts.has(port) || EXCLUDED_COMMANDS.has(command)) continue;
 			if (!isDevPort(port) && !DEV_COMMANDS.has(command)) continue;
 			seenPorts.add(port);
@@ -504,7 +522,7 @@ async function getRunningPorts(): Promise<RunningPort[]> {
 			ports.push({ port, pid, command, name: nameMap[command] || command });
 		}
 
-		return ports.sort((a, b) => a.port - b.port);
+		return ports.sort(comparePort);
 	} catch {
 		return [];
 	}
@@ -554,7 +572,9 @@ async function getClaudeProcesses(): Promise<ClaudeProcess[]> {
 			const parts = line.trim().split(/\s+/);
 			if (parts.length < 8 || parts[6] !== "claude") continue;
 
-			const pid = parseInt(parts[0], 10);
+			const pidText = parts[0];
+			if (!pidText) continue;
+			const pid = parseInt(pidText, 10);
 			if (pid === process.pid) continue;
 
 			let cwd = "";
@@ -571,34 +591,32 @@ async function getClaudeProcesses(): Promise<ClaudeProcess[]> {
 
 			processes.push({
 				pid,
-				ppid: parseInt(parts[1], 10),
-				cpu: parseFloat(parts[2]),
-				mem: parseFloat(parts[3]),
-				rss: parseInt(parts[4], 10),
+				ppid: parseInt(parts[1] ?? "0", 10),
+				cpu: parseFloat(parts[2] ?? "0"),
+				mem: parseFloat(parts[3] ?? "0"),
+				rss: parseInt(parts[4] ?? "0", 10),
 				cwd,
 				command: parts.slice(7).join(" "),
-				elapsed: parts[5],
+				elapsed: parts[5] ?? "",
 			});
 		}
 
 		const claudePids = new Set(processes.map((p) => p.pid));
-		return processes
-			.filter((p) => !claudePids.has(p.ppid))
-			.map((parent) => {
-				const children = processes.filter((p) => p.ppid === parent.pid);
-				return {
-					...parent,
-					cpu:
-						Math.round(
-							children.reduce((sum, c) => sum + c.cpu, parent.cpu) * 10
-						) / 10,
-					rss: children.reduce((sum, c) => sum + c.rss, parent.rss),
-					mem:
-						Math.round(
-							children.reduce((sum, c) => sum + c.mem, parent.mem) * 10
-						) / 10,
-				};
-			});
+		return processes.filter(ppidNotIn.bind(null, claudePids)).map((parent) => {
+			const children = processes.filter(hasPpid.bind(null, parent.pid));
+			return {
+				...parent,
+				cpu:
+					Math.round(
+						children.reduce((sum, c) => sum + c.cpu, parent.cpu) * 10
+					) / 10,
+				rss: children.reduce((sum, c) => sum + c.rss, parent.rss),
+				mem:
+					Math.round(
+						children.reduce((sum, c) => sum + c.mem, parent.mem) * 10
+					) / 10,
+			};
+		});
 	} catch {
 		return [];
 	}
@@ -636,7 +654,9 @@ async function killAllClaudeProcesses(): Promise<{
 
 function requirePid(req: Request): Promise<{ pid: number } | Response> {
 	return req.json().then(({ pid }) => {
-		if (!pid || typeof pid !== "number") return badRequest("Missing pid");
+		if (!Number.isSafeInteger(pid) || pid <= 0) {
+			return badRequest("Invalid pid");
+		}
 		return { pid };
 	});
 }
@@ -667,6 +687,13 @@ export function terminalRoutes() {
 			POST: tryRoute(async (req) => {
 				const parsed = await requirePid(req);
 				if (parsed instanceof Response) return parsed;
+				const ports = await getRunningPorts();
+				if (!ports.some(hasPid.bind(null, parsed.pid))) {
+					return Response.json(
+						{ error: "PID is not a listed port" },
+						{ status: 403 }
+					);
+				}
 				return Response.json(await killPort(parsed.pid));
 			}),
 		},
@@ -679,6 +706,13 @@ export function terminalRoutes() {
 			POST: tryRoute(async (req) => {
 				const parsed = await requirePid(req);
 				if (parsed instanceof Response) return parsed;
+				const processes = await getClaudeProcesses();
+				if (!processes.some(hasPid.bind(null, parsed.pid))) {
+					return Response.json(
+						{ error: "PID is not a listed Claude process" },
+						{ status: 403 }
+					);
+				}
 				return Response.json(await killClaudeProcess(parsed.pid));
 			}),
 		},
@@ -692,9 +726,21 @@ export function terminalRoutes() {
 				const path = url.searchParams.get("path");
 
 				if (path) {
+					const resolvedPath = resolveAllowedLocalPath(path);
+					if (!resolvedPath) {
+						return Response.json(
+							{ error: "Path is outside allowed local roots" },
+							{ status: 403 }
+						);
+					}
+					const parentPath = dirname(resolvedPath);
+					const parent =
+						parentPath !== resolvedPath && resolveAllowedLocalPath(parentPath)
+							? parentPath
+							: null;
 					return Response.json({
-						directories: await listDirectories(path),
-						parent: dirname(path) !== path ? dirname(path) : null,
+						directories: await listDirectories(resolvedPath),
+						parent,
 					});
 				}
 				if (query) {

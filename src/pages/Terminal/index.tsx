@@ -8,28 +8,22 @@ import {
 	useState,
 } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
-import { clearAgentChatMessages } from "../../components/chat/chat-session-store.ts";
+import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
 import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
 import { Button } from "../../components/ui/Button.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
 	IconArrowLeft,
-	IconCircle,
 	IconExternalLink,
 	IconGitBranch,
-	IconGlobe,
 	IconX,
 } from "../../components/ui/Icons.tsx";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
-import { useClaudeProcesses } from "../../features/agents/useClaudeProcesses.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import { useRunningPorts } from "../../hooks/useRunningPorts.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { EditorPage } from "../EditorPage/index.tsx";
 import { GitPage } from "../GitPage/index.tsx";
-import { AgentSidebar, CollapsedAgentBar } from "./AgentSidebar.tsx";
-import { ClaudeProcessesSidebar } from "./ClaudeProcessesSidebar.tsx";
-import { CollapsibleSidebarSection } from "./CollapsibleSidebarSection.tsx";
 import { InlineDirectoryPicker } from "./InlineDirectoryPicker.tsx";
 import { NewSessionButtons } from "./NewSessionButtons.tsx";
 import { PopoutHeader } from "./PopoutHeader.tsx";
@@ -53,10 +47,13 @@ import {
 	getInitialGroups,
 	getPaneTitle,
 	getThemeById,
+	loadTerminalLayoutMode,
 	loadTerminalState,
 	migrateGroup,
 	POPOUT_CHANNEL,
 	saveTerminalState,
+	syncTerminalLayoutMode,
+	type GroupId,
 	type TerminalGroupModel,
 	type TerminalPaneModel,
 	type ThemeId,
@@ -65,6 +62,11 @@ import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
 } from "../../lib/app-theme.ts";
+import { hasId, isNonEmptyString, lacksId } from "../../lib/data.ts";
+import {
+	listenWindowEvent,
+	setupTerminalThemePanelShortcut,
+} from "../../lib/react-events.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
@@ -100,6 +102,37 @@ function GraphEmptyState({ message }: { message: string }) {
 			</div>
 		</div>
 	);
+}
+
+function paneShellKey(pane: TerminalPaneModel) {
+	return {
+		id: pane.id,
+		agentKind: pane.agentKind,
+		cwd: pane.cwd ?? null,
+		pendingCwd: pane.pendingCwd ?? false,
+		title: pane.title,
+	};
+}
+
+function groupShellKey(group: TerminalGroupModel) {
+	return {
+		id: group.id,
+		name: group.name,
+		selectedPaneId: group.selectedPaneId,
+		columns: group.columns,
+		rows: group.rows,
+		panes: group.panes.map(paneShellKey),
+	};
+}
+
+function shellStateKey(
+	selectedGroupId: string | null,
+	groups: TerminalGroupModel[]
+) {
+	return JSON.stringify({
+		selectedGroupId,
+		groups: groups.map(groupShellKey),
+	});
 }
 
 const styles = stylex.create({
@@ -442,7 +475,7 @@ function groupsReducer(
 		case "removePane": {
 			return state.map((g) => {
 				if (g.id !== action.groupId) return g;
-				const panes = g.panes.filter((p) => p.id !== action.paneId);
+				const panes = g.panes.filter(lacksId.bind(null, action.paneId));
 				if (panes.length === 0) {
 					const pane = createPendingAgentChatPane();
 					return { ...g, panes: [pane], selectedPaneId: pane.id };
@@ -459,7 +492,13 @@ function groupsReducer(
 		}
 		case "selectPane":
 			return state.map((g) =>
-				g.id === action.groupId ? { ...g, selectedPaneId: action.paneId } : g
+				g.id === action.groupId
+					? {
+							...g,
+							selectedPaneId:
+								action.paneId as TerminalGroupModel["selectedPaneId"],
+						}
+					: g
 			);
 		case "directorySelected":
 			return state.map((g) =>
@@ -494,7 +533,7 @@ function groupsReducer(
 		case "addGroup":
 			return [...state, action.group];
 		case "removeGroup":
-			return state.filter((g) => g.id !== action.groupId);
+			return state.filter(lacksId.bind(null, action.groupId));
 		case "renameGroup":
 			return state.map((g) =>
 				g.id === action.groupId ? { ...g, name: action.name } : g
@@ -535,13 +574,9 @@ export function TerminalPage({
 	isPopout = false,
 	isStandalone = false,
 }: TerminalPageProps) {
-	useEffect(() => {
-		wsClient.connect();
-	}, []);
+	useEffect(wsClient.connect.bind(wsClient), []);
 	const [compactMode, setCompactMode] = useState(false);
-	const [layoutMode, setLayoutMode] = useState<"grid" | "rows">(() =>
-		readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows"
-	);
+	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
 	const [mainView, setMainView] = useState<MainViewMode>(() => {
 		const stored = readStoredValue("terminal-main-view");
 		return stored === "chat" || stored === "graph" || stored === "changes"
@@ -554,10 +589,10 @@ export function TerminalPage({
 	useEffect(() => {
 		writeStoredValue("terminal-main-view", mainView);
 	}, [mainView]);
-	const initialState = useMemo(() => loadTerminalState(), []);
+	const initialState = useMemo(loadTerminalState, []);
 	const initGroups = useMemo(() => getInitialGroups(), []);
 	const [groups, groupsDispatch] = useReducer(groupsReducer, initGroups);
-	const [selectedGroupId, setSelectedGroupId] = useState<string | null>(
+	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
 		() => initialState?.selectedGroupId ?? initGroups[0]?.id ?? null
 	);
 	const [isPoppedOut, setIsPoppedOut] = useState(false);
@@ -570,18 +605,6 @@ export function TerminalPage({
 		opacity: initialState?.opacity ?? DEFAULT_OPACITY,
 	}));
 	const { themeId, fontSize, fontFamily, opacity } = appearance;
-	const [sidebarOpen, setSidebarOpen] = useState(true);
-	const [sidebarSections, setSidebarSections] = useState({
-		ports: true,
-		agentSessions: true,
-		claudeProcesses: true,
-		git: true,
-	});
-	const toggleSection = useCallback(
-		(key: keyof typeof sidebarSections) =>
-			setSidebarSections((prev) => ({ ...prev, [key]: !prev[key] })),
-		[]
-	);
 	const popoutWindowRef = useRef<Window | null>(null);
 	const broadcastChannel = useRef<BroadcastChannel | null>(null);
 	const chatRefs = useRef<Map<string, AgentChatHandle>>(new Map());
@@ -590,14 +613,9 @@ export function TerminalPage({
 	);
 	const { ports: runningPorts, killPort, openInBrowser } = useRunningPorts();
 	useAgentSessions();
-	const {
-		processes: claudeProcesses,
-		killProcess: killClaudeProcess,
-		killAll: killAllClaudeProcesses,
-	} = useClaudeProcesses();
 	const theme = useMemo(() => getThemeById(themeId), [themeId]);
 	const currentGroup = useMemo(
-		() => groups.find((g) => g.id === selectedGroupId),
+		() => groups.find(hasId.bind(null, selectedGroupId)),
 		[groups, selectedGroupId]
 	);
 	const graphCwds = useMemo(
@@ -606,7 +624,7 @@ export function TerminalPage({
 				new Set(
 					(currentGroup?.panes ?? [])
 						.map((pane) => pane.cwd)
-						.filter((cwd): cwd is string => Boolean(cwd))
+						.filter(isNonEmptyString)
 				)
 			),
 		[currentGroup]
@@ -783,40 +801,14 @@ export function TerminalPage({
 				return;
 			}
 			if (savedState) {
-				const savedShellKey = JSON.stringify({
-					selectedGroupId: savedState.selectedGroupId,
-					groups: savedState.groups.map((group) => ({
-						id: group.id,
-						name: group.name,
-						selectedPaneId: group.selectedPaneId,
-						columns: group.columns,
-						rows: group.rows,
-						panes: group.panes.map((pane) => ({
-							id: pane.id,
-							agentKind: pane.agentKind,
-							cwd: pane.cwd ?? null,
-							pendingCwd: pane.pendingCwd ?? false,
-							title: pane.title,
-						})),
-					})),
-				});
-				const currentShellKey = JSON.stringify({
-					selectedGroupId: savedState.selectedGroupId,
-					groups: groups.map((group) => ({
-						id: group.id,
-						name: group.name,
-						selectedPaneId: group.selectedPaneId,
-						columns: group.columns,
-						rows: group.rows,
-						panes: group.panes.map((pane) => ({
-							id: pane.id,
-							agentKind: pane.agentKind,
-							cwd: pane.cwd ?? null,
-							pendingCwd: pane.pendingCwd ?? false,
-							title: pane.title,
-						})),
-					})),
-				});
+				const savedShellKey = shellStateKey(
+					savedState.selectedGroupId,
+					savedState.groups
+				);
+				const currentShellKey = shellStateKey(
+					savedState.selectedGroupId,
+					groups
+				);
 				if (savedShellKey !== currentShellKey) {
 					restoreSavedState(savedState);
 				}
@@ -831,22 +823,11 @@ export function TerminalPage({
 			if (nextMainView !== mainView) {
 				setMainView(nextMainView);
 			}
-			const nextLayoutMode =
-				readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows";
-			setLayoutMode(nextLayoutMode);
+			syncTerminalLayoutMode(setLayoutMode);
 		};
-		window.addEventListener("terminal-shell-change", handleShellChange);
-		return () =>
-			window.removeEventListener("terminal-shell-change", handleShellChange);
+		return listenWindowEvent("terminal-shell-change", handleShellChange);
 	}, [groups, mainView, restoreSavedState, selectedGroupId, themeId]);
-	useEffect(() => {
-		const handleThemeOpen = () => {
-			setShowSettings(true);
-		};
-		window.addEventListener("terminal-open-theme-panel", handleThemeOpen);
-		return () =>
-			window.removeEventListener("terminal-open-theme-panel", handleThemeOpen);
-	}, []);
+	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
 	const handleAgentStatusChange = useCallback(
 		(paneId: string, status: string) => {
 			setAgentStatuses((prev) => {
@@ -885,13 +866,13 @@ export function TerminalPage({
 	const removePane = useCallback(
 		(paneId: string, force?: boolean) => {
 			if (!selectedGroupId) return;
-			const group = groups.find((g) => g.id === selectedGroupId);
+			const group = groups.find(hasId.bind(null, selectedGroupId));
 			if (!group) return;
 			if (group.panes.length <= 1 && groups.length > 1) {
 				for (const pane of group.panes) cleanupPane(pane.id);
 				groupsDispatch({ type: "removeGroup", groupId: selectedGroupId });
 				setSelectedGroupId(
-					groups.find((g) => g.id !== selectedGroupId)?.id ?? null
+					groups.find(lacksId.bind(null, selectedGroupId))?.id ?? null
 				);
 				return;
 			}
@@ -970,13 +951,15 @@ export function TerminalPage({
 	const removeGroup = useCallback(
 		(groupId: string) => {
 			if (groups.length <= 1) return;
-			const group = groups.find((g) => g.id === groupId);
+			const group = groups.find(hasId.bind(null, groupId));
 			if (group) {
 				for (const p of group.panes) cleanupPane(p.id);
 			}
 			groupsDispatch({ type: "removeGroup", groupId });
 			if (selectedGroupId === groupId)
-				setSelectedGroupId(groups.find((g) => g.id !== groupId)?.id ?? null);
+				setSelectedGroupId(
+					groups.find(lacksId.bind(null, groupId))?.id ?? null
+				);
 		},
 		[groups, selectedGroupId, cleanupPane]
 	);
@@ -1041,7 +1024,7 @@ export function TerminalPage({
 					columns={currentGroup?.columns ?? DEFAULT_COLUMNS}
 					agentStatuses={agentStatuses}
 					onRestore={isStandalone ? () => setCompactMode(false) : handleRestore}
-					onSelectGroup={setSelectedGroupId}
+					onSelectGroup={(id) => setSelectedGroupId(id as GroupId)}
 					onAddGroup={addGroup}
 					onRenameGroup={renameGroup}
 					onRemoveGroup={removeGroup}
@@ -1099,19 +1082,6 @@ export function TerminalPage({
 		>
 			<div {...stylex.props(styles.appFrame)}>
 				<div {...stylex.props(styles.appColumn)}>
-					{false &&
-						mainView === "editor" &&
-						!sidebarOpen &&
-						currentGroup &&
-						currentGroup.panes.length > 0 && (
-							<CollapsedAgentBar
-								panes={currentGroup.panes}
-								selectedPaneId={currentGroup.selectedPaneId}
-								agentStatuses={agentStatuses}
-								onSelectPane={selectPane}
-								onExpand={() => setSidebarOpen((v) => !v)}
-							/>
-						)}
 					<div {...stylex.props(styles.appBody)}>
 						<div
 							{...stylex.props(
@@ -1149,88 +1119,10 @@ export function TerminalPage({
 									onThemeChange={(v: ThemeId) =>
 										setAppearance((prev) => ({ ...prev, themeId: v }))
 									}
-									onClose={() => setShowSettings(false)}
+									onClose={setShowSettings.bind(null, false)}
 								/>
 							)}
 						</div>
-						{false &&
-							mainView === "editor" &&
-							sidebarOpen &&
-							currentGroup &&
-							currentGroup.panes.length > 0 && (
-								<div {...stylex.props(styles.sideColumn)}>
-									<AgentSidebar
-										panes={currentGroup.panes}
-										selectedPaneId={currentGroup.selectedPaneId}
-										agentStatuses={agentStatuses}
-										onSelectPane={selectPane}
-										onRemovePane={removePane}
-										onCollapse={() => setSidebarOpen((v) => !v)}
-									/>
-									<CollapsibleSidebarSection
-										icon={<IconGlobe size={12} />}
-										label="Ports"
-										count={runningPorts.length}
-										countColor="text-inferay-accent"
-										expanded={sidebarSections.ports}
-										onToggle={() => toggleSection("ports")}
-										emptyMessage="No ports running"
-									>
-										{runningPorts.map((p) => (
-											<div
-												key={`${p.port}-${p.pid}`}
-												{...stylex.props(styles.portRow)}
-											>
-												<div {...stylex.props(styles.noShrink)}>
-													<IconCircle
-														size={8}
-														{...stylex.props(styles.accentCircle)}
-													/>
-												</div>
-												<div {...stylex.props(styles.portText)}>
-													<p
-														{...stylex.props(styles.portNumber)}
-														title={p.command}
-													>
-														:{p.port}
-													</p>
-													<p
-														{...stylex.props(styles.portName)}
-														title={p.command}
-													>
-														{p.name}
-													</p>
-												</div>
-												<div {...stylex.props(styles.portActions)}>
-													<IconButton
-														variant="ghost"
-														size="xs"
-														onClick={() => openInBrowser(p.port)}
-														title="Open in browser"
-													>
-														<IconExternalLink size={10} />
-													</IconButton>
-													<IconButton
-														variant="danger"
-														size="xs"
-														onClick={() => killPort(p.pid)}
-														title="Kill process"
-													>
-														<IconX size={10} />
-													</IconButton>
-												</div>
-											</div>
-										))}
-									</CollapsibleSidebarSection>
-									<ClaudeProcessesSidebar
-										processes={claudeProcesses}
-										onKillProcess={killClaudeProcess}
-										onKillAll={killAllClaudeProcesses}
-										expanded={sidebarSections.claudeProcesses}
-										onToggle={() => toggleSection("claudeProcesses")}
-									/>
-								</div>
-							)}
 					</div>
 				</div>
 			</div>

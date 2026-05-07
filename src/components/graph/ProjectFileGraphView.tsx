@@ -1,6 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useMemo, useState } from "react";
 import type { GitProjectStatus } from "../../features/git/useGitStatus.ts";
+import { hasId, hasPath } from "../../lib/data.ts";
 import {
 	color,
 	controlSize,
@@ -41,7 +42,7 @@ function fileStatusType(
 	project: GitProjectStatus | null,
 	path: string
 ): FileGraphNode["status"] {
-	const file = project?.files.find((entry) => entry.path === path);
+	const file = project?.files.find(hasPath.bind(null, path));
 	if (!file) return "normal";
 	if (file.status === "?" || file.status === "A") return "added";
 	return "modified";
@@ -146,25 +147,24 @@ export function ProjectFileGraphView({
 			setFiles([]);
 			return;
 		}
-		let cancelled = false;
+		const controller = new AbortController();
+		const { signal } = controller;
 		setLoading(true);
 		void fetch(
 			`/api/files/search?cwd=${encodeURIComponent(activeCwd)}&limit=50`
 		)
 			.then((response) => response.json())
 			.then((data: { results?: FileSearchEntry[] }) => {
-				if (cancelled) return;
+				if (signal.aborted) return;
 				setFiles(data.results ?? []);
 			})
 			.catch(() => {
-				if (!cancelled) setFiles([]);
+				if (!signal.aborted) setFiles([]);
 			})
 			.finally(() => {
-				if (!cancelled) setLoading(false);
+				if (!signal.aborted) setLoading(false);
 			});
-		return () => {
-			cancelled = true;
-		};
+		return controller.abort.bind(controller);
 	}, [activeCwd]);
 
 	const nodes = useMemo(
@@ -174,13 +174,13 @@ export function ProjectFileGraphView({
 
 	useEffect(() => {
 		setSelectedNodeId((current) =>
-			current && nodes.some((node) => node.id === current)
+			current && nodes.some(hasId.bind(null, current))
 				? current
 				: (nodes[0]?.id ?? null)
 		);
 	}, [nodes]);
 
-	const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
+	const selectedNode = nodes.find(hasId.bind(null, selectedNodeId)) ?? null;
 	const selectedConnections = useMemo(
 		() =>
 			selectedNode
@@ -259,9 +259,9 @@ export function ProjectFileGraphView({
 												: styles.nodeIdle
 										)}
 										style={{ left: node.x, top: node.y }}
-										onClick={() => setSelectedNodeId(node.id)}
-										onMouseEnter={() => setHoveredNodeId(node.id)}
-										onMouseLeave={() => setHoveredNodeId(null)}
+										onClick={setSelectedNodeId.bind(null, node.id)}
+										onMouseEnter={setHoveredNodeId.bind(null, node.id)}
+										onMouseLeave={setHoveredNodeId.bind(null, null)}
 									>
 										<div
 											{...stylex.props(
@@ -312,7 +312,7 @@ export function ProjectFileGraphView({
 											<button
 												type="button"
 												key={node.id}
-												onClick={() => setSelectedNodeId(node.id)}
+												onClick={setSelectedNodeId.bind(null, node.id)}
 												{...stylex.props(styles.relatedButton)}
 											>
 												<div

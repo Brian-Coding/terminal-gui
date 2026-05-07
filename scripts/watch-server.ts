@@ -2,9 +2,10 @@
  * Watches server-side sources and the Bun entrypoint for .ts changes and
  * restarts the electrobun dev process when they change.
  */
-import { existsSync, watch } from "node:fs";
+import { watch } from "node:fs";
 import { resolve } from "node:path";
 import { execFile, spawn } from "node:child_process";
+import { resolveExitCode, targetExists } from "./watch-utils.ts";
 
 const ROOT = process.cwd();
 const ELECTROBUN =
@@ -16,7 +17,7 @@ const watchTargets = [
 	{ path: resolve(ROOT, "src/server"), recursive: true },
 	{ path: resolve(ROOT, "src/lib"), recursive: true },
 	{ path: resolve(ROOT, "src/index.ts"), recursive: false },
-].filter((target) => existsSync(target.path));
+].filter(targetExists);
 
 let child: ReturnType<typeof spawn> | null = null;
 let debounce: ReturnType<typeof setTimeout> | null = null;
@@ -64,8 +65,8 @@ function runElectrobun(args: string[]): Promise<number> {
 			stdio: "inherit",
 			env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
 		});
-		proc.on("exit", (code) => resolve(code ?? 0));
-		proc.on("error", () => resolve(1));
+		proc.on("exit", resolveExitCode.bind(null, resolve));
+		proc.on("error", resolve.bind(null, 1));
 	});
 }
 
@@ -119,13 +120,11 @@ for (const target of watchTargets) {
 
 startApp();
 
-process.on("SIGTERM", async () => {
+async function shutdown() {
 	await killChild();
 	await keepMainDevAppOnly();
 	process.exit(0);
-});
-process.on("SIGINT", async () => {
-	await killChild();
-	await keepMainDevAppOnly();
-	process.exit(0);
-});
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

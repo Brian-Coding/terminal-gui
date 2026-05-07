@@ -1,4 +1,4 @@
-import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
+import type { AgentKind } from "../terminal/terminal-utils.ts";
 
 export interface AgentChatSession {
 	paneId: string;
@@ -75,9 +75,16 @@ export function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
 	return trimmed;
 }
 
-export function addMessage(
-	msgs: ChatMessage[],
-	msg: ChatMessage
+export function appendMessage(
+	msg: ChatMessage,
+	msgs: ChatMessage[]
 ): ChatMessage[] {
 	return [...msgs, msg];
+}
+
+export function appendTrimmedMessage(
+	msg: ChatMessage,
+	msgs: ChatMessage[]
+): ChatMessage[] {
+	return trimMessages([...msgs, msg]);
 }

@@ -28,8 +28,10 @@ import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
 } from "../../lib/app-theme.ts";
-import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
+import { isActive, lacksValue } from "../../lib/data.ts";
+import { fetchJsonOr, sendJsonWithBusy } from "../../lib/fetch-json.ts";
 import type { ForgeAccount, GithubRepo } from "../../lib/forge-types.ts";
+import { setupTerminalThemePanelShortcut } from "../../lib/react-events.ts";
 import type { ThemeId } from "../../features/terminal/terminal-utils.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { ONBOARDING_DONE_KEY } from "../OnboardingPage/index.tsx";
@@ -201,7 +203,7 @@ export function ProfilePage() {
 		setSimFoldersStatus(null);
 		try {
 			const nextFolders = await saveSimulatorProjectFolders(
-				simProjectFolders.filter((item) => item !== folder)
+				simProjectFolders.filter(lacksValue.bind(null, folder))
 			);
 			setSimFoldersStatus(`${nextFolders.length} project folders configured.`);
 		} catch (err) {
@@ -245,15 +247,7 @@ export function ProfilePage() {
 		void loadAccounts();
 	}, [loadAccounts]);
 
-	useEffect(() => {
-		const handleSettingsOpen = () => setShowSettings(true);
-		window.addEventListener("terminal-open-theme-panel", handleSettingsOpen);
-		return () =>
-			window.removeEventListener(
-				"terminal-open-theme-panel",
-				handleSettingsOpen
-			);
-	}, []);
+	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
 
 	const loadRepos = useCallback(async (force = false) => {
 		if (!force && cachedRepos && isFresh(cachedRepos.cachedAt)) {
@@ -286,7 +280,7 @@ export function ProfilePage() {
 	}, [accounts.length, loadRepos]);
 
 	const activeAccount = useMemo(
-		() => accounts.find((account) => account.active) ?? accounts[0] ?? null,
+		() => accounts.find(isActive) ?? accounts[0] ?? null,
 		[accounts]
 	);
 
@@ -300,14 +294,13 @@ export function ProfilePage() {
 		);
 	}, [repoQuery, repos]);
 
-	const connectGithub = async () => {
-		setConnecting(true);
-		try {
-			await sendJson("/api/forge/connect", { provider: "github" });
-		} finally {
-			setConnecting(false);
-		}
-	};
+	const connectGithub = sendJsonWithBusy.bind(
+		null,
+		setConnecting,
+		"/api/forge/connect",
+		{ provider: "github" },
+		undefined
+	);
 
 	const pickCloneDirectory = async () => {
 		const payload = await fetchJsonOr<{ folder: string | null }>(
@@ -652,7 +645,7 @@ export function ProfilePage() {
 				<TerminalSettingsPanel
 					themeId={themeId}
 					onThemeChange={(nextThemeId: ThemeId) => setThemeId(nextThemeId)}
-					onClose={() => setShowSettings(false)}
+					onClose={setShowSettings.bind(null, false)}
 				/>
 			) : null}
 		</div>

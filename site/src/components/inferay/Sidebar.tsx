@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import { stopPropagation } from "../../../../src/lib/react-events.ts";
 import { Icons } from "./Icons";
 import { activityTimeline, sessionTimeline } from "./data";
-import { FileIcon, gitStatusColors } from "./fileIcons";
+import { gitStatusColors } from "./fileIcons";
 
 // Path-based file list for git changes
 type PathFile = {
@@ -181,9 +182,7 @@ function TreeNodeRow({
 						</span>
 						{/* Stage/Unstage button */}
 						<button
-							onClick={(e) => {
-								e.stopPropagation();
-							}}
+							onClick={stopPropagation}
 							className="opacity-0 group-hover/row:opacity-100 w-4 h-4 flex items-center justify-center text-inferay-text-3 hover:text-inferay-text transition-all"
 						>
 							{isStaged ? "−" : "+"}
@@ -249,9 +248,7 @@ function FileGroupTree({
 				<span className="text-[8px] text-inferay-text-3">{fileCount}</span>
 				{/* Stage/Unstage All button */}
 				<button
-					onClick={(e) => {
-						e.stopPropagation();
-					}}
+					onClick={stopPropagation}
 					className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[7px] text-inferay-text-3 hover:text-inferay-text hover:bg-inferay-surface-2 transition-all"
 				>
 					{isStaged ? "−" : "+"}
@@ -277,17 +274,6 @@ function FileGroupTree({
 	);
 }
 
-// Count files in tree
-function countFiles(nodes: TreeNode[]): number {
-	let count = 0;
-	for (const node of nodes) {
-		if (node.type === "file") count++;
-		if (node.children) count += countFiles(node.children);
-	}
-	return count;
-}
-
-// Path-based file group (flat list with paths)
 function FileGroupPath({
 	title,
 	files,
@@ -325,9 +311,7 @@ function FileGroupPath({
 				<span className="text-[8px] text-inferay-text-3">{files.length}</span>
 				{/* Stage/Unstage All button */}
 				<button
-					onClick={(e) => {
-						e.stopPropagation();
-					}}
+					onClick={stopPropagation}
 					className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[7px] text-inferay-text-3 hover:text-inferay-text hover:bg-inferay-surface-2 transition-all"
 				>
 					{isStaged ? "−" : "+"}
@@ -356,9 +340,7 @@ function FileGroupPath({
 							</div>
 							{/* Stage/Unstage button */}
 							<button
-								onClick={(e) => {
-									e.stopPropagation();
-								}}
+								onClick={stopPropagation}
 								className="opacity-0 group-hover/file:opacity-100 w-4 h-4 flex items-center justify-center text-inferay-text-3 hover:text-inferay-text transition-all shrink-0"
 							>
 								{isStaged ? "−" : "+"}
