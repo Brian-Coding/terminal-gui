@@ -14,6 +14,11 @@ const watchTargets = [
 let debounce: ReturnType<typeof setTimeout> | null = null;
 let building = false;
 let pending = false;
+const buildArgs = ["scripts/build-renderer.ts"];
+
+if (process.argv.includes("--dev")) {
+	buildArgs.push("--dev");
+}
 
 function isRendererFile(filename: string | null | undefined) {
 	if (!filename) return false;
@@ -22,7 +27,7 @@ function isRendererFile(filename: string | null | undefined) {
 
 function runBuild(): Promise<number> {
 	return new Promise((resolve) => {
-		const proc = spawn("bun", ["scripts/build-renderer.ts"], {
+		const proc = spawn("bun", buildArgs, {
 			cwd: ROOT,
 			stdio: "inherit",
 		});

@@ -50,6 +50,7 @@ import {
 import { IconButton } from "../ui/IconButton.tsx";
 import {
 	IconChevronRight,
+	IconPencil,
 	IconPlus,
 	IconSettings,
 	IconTerminal,
@@ -127,10 +128,8 @@ function PaneSummaryItem({
 }) {
 	const isChat = isChatAgentKind(pane.agentKind);
 	const summary = isChat ? deriveSummary(pane.id) : null;
-	const dirName = pane.cwd?.split("/").pop();
-	const primaryLabel = isChat
-		? (summary ?? pane.title)
-		: (dirName ?? pane.title);
+	const folderLabel = getPaneBaseFolder(pane);
+	const primaryLabel = isChat ? (summary ?? pane.title) : pane.title;
 
 	return (
 		<button
@@ -150,6 +149,7 @@ function PaneSummaryItem({
 				)}
 			</span>
 			<div {...stylex.props(styles.paneSummaryText)}>
+				<p {...stylex.props(styles.paneSummaryFolder)}>{folderLabel}</p>
 				<p {...stylex.props(styles.paneSummaryTitle)}>{primaryLabel}</p>
 			</div>
 		</button>
@@ -164,6 +164,7 @@ function WorkspaceItem({
 	selectedPaneId,
 	onSelect,
 	onSelectPane,
+	onExpandSidebar,
 	onDelete,
 	onRename,
 }: {
@@ -179,30 +180,15 @@ function WorkspaceItem({
 	selectedPaneId: string | null;
 	onSelect: () => void;
 	onSelectPane: (paneId: string) => void;
+	onExpandSidebar: () => void;
 	onDelete: () => void;
 	onRename: (name: string) => void;
 }) {
-	const [expanded, setExpanded] = useState(isActive);
+	const [expanded, setExpanded] = useState(true);
 	const [editing, setEditing] = useState(false);
 	const [editValue, setEditValue] = useState(group.name);
 	const [hovered, setHovered] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
-	const paneGroups = useMemo(() => {
-		const byFolder = new Map<string, TerminalPaneModel[]>();
-		for (const pane of group.panes) {
-			const folder = getPaneBaseFolder(pane);
-			const panes = byFolder.get(folder) ?? [];
-			panes.push(pane);
-			byFolder.set(folder, panes);
-		}
-		return Array.from(byFolder.entries())
-			.map(([folder, panes]) => ({ folder, panes }))
-			.sort((a, b) => {
-				if (a.folder === "No folder") return 1;
-				if (b.folder === "No folder") return -1;
-				return a.folder.localeCompare(b.folder);
-			});
-	}, [group.panes]);
 
 	// Auto-expand when workspace becomes active
 	useEffect(() => {
@@ -235,6 +221,11 @@ function WorkspaceItem({
 		}
 	};
 
+	const handleCollapsedClick = () => {
+		onSelect();
+		onExpandSidebar();
+	};
+
 	if (collapsed) {
 		return (
 			<div
@@ -249,7 +240,7 @@ function WorkspaceItem({
 			>
 				<button
 					type="button"
-					onClick={onSelect}
+					onClick={handleCollapsedClick}
 					{...stylex.props(styles.collapsedWorkspaceButton)}
 					title={group.name}
 				>
@@ -276,18 +267,14 @@ function WorkspaceItem({
 
 	return (
 		<div
-			{...stylex.props(
-				styles.workspaceWrap,
-				isActive && expanded && styles.workspaceWrapActive
-			)}
+			{...stylex.props(styles.workspaceWrap)}
 			onMouseEnter={setHovered.bind(null, true)}
 			onMouseLeave={setHovered.bind(null, false)}
 		>
 			<div
 				{...stylex.props(
 					styles.workspaceHeader,
-					isActive ? styles.workspaceHeaderActive : styles.workspaceHeaderIdle,
-					isActive && expanded && styles.workspaceHeaderInActiveWrap
+					isActive ? styles.workspaceHeaderActive : styles.workspaceHeaderIdle
 				)}
 				onClick={handleClick}
 			>
@@ -307,14 +294,19 @@ function WorkspaceItem({
 						/>
 					) : (
 						<div
-							{...stylex.props(styles.workspaceName)}
+							{...stylex.props(styles.workspaceNameRow)}
+							title="Double-click to rename workspace"
 							onDoubleClick={(e) => {
 								e.stopPropagation();
 								setEditValue(group.name);
 								setEditing(true);
 							}}
 						>
-							{group.name}
+							<IconPencil
+								size={9}
+								{...stylex.props(styles.workspaceEditHint)}
+							/>
+							<div {...stylex.props(styles.workspaceName)}>{group.name}</div>
 						</div>
 					)}
 				</div>
@@ -339,26 +331,13 @@ function WorkspaceItem({
 			{/* Expanded pane list */}
 			{expanded && group.panes.length > 0 && (
 				<div {...stylex.props(styles.workspacePaneList)}>
-					{paneGroups.map(({ folder, panes }) => (
-						<div key={folder} {...stylex.props(styles.folderGroup)}>
-							<div {...stylex.props(styles.folderHeader)}>
-								<span {...stylex.props(styles.folderRule)} />
-								<span {...stylex.props(styles.folderLabel)}>{folder}</span>
-								<span {...stylex.props(styles.folderCount)}>
-									{panes.length}
-								</span>
-							</div>
-							<div {...stylex.props(styles.folderPaneList)}>
-								{panes.map((pane) => (
-									<PaneSummaryItem
-										key={pane.id}
-										pane={pane}
-										isActive={isActive && pane.id === selectedPaneId}
-										onClick={onSelectPane.bind(null, pane.id)}
-									/>
-								))}
-							</div>
-						</div>
+					{group.panes.map((pane) => (
+						<PaneSummaryItem
+							key={pane.id}
+							pane={pane}
+							isActive={isActive && pane.id === selectedPaneId}
+							onClick={onSelectPane.bind(null, pane.id)}
+						/>
 					))}
 				</div>
 			)}
@@ -638,7 +617,7 @@ export function Sidebar() {
 								onClick={addWorkspace}
 								variant="ghost"
 								size="md"
-								className="mx-auto h-7 w-7"
+								className="h-8 w-8"
 								title="Add workspace"
 							>
 								<IconPlus size={14} className="shrink-0" />
@@ -670,6 +649,7 @@ export function Sidebar() {
 							selectedPaneId={group.selectedPaneId ?? null}
 							onSelect={() => selectWorkspace(group.id)}
 							onSelectPane={(paneId) => selectPane(group.id, paneId)}
+							onExpandSidebar={() => setCollapsed(false)}
 							onDelete={() => removeWorkspace(group.id)}
 							onRename={(name) => renameWorkspace(group.id, name)}
 						/>
@@ -738,7 +718,7 @@ function SidebarAccountAvatar({ account }: { account: ForgeAccount | null }) {
 
 const styles = stylex.create({
 	paneSummary: {
-		alignItems: "center",
+		alignItems: "flex-start",
 		borderWidth: 1,
 		borderStyle: "solid",
 		borderColor: "transparent",
@@ -746,14 +726,13 @@ const styles = stylex.create({
 		display: "flex",
 		gap: controlSize._2,
 		marginBottom: "0.125rem",
-		marginInline: "0.375rem",
 		paddingBlock: "0.375rem",
 		paddingInline: controlSize._2,
 		textAlign: "left",
 		transitionDuration: "150ms",
 		transitionProperty: "background-color, border-color, color",
 		transitionTimingFunction: "ease",
-		width: "calc(100% - 12px)",
+		width: "100%",
 	},
 	paneSummaryIdle: {
 		backgroundColor: {
@@ -770,14 +749,27 @@ const styles = stylex.create({
 		},
 	},
 	paneSummarySelected: {
+		backgroundColor: color.accentWash,
+		borderColor: color.accentBorder,
 		color: color.textMain,
 	},
 	paneSummaryIcon: {
 		flexShrink: 0,
+		marginTop: "0.125rem",
 	},
 	paneSummaryText: {
 		flex: 1,
 		minWidth: 0,
+	},
+	paneSummaryFolder: {
+		color: color.textMuted,
+		fontSize: font.size_1,
+		fontWeight: font.weight_5,
+		lineHeight: 1.15,
+		margin: 0,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
 	},
 	paneSummaryTitle: {
 		fontSize: font.size_2,
@@ -790,46 +782,40 @@ const styles = stylex.create({
 	},
 	collapsedWorkspace: {
 		alignItems: "center",
+		borderColor: "transparent",
 		borderRadius: 8,
 		borderStyle: "solid",
 		borderWidth: 1,
 		color: color.textSoft,
 		display: "flex",
 		height: controlSize._7,
-		justifyContent: "center",
 		marginBlockEnd: controlSize._1,
-		marginInline: "auto",
+		marginInline: "0.375rem",
 		position: "relative",
 		transitionDuration: "150ms",
-		transitionProperty: "background-color, border-color, color",
+		transitionProperty: "background-color, color",
 		transitionTimingFunction: "ease",
-		width: controlSize._7,
+		width: controlSize._8,
 	},
 	collapsedWorkspaceIdle: {
-		backgroundColor: {
-			default: "transparent",
-			":hover": color.accentWash,
-		},
-		borderColor: {
-			default: "transparent",
-			":hover": color.border,
-		},
-		color: {
-			default: color.textSoft,
-			":hover": color.textMain,
-		},
+		backgroundColor: "transparent",
+		color: color.textSoft,
 	},
 	collapsedWorkspaceActive: {
-		backgroundColor: color.accentWash,
-		borderColor: color.border,
-		color: color.textMain,
+		backgroundColor: "transparent",
+		color: color.textSoft,
 	},
 	collapsedWorkspaceButton: {
 		alignItems: "center",
+		backgroundColor: "transparent",
+		borderWidth: 0,
 		borderRadius: 8,
+		color: "inherit",
 		display: "flex",
 		height: "100%",
-		justifyContent: "center",
+		justifyContent: "flex-start",
+		outline: "none",
+		paddingInline: controlSize._2,
 		width: "100%",
 	},
 	collapsedWorkspaceCount: {
@@ -869,20 +855,11 @@ const styles = stylex.create({
 		width: 14,
 	},
 	workspaceWrap: {
-		borderColor: "transparent",
-		borderRadius: 10,
-		borderStyle: "solid",
-		borderWidth: 1,
 		marginBottom: controlSize._1,
 		marginInline: "0.375rem",
-		paddingBlock: controlSize._0_5,
 		transitionDuration: "150ms",
 		transitionProperty: "background-color, border-color",
 		transitionTimingFunction: "ease",
-	},
-	workspaceWrapActive: {
-		backgroundColor: color.accentWash,
-		borderColor: color.border,
 	},
 	workspaceHeader: {
 		alignItems: "center",
@@ -896,36 +873,25 @@ const styles = stylex.create({
 		gap: controlSize._2,
 		height: controlSize._8,
 		paddingInline: controlSize._2,
+		textAlign: "left",
 		transitionDuration: "150ms",
 		transitionProperty: "background-color, border-color, color",
 		transitionTimingFunction: "ease",
 	},
 	workspaceHeaderIdle: {
-		backgroundColor: {
-			default: "transparent",
-			":hover": color.accentWash,
-		},
-		borderColor: {
-			default: "transparent",
-			":hover": color.border,
-		},
-		color: {
-			default: color.textSoft,
-			":hover": color.textMain,
-		},
-	},
-	workspaceHeaderActive: {
-		backgroundColor: color.accentWash,
-		borderColor: color.border,
-		color: color.textMain,
-	},
-	workspaceHeaderInActiveWrap: {
 		backgroundColor: "transparent",
 		borderColor: "transparent",
+		color: color.textSoft,
+	},
+	workspaceHeaderActive: {
+		backgroundColor: "transparent",
+		borderColor: "transparent",
+		color: color.textSoft,
 	},
 	workspaceNameWrap: {
 		flex: 1,
 		minWidth: 0,
+		textAlign: "left",
 	},
 	workspaceInput: {
 		backgroundColor: "transparent",
@@ -936,9 +902,22 @@ const styles = stylex.create({
 		width: "100%",
 	},
 	workspaceName: {
+		flex: 1,
+		minWidth: 0,
 		overflow: "hidden",
 		textOverflow: "ellipsis",
 		whiteSpace: "nowrap",
+	},
+	workspaceNameRow: {
+		alignItems: "center",
+		display: "flex",
+		gap: controlSize._1,
+		minWidth: 0,
+	},
+	workspaceEditHint: {
+		color: color.textSoft,
+		flexShrink: 0,
+		opacity: 0.55,
 	},
 	workspaceCount: {
 		color: color.textSoft,
@@ -954,50 +933,11 @@ const styles = stylex.create({
 		padding: "0.125rem",
 	},
 	workspacePaneList: {
+		display: "flex",
+		flexDirection: "column",
+		gap: controlSize._0_5,
 		marginTop: "0.125rem",
 		paddingBottom: controlSize._1,
-	},
-	folderGroup: {
-		marginBottom: "0.125rem",
-	},
-	folderHeader: {
-		alignItems: "center",
-		color: color.textSoft,
-		display: "flex",
-		fontSize: "0.5rem",
-		fontWeight: font.weight_5,
-		gap: controlSize._1,
-		letterSpacing: 0,
-		marginBottom: "0.125rem",
-		marginInline: controlSize._2,
-		paddingLeft: controlSize._1,
-		textTransform: "uppercase",
-	},
-	folderRule: {
-		backgroundColor: "rgba(255, 255, 255, 0.06)",
-		height: 1,
-		width: "0.375rem",
-	},
-	folderLabel: {
-		minWidth: 0,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	folderCount: {
-		backgroundColor: "rgba(255, 255, 255, 0.04)",
-		borderRadius: 2,
-		color: color.textSoft,
-		fontSize: "0.4375rem",
-		fontVariantNumeric: "tabular-nums",
-		paddingInline: controlSize._1,
-	},
-	folderPaneList: {
-		borderLeftColor: "rgba(255, 255, 255, 0.035)",
-		borderLeftStyle: "solid",
-		borderLeftWidth: 1,
-		marginLeft: controlSize._2,
-		paddingLeft: "0.125rem",
 	},
 	shell: {
 		backgroundColor: color.background,
@@ -1006,6 +946,7 @@ const styles = stylex.create({
 		borderRightWidth: 1,
 		display: "flex",
 		flexDirection: "column",
+		overflow: "hidden",
 		position: "relative",
 		transitionDuration: "200ms",
 		transitionProperty: "width",
@@ -1098,10 +1039,9 @@ const styles = stylex.create({
 	},
 	navItemCollapsed: {
 		height: controlSize._7,
-		justifyContent: "center",
-		marginInline: "auto",
-		paddingInline: 0,
-		width: controlSize._7,
+		marginInline: "0.375rem",
+		paddingInline: controlSize._2,
+		width: controlSize._8,
 	},
 	navItemIdle: {
 		backgroundColor: {
@@ -1133,7 +1073,7 @@ const styles = stylex.create({
 		marginInline: "0.375rem",
 	},
 	workspaceSectionHeaderCollapsed: {
-		justifyContent: "center",
+		justifyContent: "flex-start",
 	},
 	workspaceSectionHeaderOpen: {
 		justifyContent: "space-between",
@@ -1176,10 +1116,9 @@ const styles = stylex.create({
 	},
 	footerButtonCollapsed: {
 		height: controlSize._7,
-		justifyContent: "center",
-		marginInline: "auto",
-		padding: 0,
-		width: controlSize._7,
+		marginInline: 0,
+		paddingInline: controlSize._2,
+		width: controlSize._8,
 	},
 	footerButtonIdle: {
 		backgroundColor: {
@@ -1210,10 +1149,9 @@ const styles = stylex.create({
 	},
 	profileButtonCollapsed: {
 		height: controlSize._7,
-		justifyContent: "center",
-		marginInline: "auto",
-		padding: 0,
-		width: controlSize._7,
+		marginInline: 0,
+		paddingInline: controlSize._1_5,
+		width: controlSize._9,
 	},
 	profileLabel: {
 		minWidth: 0,

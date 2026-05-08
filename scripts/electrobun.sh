@@ -11,10 +11,10 @@ fi
 case "${1:-}" in
 	dev)
 		ROOT="$(pwd)"
-		bun run build:renderer
+		bun scripts/build-renderer.ts --dev
 		trap 'kill 0' EXIT INT TERM
 		bunx concurrently --kill-others \
-			"bun scripts/watch-renderer.ts" \
+			"bun scripts/watch-renderer.ts --dev" \
 			"bun run scripts/watch-server.ts" &
 		wait
 		;;

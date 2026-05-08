@@ -1,10 +1,9 @@
-import { automationRoutes } from "./automations.ts";
 import { checkpointRoutes } from "./checkpoint.ts";
 import { configRoutes } from "./config.ts";
+import { featureRoutes } from "./feature-routes.ts";
 import { fileRoutes } from "./files.ts";
 import { forgeRoutes } from "./forge.ts";
 import { gitRoutes } from "./git.ts";
-import { goalRoutes } from "./goals.ts";
 import { nativeRoutes } from "./native.ts";
 import { promptRoutes } from "./prompts.ts";
 import { simulatorRoutes } from "./simulator.ts";
@@ -19,10 +18,9 @@ export function buildApiRoutes() {
 		...terminalRoutes(),
 		...checkpointRoutes(),
 		...promptRoutes(),
-		...goalRoutes(),
 		...gitRoutes(),
 		...simulatorRoutes(),
 		...titleRoutes(),
-		...automationRoutes(),
+		...featureRoutes(),
 	};
 }

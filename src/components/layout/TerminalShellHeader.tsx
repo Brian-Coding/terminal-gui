@@ -397,8 +397,8 @@ const styles = stylex.create({
 		borderStyle: "solid",
 		borderWidth: 1,
 		color: {
-			default: color.textMuted,
-			":hover": color.textSoft,
+			default: color.textSoft,
+			":hover": color.textMain,
 		},
 		display: "flex",
 		fontSize: font.size_3,

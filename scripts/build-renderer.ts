@@ -2,9 +2,16 @@
 
 import { mkdir, rm } from "node:fs/promises";
 import { createStylexBunPlugin } from "@stylexjs/unplugin/bun";
+import {
+	DEV_FEATURE_FLAGS,
+	PUBLISHED_FEATURE_FLAGS,
+} from "../src/lib/feature-flags.ts";
 
 const distDir = "dist";
 const stylexCssPath = `${distDir}/stylex.css`;
+const featureFlags = process.argv.includes("--dev")
+	? DEV_FEATURE_FLAGS
+	: PUBLISHED_FEATURE_FLAGS;
 
 await rm(distDir, { recursive: true, force: true });
 await mkdir(distDir, { recursive: true });
@@ -31,6 +38,9 @@ const jsBuild = await Bun.build({
 	splitting: true,
 	sourcemap: "external",
 	minify: false,
+	define: {
+		__INFERAY_FEATURE_FLAGS__: JSON.stringify(featureFlags),
+	},
 	plugins: [
 		createStylexBunPlugin({
 			bunDevCssOutput: stylexCssPath,

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { hasId } from "./data.ts";
+import { FEATURE_FLAGS } from "./feature-flags.ts";
 import {
 	IconCamera,
 	IconCode,
@@ -43,7 +44,7 @@ interface TerminalMainViewRoute {
 export const DEFAULT_APP_ROUTE = "/terminal";
 export const DEFAULT_TERMINAL_MAIN_VIEW: TerminalMainView = "editor";
 
-export const APP_PAGE_ROUTES: readonly AppPageRoute[] = [
+const ALL_APP_PAGE_ROUTES = [
 	{ id: "terminal", label: "Terminal", path: "/terminal" },
 	{ id: "git", label: "Git", path: "/git" },
 	{
@@ -82,7 +83,10 @@ export const APP_PAGE_ROUTES: readonly AppPageRoute[] = [
 		icon: IconSimulator,
 	},
 	{ id: "profile", label: "Profile", path: "/profile" },
-];
+] as const satisfies readonly AppPageRoute[];
+
+export const APP_PAGE_ROUTES: readonly AppPageRoute[] =
+	ALL_APP_PAGE_ROUTES.filter((route) => FEATURE_FLAGS[route.id]);
 
 export const SIDEBAR_NAV_ROUTES = APP_PAGE_ROUTES.filter(
 	(
@@ -93,12 +97,15 @@ export const SIDEBAR_NAV_ROUTES = APP_PAGE_ROUTES.filter(
 	} => route.sidebar === true && !!route.icon
 );
 
-export const TERMINAL_MAIN_VIEWS = [
+const ALL_TERMINAL_MAIN_VIEWS = [
 	{ id: "chat", label: "Chat", icon: IconMessageCircle },
 	{ id: "editor", label: "Editor", icon: IconCode },
 	{ id: "changes", label: "Changes", icon: IconGitCommit },
 	{ id: "graph", label: "Graph", icon: IconGitBranch },
 ] as const satisfies readonly TerminalMainViewRoute[];
+
+export const TERMINAL_MAIN_VIEWS: readonly TerminalMainViewRoute[] =
+	ALL_TERMINAL_MAIN_VIEWS.filter((view) => FEATURE_FLAGS[view.id]);
 
 export function isTerminalMainView(
 	value: string | null
