@@ -1,6 +1,7 @@
 import { atomicWriteJson } from "../../lib/atomic-write.ts";
-import { tryRoute } from "../../lib/route-helpers.ts";
+import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import { userDataPath } from "../../lib/user-data.ts";
+import { runAgentOnce } from "../services/agent-once.ts";
 
 const AUTOMATIONS_FILE = userDataPath("automations.json");
 
@@ -32,6 +33,23 @@ export function automationRoutes() {
 				};
 				await saveAutomations(store);
 				return Response.json(store);
+			}),
+		},
+		"/api/automations/run": {
+			POST: tryRoute(async (req) => {
+				const body = (await req.json()) as {
+					prompt?: string;
+					cwd?: string;
+					timeoutMs?: number;
+				};
+				if (!body.prompt) return badRequest("prompt is required");
+				const result = await runAgentOnce({
+					agentKind: "claude",
+					prompt: body.prompt,
+					cwd: body.cwd || process.cwd(),
+					timeoutMs: body.timeoutMs ?? 120_000,
+				});
+				return Response.json({ result });
 			}),
 		},
 	};

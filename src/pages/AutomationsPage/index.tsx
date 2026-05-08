@@ -9,25 +9,15 @@ import {
 } from "react";
 import {
 	IconClock,
-	IconCode,
 	IconEye,
 	IconFilePlus,
-	IconFolder,
-	IconGitBranch,
 	IconGlobe,
 	IconPlus,
 	IconRobot,
-	IconSearch,
 	IconTerminal,
 	IconWorkflow,
 } from "../../components/ui/Icons.tsx";
-import {
-	hasId,
-	isPresent,
-	lacksId,
-	setRecordEntry,
-	withRecordEntry,
-} from "../../lib/data.ts";
+import { hasId, isPresent, lacksId } from "../../lib/data.ts";
 import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import {
@@ -38,7 +28,6 @@ import {
 	radius,
 	shadow,
 } from "../../tokens.stylex.ts";
-import { InlineDirectoryPicker } from "../Terminal/InlineDirectoryPicker.tsx";
 
 type AutomationStatus = "ready" | "scheduled" | "running";
 type NodeKind =
@@ -61,6 +50,9 @@ interface NodeKindConfig {
 	inputs: string[];
 	outputs: string[];
 	tone: "emerald" | "blue" | "purple" | "pink" | "amber" | "orange" | "cyan";
+	hint: string;
+	placeholder: string;
+	autoDescription: string;
 }
 
 interface AutomationFlow {
@@ -105,118 +97,56 @@ interface RunState {
 	flowId: string;
 	activeNodeId: string | null;
 	completedNodeIds: string[];
+	failedNodeId: string | null;
 	isRunning: boolean;
+	nodeOutputs: Record<string, string>;
 }
 
-const NODE_WIDTH = 140;
+const NODE_WIDTH = 200;
 const NODE_PORT_TOP = 44;
 const NODE_PORT_ROW_HEIGHT = 16;
 
-const defaultFlows: AutomationFlow[] = [createStarterWorkflow(1)];
+const toolKinds: NodeKind[] = [
+	"input",
+	"web",
+	"agent",
+	"script",
+	"note",
+	"output",
+];
 
-function createStarterWorkflow(index: number): AutomationFlow {
-	const id = `workflow-${Date.now().toString(36)}`;
-	return {
-		id,
-		name: `Workflow ${index}`,
-		description:
-			"Draft workflow with a context step, an agent task, and a final output.",
-		schedule: "Manual",
-		nextRun: "Manual",
-		status: "ready",
-		primaryPath: "~/Desktop",
-		referencePaths: [],
-		edges: [
-			["context", "agent"],
-			["agent", "output"],
-		],
-		nodes: [
-			{
-				id: "context",
-				kind: "input",
-				title: "Choose context",
-				description: "Pick the primary folder and supporting references.",
-				x: 72,
-				y: 138,
-				file: `automations/${id}/00-context.md`,
-				body: "Describe the files, folders, and constraints this workflow should use.",
-				output: "context.md",
-			},
-			{
-				id: "agent",
-				kind: "agent",
-				title: "Run agent task",
-				description: "Execute the main automation step against the context.",
-				x: 366,
-				y: 118,
-				file: `automations/${id}/10-agent.md`,
-				body: "Describe the work the agent should perform. Include expected checks and output format.",
-				output: "result.md",
-			},
-			{
-				id: "output",
-				kind: "output",
-				title: "Save output",
-				description: "Write the workflow result to the expected artifact.",
-				x: 660,
-				y: 142,
-				file: `automations/${id}/20-output.md`,
-				body: "Define where the result should be written and what the final summary should include.",
-				output: "summary.md",
-			},
-		],
-	};
-}
-
-const nodeKinds = {
+const nodeKinds: Record<string, NodeKindConfig> = {
 	input: {
 		label: "Input",
 		icon: IconFilePlus,
 		inputs: [],
 		outputs: ["out"],
 		tone: "emerald",
+		hint: "Watch a folder or receive data",
+		placeholder:
+			"Describe the folder to scan or the initial data to provide...",
+		autoDescription:
+			"Scans a folder and provides its contents to the next step",
 	},
-	prompt: {
-		label: "Prompt",
-		icon: IconTerminal,
-		inputs: ["in"],
-		outputs: ["out"],
-		tone: "blue",
-	},
-	research: {
+	web: {
 		label: "Research",
-		icon: IconSearch,
-		inputs: ["topic"],
+		icon: IconGlobe,
+		inputs: ["in"],
 		outputs: ["findings"],
 		tone: "purple",
+		hint: "Fetch URLs and return findings",
+		placeholder: "Enter URLs to fetch or describe what to search for...",
+		autoDescription: "Fetches URLs and returns structured findings",
 	},
-	image: {
-		label: "Generate Image",
-		icon: IconFolder,
-		inputs: ["prompt"],
-		outputs: ["image"],
-		tone: "pink",
-	},
-	code: {
-		label: "Code",
-		icon: IconCode,
-		inputs: ["in"],
-		outputs: ["patch"],
-		tone: "amber",
-	},
-	condition: {
-		label: "Condition",
-		icon: IconGitBranch,
-		inputs: ["in"],
-		outputs: ["pass", "fail"],
-		tone: "orange",
-	},
-	output: {
-		label: "Output",
-		icon: IconEye,
-		inputs: ["content"],
-		outputs: [],
-		tone: "cyan",
+	agent: {
+		label: "Agent",
+		icon: IconRobot,
+		inputs: ["context"],
+		outputs: ["result"],
+		tone: "blue",
+		hint: "Run a Claude agent with a prompt",
+		placeholder: "Write the prompt for the Claude agent...",
+		autoDescription: "Runs a Claude agent with the prompt below",
 	},
 	script: {
 		label: "Script",
@@ -224,6 +154,9 @@ const nodeKinds = {
 		inputs: ["in"],
 		outputs: ["out"],
 		tone: "amber",
+		hint: "Execute a shell command",
+		placeholder: "Enter the shell command to run...",
+		autoDescription: "Executes a shell command and captures output",
 	},
 	note: {
 		label: "Note",
@@ -231,45 +164,167 @@ const nodeKinds = {
 		inputs: ["in"],
 		outputs: ["out"],
 		tone: "blue",
+		hint: "Pass through text instructions",
+		placeholder: "Write instructions to pass to the next step...",
+		autoDescription: "Passes these instructions to the next step",
 	},
-	agent: {
+	output: {
+		label: "Output",
+		icon: IconEye,
+		inputs: ["content"],
+		outputs: [],
+		tone: "cyan",
+		hint: "Write the final result",
+		placeholder: "Describe where and how to write the result...",
+		autoDescription: "Writes the final result",
+	},
+	prompt: {
 		label: "Prompt",
-		icon: IconRobot,
-		inputs: ["context"],
-		outputs: ["result"],
+		icon: IconTerminal,
+		inputs: ["in"],
+		outputs: ["out"],
 		tone: "blue",
+		hint: "Send a prompt",
+		placeholder: "Write a prompt...",
+		autoDescription: "Sends a prompt",
 	},
-	web: {
+	research: {
 		label: "Research",
 		icon: IconGlobe,
-		inputs: ["query"],
+		inputs: ["topic"],
 		outputs: ["findings"],
 		tone: "purple",
+		hint: "Research a topic",
+		placeholder: "Describe what to research...",
+		autoDescription: "Researches a topic",
+	},
+	image: {
+		label: "Image",
+		icon: IconFilePlus,
+		inputs: ["prompt"],
+		outputs: ["image"],
+		tone: "pink",
+		hint: "Generate an image",
+		placeholder: "Describe the image to generate...",
+		autoDescription: "Generates an image",
+	},
+	code: {
+		label: "Code",
+		icon: IconTerminal,
+		inputs: ["in"],
+		outputs: ["patch"],
+		tone: "amber",
+		hint: "Write code",
+		placeholder: "Describe the code to write...",
+		autoDescription: "Writes code",
+	},
+	condition: {
+		label: "Condition",
+		icon: IconWorkflow,
+		inputs: ["in"],
+		outputs: ["pass", "fail"],
+		tone: "orange",
+		hint: "Branch on a condition",
+		placeholder: "Describe the condition to check...",
+		autoDescription: "Branches based on a condition",
 	},
 	shape: {
-		label: "Output",
-		icon: IconCode,
+		label: "Shape",
+		icon: IconEye,
 		inputs: ["content"],
 		outputs: ["out"],
 		tone: "cyan",
+		hint: "Transform output",
+		placeholder: "Describe how to transform...",
+		autoDescription: "Transforms the output",
 	},
-} satisfies Record<NodeKind, NodeKindConfig>;
-
-const paletteKinds = [
-	"input",
-	"prompt",
-	"research",
-	"image",
-	"code",
-	"condition",
-	"output",
-] as const satisfies readonly NodeKind[];
+};
 
 function getNodeConfig(kind: unknown): NodeKindConfig {
 	if (typeof kind === "string" && kind in nodeKinds) {
-		return nodeKinds[kind as NodeKind];
+		return nodeKinds[kind as NodeKind]!;
 	}
-	return nodeKinds.prompt;
+	return nodeKinds.note!;
+}
+
+const defaultFlows: AutomationFlow[] = [createSampleFlow()];
+
+function createSampleFlow(): AutomationFlow {
+	const id = "research-summarizer";
+	return {
+		id,
+		name: "Research Summarizer",
+		description:
+			"Watches a topic file, researches it on the web, and writes a summary.",
+		schedule: "Manual",
+		nextRun: "Manual",
+		status: "ready",
+		primaryPath: "~/Desktop",
+		referencePaths: [],
+		edges: [
+			["topic", "research"],
+			["research", "analyze"],
+			["analyze", "format"],
+			["format", "save"],
+		],
+		nodes: [
+			{
+				id: "topic",
+				kind: "input",
+				title: "Topic Source",
+				description: "",
+				x: 60,
+				y: 160,
+				file: `automations/${id}/00-topic.md`,
+				body: "Read the topic from ~/Desktop/topics.md",
+				output: "",
+			},
+			{
+				id: "research",
+				kind: "web",
+				title: "Web Research",
+				description: "",
+				x: 320,
+				y: 120,
+				file: `automations/${id}/10-research.md`,
+				body: "Search for the latest news and developments on the given topic. Return 3-5 key findings with source URLs.",
+				output: "",
+			},
+			{
+				id: "analyze",
+				kind: "agent",
+				title: "Analyze Findings",
+				description: "",
+				x: 580,
+				y: 160,
+				file: `automations/${id}/20-analyze.md`,
+				body: "Review the research findings. Identify the most important trends and insights. Write a structured analysis with sections: Overview, Key Trends, Implications.",
+				output: "",
+			},
+			{
+				id: "format",
+				kind: "note",
+				title: "Format Instructions",
+				description: "",
+				x: 840,
+				y: 120,
+				file: `automations/${id}/30-format.md`,
+				body: "Format the analysis as a clean markdown document with a title, date, and table of contents.",
+				output: "",
+			},
+			{
+				id: "save",
+				kind: "output",
+				title: "Save Report",
+				description: "",
+				x: 1100,
+				y: 160,
+				file: `automations/${id}/40-save.md`,
+				body: "Write the formatted report to ~/Desktop/research-report.md",
+				output: "",
+			},
+		],
+	};
 }
 
 function getInputPortY(node: AutomationNode): number {
@@ -309,10 +364,7 @@ export function AutomationsPage() {
 		defaultFlows[0]!.nodes[0]!.id
 	);
 	const [showGrid, setShowGrid] = useState(false);
-	const [isPickingFolders, setIsPickingFolders] = useState(false);
-	const [folderSelections, setFolderSelections] = useState<
-		Record<string, string[]>
-	>({});
+	const [showAddMenu, setShowAddMenu] = useState(false);
 	const [dragState, setDragState] = useState<NodeDragState | null>(null);
 	const [runState, setRunState] = useState<RunState | null>(null);
 	const flowsRef = useRef(flows);
@@ -320,30 +372,14 @@ export function AutomationsPage() {
 	const dragCleanupRef = useRef<(() => void) | null>(null);
 	const dragFrameRef = useRef<number | null>(null);
 	const edgePathRefs = useRef(new Map<string, SVGPathElement>());
-	const runTimerRef = useRef<number | null>(null);
+	const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const selectedFlow =
 		flows.find(hasId.bind(null, selectedFlowId)) ?? flows[0]!;
 	const selectedNode =
 		selectedFlow.nodes.find(hasId.bind(null, selectedNodeId)) ??
 		selectedFlow.nodes[0]!;
-	const selectedFlowPaths = [
-		selectedFlow.primaryPath,
-		...selectedFlow.referencePaths,
-	];
-	const selectedNodeContextPaths =
-		folderSelections[selectedNode.id] ??
-		selectedNode.contextPaths ??
-		selectedFlowPaths;
-	const primaryPath = selectedNodeContextPaths[0] ?? selectedFlow.primaryPath;
-	const referencePaths = selectedNodeContextPaths.slice(1);
-	const selectedNodeIndex = selectedFlow.nodes.findIndex(
-		hasId.bind(null, selectedNode.id)
-	);
-	const incomingNodes = selectedFlow.edges
-		.filter(([, toId]) => toId === selectedNode.id)
-		.map(([fromId]) => selectedFlow.nodes.find(hasId.bind(null, fromId)))
-		.filter(isPresent);
+	const selectedNodeConfig = getNodeConfig(selectedNode.kind);
 	const outgoingNodes = selectedFlow.edges
 		.filter(([fromId]) => fromId === selectedNode.id)
 		.map(([, toId]) => selectedFlow.nodes.find(hasId.bind(null, toId)))
@@ -355,9 +391,6 @@ export function AutomationsPage() {
 
 	useEffect(() => {
 		return () => {
-			if (runTimerRef.current !== null) {
-				window.clearTimeout(runTimerRef.current);
-			}
 			if (dragFrameRef.current !== null) {
 				window.cancelAnimationFrame(dragFrameRef.current);
 			}
@@ -399,20 +432,35 @@ export function AutomationsPage() {
 		return controller.abort.bind(controller);
 	}, [selectedFlowId]);
 
-	const persistFlows = async (nextFlows: AutomationFlow[]) => {
+	const persistFlows = useCallback((nextFlows: AutomationFlow[]) => {
 		setFlows(nextFlows);
 		flowsRef.current = nextFlows;
-		await sendJson("/api/automations", { flows: nextFlows }, { method: "PUT" });
-	};
+		if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+		persistTimerRef.current = setTimeout(() => {
+			void sendJson(
+				"/api/automations",
+				{ flows: flowsRef.current },
+				{ method: "PUT" }
+			);
+		}, 400);
+	}, []);
 
-	const updateSelectedFlow = async (
-		updater: (flow: AutomationFlow) => AutomationFlow
-	) => {
-		const nextFlows = flows.map((flow) =>
-			flow.id === selectedFlow.id ? updater(flow) : flow
-		);
-		await persistFlows(nextFlows);
-	};
+	const persistFlowsNow = useCallback(async (nextFlows: AutomationFlow[]) => {
+		setFlows(nextFlows);
+		flowsRef.current = nextFlows;
+		if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+		await sendJson("/api/automations", { flows: nextFlows }, { method: "PUT" });
+	}, []);
+
+	const updateSelectedFlow = useCallback(
+		(updater: (flow: AutomationFlow) => AutomationFlow) => {
+			const nextFlows = flowsRef.current.map((flow) =>
+				flow.id === selectedFlow.id ? updater(flow) : flow
+			);
+			persistFlows(nextFlows);
+		},
+		[persistFlows, selectedFlow.id]
+	);
 
 	const edgeLines = useMemo(() => {
 		return selectedFlow.edges.flatMap(([fromId, toId]) => {
@@ -452,60 +500,80 @@ export function AutomationsPage() {
 			override && edge.toId === override.nodeId
 				? getInputPortY({ ...edge.toNode, x: override.x, y: override.y })
 				: edge.y2;
-		return `M ${x1} ${y1} C ${x1 + 72} ${y1}, ${x2 - 72} ${y2}, ${x2} ${y2}`;
+		return `M ${x1} ${y1} C ${x1 + 80} ${y1}, ${x2 - 80} ${y2}, ${x2} ${y2}`;
 	};
 
 	const selectFlow = (flow: AutomationFlow) => {
 		setSelectedFlowId(flow.id);
 		setSelectedNodeId(flow.nodes[0]?.id ?? "");
-		setIsPickingFolders(false);
 	};
 
 	const handleAddWorkflow = async () => {
-		const flow = createStarterWorkflow(flows.length + 1);
+		const id = `workflow-${Date.now().toString(36)}`;
+		const flow: AutomationFlow = {
+			id,
+			name: `Workflow ${flows.length + 1}`,
+			description: "New workflow",
+			schedule: "Manual",
+			nextRun: "Manual",
+			status: "ready",
+			primaryPath: "~/Desktop",
+			referencePaths: [],
+			edges: [],
+			nodes: [
+				{
+					id: `note-${Date.now().toString(36)}`,
+					kind: "note",
+					title: "Start",
+					description: "",
+					x: 200,
+					y: 160,
+					file: `automations/${id}/00-start.md`,
+					body: "",
+					output: "",
+				},
+			],
+		};
 		const nextFlows = [...flows, flow];
-		await persistFlows(nextFlows);
+		await persistFlowsNow(nextFlows);
 		setSelectedFlowId(flow.id);
 		setSelectedNodeId(flow.nodes[0]!.id);
-		setIsPickingFolders(false);
 	};
 
-	const handleAddNode = async (kind: NodeKind = "prompt") => {
-		const config = nodeKinds[kind];
+	const handleAddNode = (kind: NodeKind) => {
+		const config = getNodeConfig(kind);
 		const node: AutomationNode = {
-			id: `${kind}-${Date.now()}`,
+			id: `${kind}-${Date.now().toString(36)}`,
 			kind,
 			title: config.label,
-			description: `Configure this ${config.label.toLowerCase()} step.`,
+			description: "",
 			x: 440,
-			y: 210,
+			y: 200,
 			file: `automations/${selectedFlow.id}/${selectedFlow.nodes.length
 				.toString()
 				.padStart(2, "0")}-${kind}.md`,
 			body: "",
-			output: config.outputs[0] ?? "done",
+			output: "",
 		};
-		await updateSelectedFlow((flow) => ({
+		updateSelectedFlow((flow) => ({
 			...flow,
 			nodes: [...flow.nodes, node],
 		}));
 		setSelectedNodeId(node.id);
+		setShowAddMenu(false);
 	};
 
 	const handleDeleteSelectedNode = useCallback(async () => {
 		if (selectedFlow.nodes.length <= 1) return;
-
 		const selectedIndex = selectedFlow.nodes.findIndex(
 			(node) => node.id === selectedNode.id
 		);
 		if (selectedIndex === -1) return;
-
 		const fallbackNode =
 			selectedFlow.nodes[selectedIndex + 1] ??
 			selectedFlow.nodes[selectedIndex - 1];
 		if (!fallbackNode) return;
-
-		const nextFlows = flows.map((flow) => {
+		const nextFlows = flowsRef.current.map((flow) => {
 			if (flow.id !== selectedFlow.id) return flow;
 			return {
 				...flow,
@@ -516,13 +584,9 @@ export function AutomationsPage() {
 				nodes: flow.nodes.filter(lacksId.bind(null, selectedNode.id)),
 			};
 		});
-
 		setSelectedNodeId(fallbackNode.id);
-		if (runState?.flowId === selectedFlow.id) {
-			setRunState(null);
-		}
-		await persistFlows(nextFlows);
-	}, [flows, persistFlows, runState?.flowId, selectedFlow, selectedNode.id]);
+		await persistFlowsNow(nextFlows);
+	}, [persistFlowsNow, selectedFlow, selectedNode.id]);
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -539,45 +603,108 @@ export function AutomationsPage() {
 			event.preventDefault();
 			void handleDeleteSelectedNode();
 		};
-
 		return listenWindowEvent("keydown", handleKeyDown);
 	}, [handleDeleteSelectedNode]);
 
-	const handleRunOnce = () => {
-		if (runTimerRef.current !== null) {
-			window.clearTimeout(runTimerRef.current);
+	useEffect(() => {
+		const handleClick = (e: MouseEvent) => {
+			if (showAddMenu) setShowAddMenu(false);
+		};
+		if (showAddMenu) {
+			window.addEventListener("click", handleClick, true);
+			return () => window.removeEventListener("click", handleClick, true);
 		}
+	}, [showAddMenu]);
+
+	const handleRunOnce = async () => {
 		const nodes = selectedFlow.nodes;
 		if (nodes.length < 1) return;
 
-		const runStep = (index: number, completedNodeIds: string[]) => {
-			const activeNode = nodes[index];
-			if (!activeNode) {
-				setRunState({
-					flowId: selectedFlow.id,
-					activeNodeId: null,
-					completedNodeIds,
-					isRunning: false,
-				});
+		const state: RunState = {
+			flowId: selectedFlow.id,
+			activeNodeId: null,
+			completedNodeIds: [],
+			failedNodeId: null,
+			isRunning: true,
+			nodeOutputs: {},
+		};
+		setRunState(state);
+
+		let previousOutput = "";
+
+		for (const node of nodes) {
+			const config = getNodeConfig(node.kind);
+			state.activeNodeId = node.id;
+			setRunState({ ...state });
+			setSelectedNodeId(node.id);
+
+			try {
+				let result = "";
+
+				if (
+					node.kind === "agent" ||
+					node.kind === "web" ||
+					node.kind === "research"
+				) {
+					const systemHint = config.autoDescription;
+					const prompt = [
+						systemHint,
+						previousOutput
+							? `\nPrevious step output:\n${previousOutput.slice(0, 8000)}`
+							: "",
+						`\nInstructions:\n${node.body}`,
+					].join("\n");
+
+					const res = await sendJson(
+						"/api/automations/run",
+						{
+							prompt,
+							cwd: selectedFlow.primaryPath.replace(/^~/, ""),
+						},
+						{ method: "POST" }
+					);
+					const data = (await res.json()) as { result?: string };
+					result = data.result ?? "";
+				} else if (node.kind === "script" || node.kind === "code") {
+					const prompt = `Execute this shell command and return its output:\n${node.body}${
+						previousOutput
+							? `\n\nContext from previous step:\n${previousOutput.slice(0, 4000)}`
+							: ""
+					}`;
+					const res = await sendJson(
+						"/api/automations/run",
+						{ prompt, cwd: selectedFlow.primaryPath.replace(/^~/, "") },
+						{ method: "POST" }
+					);
+					const data = (await res.json()) as { result?: string };
+					result = data.result ?? "";
+				} else {
+					result = node.body;
+					if (previousOutput) {
+						result = `${previousOutput}\n\n${node.body}`;
+					}
+				}
+
+				previousOutput = result;
+				state.nodeOutputs[node.id] = result;
+				state.completedNodeIds.push(node.id);
+				setRunState({ ...state });
+			} catch (err) {
+				state.failedNodeId = node.id;
+				state.isRunning = false;
+				state.activeNodeId = null;
+				setRunState({ ...state });
 				return;
 			}
-			setSelectedNodeId(activeNode.id);
-			setRunState({
-				flowId: selectedFlow.id,
-				activeNodeId: activeNode.id,
-				completedNodeIds,
-				isRunning: true,
-			});
-			runTimerRef.current = window.setTimeout(() => {
-				runStep(index + 1, [...completedNodeIds, activeNode.id]);
-			}, 900);
-		};
+		}
 
-		runStep(0, []);
+		state.isRunning = false;
+		state.activeNodeId = null;
+		setRunState({ ...state });
 	};
 
-	const updateSelectedNodeBody = async (body: string) => {
-		await updateSelectedFlow((flow) => ({
+	const updateSelectedNodeBody = (body: string) => {
+		updateSelectedFlow((flow) => ({
 			...flow,
 			nodes: flow.nodes.map((node) =>
 				node.id === selectedNode.id ? { ...node, body } : node
@@ -585,12 +712,11 @@ export function AutomationsPage() {
 		}));
 	};
 
-	const updateSelectedNodeContextPaths = async (paths: string[]) => {
-		setFolderSelections(withRecordEntry(selectedNode.id, paths));
-		await updateSelectedFlow((flow) => ({
+	const updateSelectedNodeTitle = (title: string) => {
+		updateSelectedFlow((flow) => ({
 			...flow,
 			nodes: flow.nodes.map((node) =>
-				node.id === selectedNode.id ? { ...node, contextPaths: paths } : node
+				node.id === selectedNode.id ? { ...node, title } : node
 			),
 		}));
 	};
@@ -723,7 +849,7 @@ export function AutomationsPage() {
 				<div {...stylex.props(styles.header)}>
 					<div {...stylex.props(styles.titleBlock)}>
 						<span {...stylex.props(styles.kicker)}>Automations</span>
-						<h1 {...stylex.props(styles.title)}>Markdown Orchestrator</h1>
+						<h1 {...stylex.props(styles.title)}>Workflows</h1>
 					</div>
 					<button
 						type="button"
@@ -756,7 +882,7 @@ export function AutomationsPage() {
 							<span {...stylex.props(styles.flowMeta)}>
 								<span>
 									<IconClock size={11} />
-									{flow.nextRun}
+									{flow.schedule}
 								</span>
 								<span>{flow.nodes.length} steps</span>
 							</span>
@@ -771,9 +897,6 @@ export function AutomationsPage() {
 						<IconWorkflow size={14} />
 						<span>{selectedFlow.name}</span>
 					</div>
-					<span {...stylex.props(styles.scheduleText)}>
-						{selectedFlow.schedule}
-					</span>
 					<span {...stylex.props(styles.spacer)} />
 					<button
 						type="button"
@@ -784,24 +907,76 @@ export function AutomationsPage() {
 					</button>
 					<button
 						type="button"
-						onClick={handleRunOnce}
+						onClick={() => void handleRunOnce()}
+						disabled={
+							runState?.flowId === selectedFlow.id && runState.isRunning
+						}
 						{...stylex.props(styles.primaryButton)}
 					>
 						{runState?.flowId === selectedFlow.id && runState.isRunning
-							? "Running"
-							: "Run once"}
+							? "Running..."
+							: "Run"}
 					</button>
 				</div>
 
 				<div
 					{...stylex.props(styles.canvas, showGrid && styles.canvasGrid)}
-					aria-label="Automation note canvas"
+					aria-label="Automation canvas"
 					role="region"
 				>
+					<div {...stylex.props(styles.addButtonWrap)}>
+						<button
+							type="button"
+							onClick={(e) => {
+								e.stopPropagation();
+								setShowAddMenu(!showAddMenu);
+							}}
+							{...stylex.props(styles.addButton)}
+						>
+							<IconPlus size={14} />
+						</button>
+						{showAddMenu && (
+							<div
+								{...stylex.props(styles.addMenu)}
+								onClick={(e) => e.stopPropagation()}
+							>
+								{toolKinds.map((kind) => {
+									const config = getNodeConfig(kind);
+									const Icon = config.icon;
+									return (
+										<button
+											key={kind}
+											type="button"
+											onClick={() => handleAddNode(kind)}
+											{...stylex.props(styles.addMenuItem)}
+										>
+											<span
+												{...stylex.props(
+													styles.addMenuIcon,
+													styles[`menuIcon${config.tone}`]
+												)}
+											>
+												<Icon size={13} />
+											</span>
+											<span {...stylex.props(styles.addMenuText)}>
+												<span {...stylex.props(styles.addMenuLabel)}>
+													{config.label}
+												</span>
+												<span {...stylex.props(styles.addMenuHint)}>
+													{config.hint}
+												</span>
+											</span>
+										</button>
+									);
+								})}
+							</div>
+						)}
+					</div>
+
 					<svg
 						{...stylex.props(styles.edgeLayer)}
 						aria-hidden="true"
-						width="980"
+						width="1400"
 						height="520"
 					>
 						{edgeLines.map((edge) => (
@@ -826,6 +1001,9 @@ export function AutomationsPage() {
 						const isRunComplete =
 							runState?.flowId === selectedFlow.id &&
 							runState.completedNodeIds.includes(node.id);
+						const isRunFailed =
+							runState?.flowId === selectedFlow.id &&
+							runState.failedNodeId === node.id;
 						return (
 							<button
 								key={node.id}
@@ -837,7 +1015,8 @@ export function AutomationsPage() {
 									node.id === selectedNode.id && styles.nodeCardSelected,
 									dragState?.nodeId === node.id && styles.nodeCardDragging,
 									isRunActive && styles.nodeCardRunning,
-									isRunComplete && styles.nodeCardComplete
+									isRunComplete && styles.nodeCardComplete,
+									isRunFailed && styles.nodeCardFailed
 								)}
 								style={{ left: node.x, top: node.y }}
 							>
@@ -853,176 +1032,67 @@ export function AutomationsPage() {
 									<span {...stylex.props(styles.nodeTitle)}>{node.title}</span>
 								</span>
 								<span {...stylex.props(styles.nodePorts)}>
-									{nodeConfig.inputs.map((input) => (
-										<span key={input} {...stylex.props(styles.nodeInputPort)}>
-											<span {...stylex.props(styles.portDot)} />
-											{input}
-										</span>
-									))}
-									{nodeConfig.outputs.map((output) => (
-										<span key={output} {...stylex.props(styles.nodeOutputPort)}>
-											{isRunActive
-												? "running"
-												: isRunComplete
-													? "complete"
-													: output}
+									{nodeConfig.inputs.length > 0 && (
+										<span {...stylex.props(styles.nodeInputPort)}>
 											<span {...stylex.props(styles.portDot)} />
 										</span>
-									))}
+									)}
+									{nodeConfig.outputs.length > 0 && (
+										<span {...stylex.props(styles.nodeOutputPort)}>
+											{isRunActive ? "running..." : isRunComplete ? "done" : ""}
+											<span {...stylex.props(styles.portDot)} />
+										</span>
+									)}
 								</span>
+								{node.body && (
+									<span {...stylex.props(styles.nodeBodyPreview)}>
+										{node.body}
+									</span>
+								)}
 							</button>
 						);
 					})}
-					<div {...stylex.props(styles.nodePalette)}>
-						<span {...stylex.props(styles.paletteLabel)}>Add</span>
-						{paletteKinds.map((kind) => {
-							const config = nodeKinds[kind];
-							const Icon = config.icon;
-							return (
-								<button
-									key={kind}
-									type="button"
-									onClick={() => handleAddNode(kind)}
-									{...stylex.props(styles.paletteButton)}
-								>
-									<Icon size={12} />
-									{config.label}
-								</button>
-							);
-						})}
-					</div>
 				</div>
 			</section>
 
 			<aside {...stylex.props(styles.detailPane)}>
 				<div {...stylex.props(styles.detailHeader)}>
-					<span {...stylex.props(styles.kicker)}>Selected note</span>
-					<h2 {...stylex.props(styles.detailTitle)}>{selectedNode.title}</h2>
-					<p {...stylex.props(styles.detailDescription)}>
-						{selectedNode.description}
-					</p>
+					<span {...stylex.props(styles.kicker)}>
+						{selectedNodeConfig.label}
+					</span>
+					<input
+						type="text"
+						value={selectedNode.title}
+						onChange={(e) => updateSelectedNodeTitle(e.target.value)}
+						{...stylex.props(styles.detailTitleInput)}
+					/>
+					<span {...stylex.props(styles.detailAutoDesc)}>
+						{selectedNodeConfig.autoDescription}
+					</span>
 				</div>
 
-				<div {...stylex.props(styles.detailSection)}>
-					<div {...stylex.props(styles.panelHeader)}>
-						<span>Step context</span>
-						<button
-							type="button"
-							onClick={() => setIsPickingFolders(!isPickingFolders)}
-							{...stylex.props(styles.linkButton)}
-						>
-							{isPickingFolders ? "Close" : "Choose repos"}
-						</button>
-					</div>
-					<div {...stylex.props(styles.pathStack)}>
-						<div {...stylex.props(styles.contextPath)}>
-							<span {...stylex.props(styles.pathLabel)}>Primary</span>
-							<span>{primaryPath}</span>
-						</div>
-						{referencePaths.map((path) => (
-							<div key={path} {...stylex.props(styles.contextPath)}>
-								<span {...stylex.props(styles.pathLabel)}>Additional</span>
-								<span>{path}</span>
-							</div>
-						))}
-					</div>
-					{isPickingFolders && (
-						<div {...stylex.props(styles.pickerWrap)}>
-							<InlineDirectoryPicker
-								multiSelect
-								showStartButton={false}
-								onSelect={(path) => {
-									if (!path) return;
-									void updateSelectedNodeContextPaths([path]);
-									setIsPickingFolders(false);
-								}}
-								onSelectionChange={(setRecordEntry<string[]>).bind(
-									null,
-									setFolderSelections,
-									selectedNode.id
-								)}
-								onMultiSelect={(paths) => {
-									void updateSelectedNodeContextPaths(paths);
-									setIsPickingFolders(false);
-								}}
-								onCancel={() => setIsPickingFolders(false)}
-							/>
-						</div>
-					)}
+				<div {...stylex.props(styles.detailBody)}>
+					<textarea
+						value={selectedNode.body}
+						onChange={(e) => updateSelectedNodeBody(e.target.value)}
+						placeholder={selectedNodeConfig.placeholder}
+						{...stylex.props(styles.bodyEditor)}
+					/>
+					<span {...stylex.props(styles.feedsInto)}>
+						{outgoingNodes.length > 0
+							? `Feeds into ${outgoingNodes.map((n) => n.title).join(", ")}`
+							: "Final step"}
+					</span>
 				</div>
 
-				<div {...stylex.props(styles.detailSection)}>
-					<div {...stylex.props(styles.panelHeader)}>
-						<span>Markdown file</span>
-						<span {...stylex.props(styles.outputCount)}>
-							{selectedNode.kind}
-						</span>
-					</div>
-					<div {...stylex.props(styles.filePath)}>
-						<IconFolder size={12} />
-						{selectedNode.file}
-					</div>
-					<div {...stylex.props(styles.markdownCard)}>
-						<span {...stylex.props(styles.markdownHeading)}>What it does</span>
-						<textarea
-							value={selectedNode.body}
-							onChange={(event) => {
-								void updateSelectedNodeBody(event.target.value);
-							}}
-							placeholder="Write the markdown instructions for this automation step..."
-							{...stylex.props(styles.bodyEditor)}
-						/>
-					</div>
-				</div>
-
-				<div {...stylex.props(styles.detailSection)}>
-					<div {...stylex.props(styles.panelHeader)}>
-						<span>Step flow</span>
-						<span {...stylex.props(styles.outputCount)}>
-							{selectedNodeIndex + 1} of {selectedFlow.nodes.length}
-						</span>
-					</div>
-					<div {...stylex.props(styles.flowPath)}>
-						<div {...stylex.props(styles.flowPathGroup)}>
-							<span {...stylex.props(styles.pathLabel)}>Receives from</span>
-							{incomingNodes.length > 0 ? (
-								incomingNodes.map((node) => (
-									<span key={node.id} {...stylex.props(styles.flowPathNode)}>
-										{node.title}
-									</span>
-								))
-							) : (
-								<span {...stylex.props(styles.emptyFlowPath)}>Start step</span>
-							)}
-						</div>
-						<div {...stylex.props(styles.flowPathGroup)}>
-							<span {...stylex.props(styles.pathLabel)}>Runs as</span>
-							<span {...stylex.props(styles.flowPathNode)}>
-								{selectedNode.kind === "agent"
-									? "Inferay agent"
-									: selectedNode.kind === "web"
-										? "Web fetch"
-										: selectedNode.kind === "script"
-											? "Script"
-											: "Markdown step"}
-							</span>
-						</div>
-						<div {...stylex.props(styles.flowPathGroup)}>
-							<span {...stylex.props(styles.pathLabel)}>Sends to</span>
-							{outgoingNodes.length > 0 ? (
-								outgoingNodes.map((node) => (
-									<span key={node.id} {...stylex.props(styles.flowPathNode)}>
-										{node.title}
-									</span>
-								))
-							) : (
-								<span {...stylex.props(styles.emptyFlowPath)}>
-									Final output
-								</span>
-							)}
+				{runState?.nodeOutputs[selectedNode.id] && (
+					<div {...stylex.props(styles.detailOutput)}>
+						<span {...stylex.props(styles.kicker)}>Output</span>
+						<div {...stylex.props(styles.outputText)}>
+							{runState.nodeOutputs[selectedNode.id]!.slice(0, 2000)}
 						</div>
 					</div>
-				</div>
+				)}
 			</aside>
 		</div>
 	);
@@ -1049,7 +1119,7 @@ const styles = stylex.create({
 		backgroundColor: color.background,
 		color: color.textMain,
 		display: "grid",
-		gridTemplateColumns: "280px minmax(520px, 1fr) 300px",
+		gridTemplateColumns: "260px minmax(520px, 1fr) 300px",
 		height: "100%",
 		minWidth: 0,
 		overflow: "hidden",
@@ -1110,6 +1180,7 @@ const styles = stylex.create({
 	},
 	flowList: {
 		display: "flex",
+		flex: 1,
 		flexDirection: "column",
 		gap: controlSize._2,
 		overflowY: "auto",
@@ -1165,31 +1236,6 @@ const styles = stylex.create({
 		gap: controlSize._2,
 		justifyContent: "space-between",
 	},
-	panelHeader: {
-		alignItems: "center",
-		color: color.textMuted,
-		display: "flex",
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		justifyContent: "space-between",
-		textTransform: "uppercase",
-	},
-	linkButton: {
-		backgroundColor: "transparent",
-		color: {
-			default: color.textSoft,
-			":hover": color.textMain,
-		},
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		textTransform: "none",
-	},
-	outputCount: {
-		color: color.textFaint,
-		fontFamily: font.familyMono,
-		fontSize: font.size_1,
-		textTransform: "none",
-	},
 	canvasPane: {
 		display: "flex",
 		flexDirection: "column",
@@ -1215,14 +1261,7 @@ const styles = stylex.create({
 		fontWeight: font.weight_6,
 		gap: controlSize._2,
 	},
-	scheduleText: {
-		color: color.textMuted,
-		fontFamily: font.familyMono,
-		fontSize: font.size_1,
-	},
-	spacer: {
-		flex: 1,
-	},
+	spacer: { flex: 1 },
 	smallButton: {
 		backgroundColor: {
 			default: color.surfaceControl,
@@ -1261,13 +1300,95 @@ const styles = stylex.create({
 			"radial-gradient(circle at 1px 1px, rgba(255,255,255,0.055) 1px, transparent 0)",
 		backgroundSize: "32px 32px",
 	},
+	addButtonWrap: {
+		left: 16,
+		position: "absolute",
+		top: 16,
+		zIndex: 5,
+	},
+	addButton: {
+		alignItems: "center",
+		backgroundColor: {
+			default: "rgba(255,255,255,0.08)",
+			":hover": "rgba(255,255,255,0.14)",
+		},
+		borderColor: "rgba(255,255,255,0.15)",
+		borderRadius: radius.md,
+		borderStyle: "solid",
+		borderWidth: 1,
+		color: color.textMain,
+		display: "flex",
+		height: controlSize._8,
+		justifyContent: "center",
+		width: controlSize._8,
+	},
+	addMenu: {
+		backdropFilter: "blur(16px)",
+		backgroundColor: "rgba(12, 12, 14, 0.95)",
+		borderColor: "rgba(255,255,255,0.1)",
+		borderRadius: radius.lg,
+		borderStyle: "solid",
+		borderWidth: 1,
+		boxShadow: shadow.modal,
+		display: "flex",
+		flexDirection: "column",
+		marginTop: controlSize._1,
+		minWidth: 260,
+		overflow: "hidden",
+		padding: controlSize._1,
+	},
+	addMenuItem: {
+		alignItems: "center",
+		backgroundColor: {
+			default: "transparent",
+			":hover": "rgba(255,255,255,0.06)",
+		},
+		borderRadius: radius.md,
+		color: color.textMain,
+		display: "flex",
+		gap: controlSize._2,
+		paddingBlock: controlSize._2,
+		paddingInline: controlSize._2,
+		textAlign: "left",
+	},
+	addMenuIcon: {
+		alignItems: "center",
+		borderRadius: radius.sm,
+		display: "flex",
+		flexShrink: 0,
+		height: controlSize._6,
+		justifyContent: "center",
+		width: controlSize._6,
+	},
+	menuIconemerald: { backgroundColor: "rgba(16, 185, 129, 0.8)" },
+	menuIconblue: { backgroundColor: "rgba(59, 130, 246, 0.8)" },
+	menuIconpurple: { backgroundColor: "rgba(168, 85, 247, 0.8)" },
+	menuIconamber: { backgroundColor: "rgba(245, 158, 11, 0.8)" },
+	menuIconcyan: { backgroundColor: "rgba(6, 182, 212, 0.8)" },
+	menuIconpink: { backgroundColor: "rgba(236, 72, 153, 0.8)" },
+	menuIconorange: { backgroundColor: "rgba(249, 115, 22, 0.8)" },
+	addMenuText: {
+		display: "flex",
+		flex: 1,
+		flexDirection: "column",
+		gap: 2,
+		minWidth: 0,
+	},
+	addMenuLabel: {
+		fontSize: font.size_2,
+		fontWeight: font.weight_6,
+	},
+	addMenuHint: {
+		color: color.textMuted,
+		fontSize: font.size_1,
+	},
 	edgeLayer: {
 		height: 520,
 		left: 0,
 		pointerEvents: "none",
 		position: "absolute",
 		top: 0,
-		width: 980,
+		width: 1400,
 	},
 	edge: {
 		fill: "none",
@@ -1296,36 +1417,36 @@ const styles = stylex.create({
 		transitionProperty: "background-color, border-color, transform",
 		transitionTimingFunction: motion.ease,
 		userSelect: "none",
-		width: 140,
+		width: NODE_WIDTH,
 	},
 	nodeToneemerald: {
 		backgroundColor:
 			"color-mix(in srgb, var(--color-inferay-success) 5%, #050505)",
-		borderColor: color.successBorder,
+		borderColor: "rgba(16, 185, 129, 0.4)",
 	},
 	nodeToneblue: {
 		backgroundColor: "color-mix(in srgb, #3b82f6 7%, #050505)",
-		borderColor: "rgba(59, 130, 246, 0.5)",
+		borderColor: "rgba(59, 130, 246, 0.4)",
 	},
 	nodeTonepurple: {
 		backgroundColor: "color-mix(in srgb, #a855f7 8%, #050505)",
-		borderColor: "rgba(168, 85, 247, 0.5)",
+		borderColor: "rgba(168, 85, 247, 0.4)",
 	},
 	nodeTonepink: {
 		backgroundColor: "color-mix(in srgb, #ec4899 8%, #050505)",
-		borderColor: "rgba(236, 72, 153, 0.5)",
+		borderColor: "rgba(236, 72, 153, 0.4)",
 	},
 	nodeToneamber: {
 		backgroundColor: "color-mix(in srgb, #f59e0b 7%, #050505)",
-		borderColor: "rgba(245, 158, 11, 0.5)",
+		borderColor: "rgba(245, 158, 11, 0.4)",
 	},
 	nodeToneorange: {
 		backgroundColor: "color-mix(in srgb, #f97316 7%, #050505)",
-		borderColor: "rgba(249, 115, 22, 0.5)",
+		borderColor: "rgba(249, 115, 22, 0.4)",
 	},
 	nodeTonecyan: {
 		backgroundColor: "color-mix(in srgb, #06b6d4 7%, #050505)",
-		borderColor: "rgba(6, 182, 212, 0.55)",
+		borderColor: "rgba(6, 182, 212, 0.4)",
 	},
 	nodeCardSelected: {
 		borderColor: color.focusRing,
@@ -1334,6 +1455,7 @@ const styles = stylex.create({
 	nodeCardDragging: {
 		borderColor: color.textSoft,
 		cursor: "grabbing",
+		willChange: "left, top",
 		zIndex: 2,
 	},
 	nodeCardRunning: {
@@ -1341,7 +1463,10 @@ const styles = stylex.create({
 		boxShadow: shadow.focusRing,
 	},
 	nodeCardComplete: {
-		borderColor: color.successBorder,
+		borderColor: "rgba(16, 185, 129, 0.6)",
+	},
+	nodeCardFailed: {
+		borderColor: "rgba(239, 68, 68, 0.6)",
 	},
 	nodeHeader: {
 		alignItems: "center",
@@ -1364,27 +1489,13 @@ const styles = stylex.create({
 		justifyContent: "center",
 		width: controlSize._4,
 	},
-	nodeIconemerald: {
-		backgroundColor: color.success,
-	},
-	nodeIconblue: {
-		backgroundColor: "#3b82f6",
-	},
-	nodeIconpurple: {
-		backgroundColor: "#a855f7",
-	},
-	nodeIconpink: {
-		backgroundColor: "#ec4899",
-	},
-	nodeIconamber: {
-		backgroundColor: "#f59e0b",
-	},
-	nodeIconorange: {
-		backgroundColor: "#f97316",
-	},
-	nodeIconcyan: {
-		backgroundColor: "#06b6d4",
-	},
+	nodeIconemerald: { backgroundColor: "rgba(16, 185, 129, 0.8)" },
+	nodeIconblue: { backgroundColor: "#3b82f6" },
+	nodeIconpurple: { backgroundColor: "#a855f7" },
+	nodeIconpink: { backgroundColor: "#ec4899" },
+	nodeIconamber: { backgroundColor: "#f59e0b" },
+	nodeIconorange: { backgroundColor: "#f97316" },
+	nodeIconcyan: { backgroundColor: "#06b6d4" },
 	nodeTitle: {
 		color: color.textMain,
 		fontSize: font.size_1,
@@ -1394,11 +1505,11 @@ const styles = stylex.create({
 		whiteSpace: "nowrap",
 	},
 	nodePorts: {
+		alignItems: "center",
 		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
-		paddingBlock: controlSize._1_5,
-		paddingInline: controlSize._2,
+		justifyContent: "space-between",
+		paddingBlock: controlSize._1,
+		paddingInline: controlSize._1,
 	},
 	nodeInputPort: {
 		alignItems: "center",
@@ -1406,7 +1517,7 @@ const styles = stylex.create({
 		display: "flex",
 		fontSize: font.size_1,
 		gap: controlSize._1,
-		marginLeft: "-0.875rem",
+		marginLeft: "-0.625rem",
 	},
 	nodeOutputPort: {
 		alignItems: "center",
@@ -1415,7 +1526,8 @@ const styles = stylex.create({
 		fontSize: font.size_1,
 		gap: controlSize._1,
 		justifyContent: "flex-end",
-		marginRight: "-0.875rem",
+		marginLeft: "auto",
+		marginRight: "-0.625rem",
 	},
 	portDot: {
 		backgroundColor: color.background,
@@ -1427,45 +1539,19 @@ const styles = stylex.create({
 		height: controlSize._2,
 		width: controlSize._2,
 	},
-	nodePalette: {
-		alignItems: "center",
-		backdropFilter: "blur(12px)",
-		backgroundColor: "rgba(5, 5, 5, 0.92)",
-		borderTopColor: color.border,
+	nodeBodyPreview: {
+		"-webkit-box-orient": "vertical",
+		"-webkit-line-clamp": "2",
+		borderTopColor: color.borderSubtle,
 		borderTopStyle: "solid",
 		borderTopWidth: 1,
-		bottom: 0,
-		display: "flex",
-		gap: controlSize._1,
-		left: 0,
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
-		position: "absolute",
-		right: 0,
-		zIndex: 3,
-	},
-	paletteLabel: {
-		color: color.textMuted,
+		color: color.textFaint,
+		display: "-webkit-box",
+		fontFamily: font.familyMono,
 		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		marginRight: controlSize._2,
-		textTransform: "uppercase",
-	},
-	paletteButton: {
-		alignItems: "center",
-		backgroundColor: {
-			default: color.surfaceInset,
-			":hover": color.surfaceControl,
-		},
-		borderColor: color.border,
-		borderRadius: radius.md,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textSoft,
-		display: "flex",
-		fontSize: font.size_1,
-		gap: controlSize._1_5,
-		height: controlSize._7,
+		lineHeight: 1.4,
+		overflow: "hidden",
+		paddingBlock: controlSize._1_5,
 		paddingInline: controlSize._2,
 	},
 	detailPane: {
@@ -1481,104 +1567,41 @@ const styles = stylex.create({
 		borderBottomColor: color.border,
 		borderBottomStyle: "solid",
 		borderBottomWidth: 1,
+		display: "flex",
+		flexDirection: "column",
+		gap: controlSize._1,
 		padding: controlSize._3,
 	},
-	detailTitle: {
+	detailTitleInput: {
+		backgroundColor: "transparent",
+		borderColor: {
+			default: "transparent",
+			":hover": color.borderSubtle,
+			":focus": color.focusRing,
+		},
+		borderRadius: radius.md,
+		borderStyle: "solid",
+		borderWidth: 1,
 		color: color.textMain,
 		fontSize: font.size_5,
 		fontWeight: font.weight_6,
 		lineHeight: 1.25,
-		margin: 0,
-		marginTop: controlSize._1,
+		outline: "none",
+		paddingBlock: controlSize._0_5,
+		paddingInline: controlSize._1,
+		width: "100%",
 	},
-	detailDescription: {
-		color: color.textMuted,
-		fontSize: font.size_2,
-		lineHeight: 1.45,
-		margin: 0,
-		marginTop: controlSize._2,
-	},
-	detailSection: {
-		borderBottomColor: color.border,
-		borderBottomStyle: "solid",
-		borderBottomWidth: 1,
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._2,
-		padding: controlSize._3,
-	},
-	pathStack: {
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
-	},
-	contextPath: {
-		backgroundColor: color.surfaceInset,
-		borderColor: color.borderSubtle,
-		borderRadius: radius.md,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textSoft,
-		display: "flex",
-		flexDirection: "column",
-		fontFamily: font.familyMono,
-		fontSize: font.size_1,
-		gap: controlSize._0_5,
-		minWidth: 0,
-		overflow: "hidden",
-		paddingBlock: controlSize._1_5,
-		paddingInline: controlSize._2,
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	pathLabel: {
+	detailAutoDesc: {
 		color: color.textFaint,
-		fontFamily: "inherit",
-		fontSize: font.size_0_5,
-		textTransform: "uppercase",
+		fontSize: font.size_1,
+		paddingInline: controlSize._1,
 	},
-	pickerWrap: {
-		backgroundColor: color.surfaceTranslucent,
-		borderColor: color.border,
-		borderRadius: radius.lg,
-		borderStyle: "solid",
-		borderWidth: 1,
-		maxHeight: 320,
-		overflow: "auto",
-		padding: controlSize._2,
-	},
-	filePath: {
-		alignItems: "center",
-		backgroundColor: color.surfaceInset,
-		borderColor: color.borderSubtle,
-		borderRadius: radius.md,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textSoft,
+	detailBody: {
 		display: "flex",
-		fontFamily: font.familyMono,
-		fontSize: font.size_1,
+		flex: 1,
+		flexDirection: "column",
 		gap: controlSize._2,
-		padding: controlSize._2,
-	},
-	markdownCard: {
-		backgroundColor: color.surfaceTranslucent,
-		borderColor: color.border,
-		borderRadius: radius.lg,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textMuted,
-		fontSize: font.size_2,
-		lineHeight: 1.5,
 		padding: controlSize._3,
-	},
-	markdownHeading: {
-		color: color.textMain,
-		display: "block",
-		fontSize: font.size_1,
-		fontWeight: font.weight_6,
-		marginBottom: controlSize._1,
-		textTransform: "uppercase",
 	},
 	bodyEditor: {
 		backgroundColor: color.surfaceInset,
@@ -1587,10 +1610,11 @@ const styles = stylex.create({
 		borderStyle: "solid",
 		borderWidth: 1,
 		color: color.textMain,
+		flex: 1,
 		fontFamily: font.familyMono,
 		fontSize: font.size_2,
 		lineHeight: 1.5,
-		minHeight: 148,
+		minHeight: 240,
 		outline: {
 			default: "none",
 			":focus": "none",
@@ -1599,32 +1623,37 @@ const styles = stylex.create({
 		resize: "vertical",
 		width: "100%",
 	},
-	flowPath: {
+	feedsInto: {
+		color: color.textFaint,
+		fontSize: font.size_1,
+		paddingInline: controlSize._1,
+	},
+	detailOutput: {
+		borderTopColor: color.border,
+		borderTopStyle: "solid",
+		borderTopWidth: 1,
 		display: "flex",
 		flexDirection: "column",
-		gap: controlSize._2,
+		gap: controlSize._1,
+		maxHeight: 300,
+		overflow: "auto",
+		padding: controlSize._3,
 	},
-	flowPathGroup: {
+	outputText: {
 		backgroundColor: color.surfaceInset,
 		borderColor: color.borderSubtle,
 		borderRadius: radius.md,
 		borderStyle: "solid",
 		borderWidth: 1,
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
+		color: color.textSoft,
+		fontFamily: font.familyMono,
+		fontSize: font.size_1,
+		lineHeight: 1.5,
+		maxHeight: 200,
+		overflow: "auto",
 		padding: controlSize._2,
-	},
-	flowPathNode: {
-		color: color.textMain,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-		lineHeight: 1.35,
-	},
-	emptyFlowPath: {
-		color: color.textFaint,
-		fontSize: font.size_2,
-		lineHeight: 1.35,
+		whiteSpace: "pre-wrap",
+		wordBreak: "break-word",
 	},
 	statusPill: {
 		alignItems: "center",
