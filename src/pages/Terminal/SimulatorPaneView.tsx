@@ -33,7 +33,13 @@ import {
 	toggleBoolean,
 } from "../../lib/data.ts";
 import { isBootedSimulatorDevice } from "../../lib/simulator-utils.ts";
-import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
+import {
+	readStoredJson,
+	readStoredValue,
+	removeStoredValue,
+	writeStoredJson,
+	writeStoredValue,
+} from "../../lib/stored-json.ts";
 import { color, controlSize, font, radius } from "../../tokens.stylex.ts";
 
 interface SimulatorDevice {
@@ -531,7 +537,7 @@ export function SimulatorPaneView() {
 	} | null>(null);
 	const [launchError, setLaunchError] = useState<string | null>(null);
 	const [launchedProjectId, setLaunchedProjectId] = useState<string | null>(
-		() => localStorage.getItem(SIMULATOR_LAUNCHED_PROJECT_KEY)
+		() => readStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY)
 	);
 	const [deviceProjectIds, setDeviceProjectIds] = useState<
 		Record<string, string>
@@ -659,9 +665,9 @@ export function SimulatorPaneView() {
 						? current
 						: null);
 				if (nextId) {
-					localStorage.setItem(SIMULATOR_LAUNCHED_PROJECT_KEY, nextId);
+					writeStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY, nextId);
 				} else {
-					localStorage.removeItem(SIMULATOR_LAUNCHED_PROJECT_KEY);
+					removeStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY);
 				}
 				return nextId;
 			});
@@ -681,7 +687,7 @@ export function SimulatorPaneView() {
 			}).catch(noop);
 			if (target.udid === viewportDevice?.udid) {
 				setLaunchedProjectId(null);
-				localStorage.removeItem(SIMULATOR_LAUNCHED_PROJECT_KEY);
+				removeStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY);
 			}
 			await refresh();
 		},
@@ -757,7 +763,7 @@ export function SimulatorPaneView() {
 					return;
 				}
 				setLaunchedProjectId(project.id);
-				localStorage.setItem(SIMULATOR_LAUNCHED_PROJECT_KEY, project.id);
+				writeStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY, project.id);
 				setDeviceProjectIds((current) => {
 					const next = { ...current, [targetDevice.udid]: project.id };
 					writeStoredJson(SIMULATOR_DEVICE_PROJECTS_KEY, next);

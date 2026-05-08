@@ -57,10 +57,15 @@ import {
 	isNonEmptyString,
 	toggleBoolean,
 } from "../../lib/data.ts";
-import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
+import {
+	readStoredValue,
+	removeStoredValue,
+	writeStoredValue,
+} from "../../lib/stored-json.ts";
 import {
 	loadTerminalState,
 	type TerminalGroupModel,
+	type ThemeId,
 } from "../../features/terminal/terminal-utils.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
@@ -105,7 +110,18 @@ function flattenSessions(groups: TerminalGroupModel[]): Session[] {
 }
 
 function stableSessions(next: Session[]): Session[] {
-	const key = next.map((s) => s.paneId).join(",");
+	const key = next
+		.map((s) =>
+			[
+				s.groupId,
+				s.paneId,
+				s.agentKind,
+				s.cwd ?? "",
+				s.pendingCwd ? "pending" : "ready",
+				s.referencePaths?.join("\u0000") ?? "",
+			].join("\u0001")
+		)
+		.join("\u0002");
 	if (key === cachedKey) return cachedSessions;
 	cachedKey = key;
 	cachedSessions = next;
@@ -116,7 +132,25 @@ function loadZenMode() {
 	return readStoredValue("terminal-editor-zen") === "true";
 }
 
-export function EditorPage() {
+interface EditorPageProps {
+	groups?: TerminalGroupModel[];
+	selectedGroupId?: string | null;
+	themeId?: ThemeId;
+	onSelectPane?: (paneId: string) => void;
+	onDirectoryChange?: (
+		paneId: string,
+		cwd: string,
+		referencePaths?: string[]
+	) => void;
+}
+
+export function EditorPage({
+	groups: liveGroups,
+	selectedGroupId: liveSelectedGroupId,
+	themeId: liveThemeId,
+	onSelectPane,
+	onDirectoryChange,
+}: EditorPageProps = {}) {
 	const [, setTick] = useState(0);
 	const [selectedPaneId, setSelectedPaneId] = useState<string | null>(
 		() => readStoredValue("editor-selected-pane") ?? null
@@ -144,16 +178,30 @@ export function EditorPage() {
 	} | null>(null);
 
 	const [sessionVersion, setSessionVersion] = useState(0);
-	const terminalState = useMemo(loadTerminalState, [sessionVersion]);
+	const terminalState = useMemo(
+		() => (liveGroups ? null : loadTerminalState()),
+		[liveGroups, sessionVersion]
+	);
 	const themeId =
-		terminalState?.themeId ?? mapAppThemeToTerminalTheme(loadAppThemeId());
+		liveThemeId ??
+		terminalState?.themeId ??
+		mapAppThemeToTerminalTheme(loadAppThemeId());
+	const sourceGroups = liveGroups ?? terminalState?.groups ?? [];
+	const activeGroupId =
+		liveSelectedGroupId ?? terminalState?.selectedGroupId ?? null;
+	const visibleGroups = useMemo(() => {
+		const activeGroup = sourceGroups.find(
+			(group) => group.id === activeGroupId
+		);
+		return activeGroup ? [activeGroup] : sourceGroups;
+	}, [activeGroupId, sourceGroups]);
+	const activeGroupSelectedPaneId = visibleGroups[0]?.selectedPaneId ?? null;
 	const allSessions = useMemo(
-		() => stableSessions(flattenSessions(terminalState?.groups ?? [])),
-		[terminalState]
+		() => stableSessions(flattenSessions(visibleGroups)),
+		[visibleGroups]
 	);
 	const sessions = useMemo(
-		() =>
-			allSessions.filter((s) => !closedPaneIds.has(s.paneId) && !s.pendingCwd),
+		() => allSessions.filter((s) => !closedPaneIds.has(s.paneId)),
 		[allSessions, closedPaneIds]
 	);
 	const { sessions: liveAgentSessions } = useAgentSessions();
@@ -200,20 +248,24 @@ export function EditorPage() {
 			setSelectedPaneId(null);
 			return;
 		}
-		setSelectedPaneId((cur) =>
-			cur && sessions.some((s) => s.paneId === cur)
+		setSelectedPaneId((cur) => {
+			if (
+				activeGroupSelectedPaneId &&
+				sessions.some((s) => s.paneId === activeGroupSelectedPaneId)
+			) {
+				return activeGroupSelectedPaneId;
+			}
+			return cur && sessions.some((s) => s.paneId === cur)
 				? cur
-				: (sessions[0]?.paneId ?? null)
-		);
-	}, [sessions]);
+				: (sessions[0]?.paneId ?? null);
+		});
+	}, [activeGroupSelectedPaneId, sessions]);
 
 	useEffect(() => {
 		if (selectedPaneId) {
 			writeStoredValue("editor-selected-pane", selectedPaneId);
 		} else {
-			try {
-				localStorage.removeItem("editor-selected-pane");
-			} catch {}
+			removeStoredValue("editor-selected-pane");
 		}
 	}, [selectedPaneId]);
 
@@ -422,6 +474,13 @@ export function EditorPage() {
 		},
 		[selectedPaneId, sessions]
 	);
+	const selectEditorPane = useCallback(
+		(paneId: string) => {
+			setSelectedPaneId(paneId);
+			onSelectPane?.(paneId);
+		},
+		[onSelectPane]
+	);
 
 	const handleAgentStatusChange = useCallback((id: string, status: string) => {
 		setAgentStatuses((cur) => {
@@ -588,6 +647,7 @@ export function EditorPage() {
 							composerOnly
 							composerOnlyOffsetX={sidebarVisible ? -(sidebarWidth / 2) : 0}
 							onExitComposerOnly={() => updateZenMode(false)}
+							onDirectoryChange={onDirectoryChange}
 						/>
 					}
 					viewer={renderViewer()}
@@ -603,7 +663,8 @@ export function EditorPage() {
 							onStatusChange={handleAgentStatusChange}
 							onClose={closePane}
 							sessions={sessions}
-							onSelectSession={setSelectedPaneId}
+							onSelectSession={selectEditorPane}
+							onDirectoryChange={onDirectoryChange}
 						/>
 					</section>
 
@@ -644,8 +705,7 @@ function EmptyState() {
 			<div {...stylex.props(styles.emptyCard)}>
 				<h2 {...stylex.props(styles.emptyTitle)}>No saved agent sessions</h2>
 				<p {...stylex.props(styles.emptyDescription)}>
-					Open Claude or Codex in the terminal page, pick a project directory,
-					and it will appear here.
+					Open Claude or Codex in the chat grid and it will appear here.
 				</p>
 			</div>
 		</div>
@@ -704,6 +764,7 @@ function EditorAgentChat({
 	onClose,
 	sessions,
 	onSelectSession,
+	onDirectoryChange,
 	composerOnly,
 	composerOnlyOffsetX,
 	onExitComposerOnly,
@@ -714,6 +775,11 @@ function EditorAgentChat({
 	onClose?: (paneId: string) => void;
 	sessions?: Session[];
 	onSelectSession?: (paneId: string) => void;
+	onDirectoryChange?: (
+		paneId: string,
+		cwd: string,
+		referencePaths?: string[]
+	) => void;
 	composerOnly?: boolean;
 	composerOnlyOffsetX?: number;
 	onExitComposerOnly?: () => void;
@@ -730,6 +796,7 @@ function EditorAgentChat({
 			onClose={onClose}
 			sessions={sessions}
 			onSelectSession={onSelectSession}
+			onDirectoryChange={onDirectoryChange}
 			composerOnly={composerOnly}
 			composerOnlyOffsetX={composerOnlyOffsetX}
 			onExitComposerOnly={onExitComposerOnly}

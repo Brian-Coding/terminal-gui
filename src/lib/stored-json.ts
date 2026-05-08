@@ -1,3 +1,5 @@
+import { syncStoredValue } from "./client-storage-sync.ts";
+
 export function readStoredJson<T>(key: string, fallback: T): T {
 	try {
 		const stored = localStorage.getItem(key);
@@ -9,7 +11,9 @@ export function readStoredJson<T>(key: string, fallback: T): T {
 
 export function writeStoredJson<T>(key: string, value: T) {
 	try {
-		localStorage.setItem(key, JSON.stringify(value));
+		const stored = JSON.stringify(value);
+		localStorage.setItem(key, stored);
+		syncStoredValue(key, stored);
 	} catch {}
 }
 
@@ -27,12 +31,14 @@ export function readStoredValue(
 export function writeStoredValue(key: string, value: string): void {
 	try {
 		localStorage.setItem(key, value);
+		syncStoredValue(key, value);
 	} catch {}
 }
 
 export function removeStoredValue(key: string): void {
 	try {
 		localStorage.removeItem(key);
+		syncStoredValue(key, null);
 	} catch {}
 }
 

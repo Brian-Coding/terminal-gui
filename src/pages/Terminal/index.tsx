@@ -1094,7 +1094,14 @@ export function TerminalPage({
 							{!currentGroup || currentGroup.panes.length === 0 ? (
 								renderStartPane()
 							) : mainView === "editor" ? (
-								<EditorPage key={editorViewKey} />
+								<EditorPage
+									key={editorViewKey}
+									groups={groups}
+									selectedGroupId={selectedGroupId}
+									themeId={themeId}
+									onSelectPane={selectPane}
+									onDirectoryChange={handleDirectorySelected}
+								/>
 							) : mainView === "changes" ? (
 								<GitPage />
 							) : mainView === "chat" ? (

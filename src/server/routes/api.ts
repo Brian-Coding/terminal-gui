@@ -1,4 +1,5 @@
 import { checkpointRoutes } from "./checkpoint.ts";
+import { clientStorageRoutes } from "./client-storage.ts";
 import { configRoutes } from "./config.ts";
 import { featureRoutes } from "./feature-routes.ts";
 import { fileRoutes } from "./files.ts";
@@ -16,6 +17,7 @@ export function buildApiRoutes() {
 		...forgeRoutes(),
 		...nativeRoutes(),
 		...terminalRoutes(),
+		...clientStorageRoutes(),
 		...checkpointRoutes(),
 		...promptRoutes(),
 		...gitRoutes(),

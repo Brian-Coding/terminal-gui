@@ -13,6 +13,7 @@ import {
 } from "../../features/agents/agents.ts";
 import {
 	DEFAULT_TERMINAL_MAIN_VIEW,
+	APP_PAGE_ROUTES,
 	isTerminalMainView,
 	TERMINAL_MAIN_VIEWS,
 	type TerminalMainView,
@@ -49,6 +50,10 @@ const GRID_SIZE_OPTIONS = [
 	{ id: "3", label: "3" },
 	{ id: "4", label: "4" },
 ];
+
+const AUTOMATIONS_ROUTE = APP_PAGE_ROUTES.find(
+	(route) => route.id === "automations"
+);
 
 function loadShellState() {
 	const terminalState = loadTerminalState();
@@ -207,12 +212,14 @@ export function TerminalShellHeader() {
 						/>
 					);
 				})}
-				<ViewTab
-					active={location.pathname === "/automations"}
-					icon={<IconWorkflow size={12} />}
-					label="Automations"
-					onClick={() => navigate("/automations")}
-				/>
+				{AUTOMATIONS_ROUTE && (
+					<ViewTab
+						active={location.pathname === AUTOMATIONS_ROUTE.path}
+						icon={<IconWorkflow size={12} />}
+						label={AUTOMATIONS_ROUTE.label}
+						onClick={() => navigate(AUTOMATIONS_ROUTE.path)}
+					/>
+				)}
 			</div>
 			{isTerminalRoute && (
 				<>

@@ -12,6 +12,7 @@ import {
 	DEFAULT_APP_ROUTE,
 } from "./lib/app-navigation.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
+import { hydrateStoredValues } from "./lib/client-storage-sync.ts";
 import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
 import { readStoredBoolean } from "./lib/stored-json.ts";
 import { AutomationsPage } from "./pages/AutomationsPage";
@@ -35,9 +36,6 @@ import {
 const TerminalPage = lazy(() =>
 	import("./pages/Terminal").then((m) => ({ default: m.TerminalPage }))
 );
-
-const onboardingDone = readStoredBoolean(ONBOARDING_DONE_KEY);
-const defaultRoute = onboardingDone ? DEFAULT_APP_ROUTE : "/onboarding";
 
 if (window.location.origin !== getServerOrigin()) {
 	const originalFetch = window.fetch.bind(window);
@@ -63,6 +61,11 @@ if (window.location.origin !== getServerOrigin()) {
 		return originalFetch(input, init);
 	};
 }
+
+await hydrateStoredValues();
+
+const onboardingDone = readStoredBoolean(ONBOARDING_DONE_KEY);
+const defaultRoute = onboardingDone ? DEFAULT_APP_ROUTE : "/onboarding";
 
 applyAppTheme(loadAppThemeId());
 
@@ -124,6 +127,10 @@ function AppShell() {
 										element={routeElements[route.id]}
 									/>
 								))}
+								<Route
+									path="*"
+									element={<Navigate to={DEFAULT_APP_ROUTE} replace />}
+								/>
 							</Routes>
 						</Suspense>
 					</main>

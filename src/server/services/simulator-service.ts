@@ -9,6 +9,7 @@ import { compareName, isString, uniqueTrimmedStrings } from "../../lib/data.ts";
 import { isBootedSimulatorDevice } from "../../lib/simulator-utils.ts";
 import { resolveAllowedLocalPath } from "../security.ts";
 import { ConfigManager } from "./config-manager.ts";
+import { readTerminalState } from "./terminal-state.ts";
 
 export interface SimulatorDevice {
 	udid: string;
@@ -89,11 +90,6 @@ const SCAN_SKIP_DIRS = new Set([
 	".build",
 ]);
 
-const TERMINAL_STATE_PATH = resolve(
-	import.meta.dir,
-	"../../data/terminal-state.json"
-);
-
 function expandHome(path: string): string {
 	if (path === "~") return homedir();
 	if (path.startsWith("~/")) return resolve(homedir(), path.slice(2));
@@ -117,14 +113,13 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 async function getWorkspacePaths(): Promise<string[]> {
-	const file = Bun.file(TERMINAL_STATE_PATH);
-	if (!(await file.exists())) return [];
+	const data = await readTerminalState<{
+		groups?: Array<{
+			panes?: Array<{ cwd?: string; referencePaths?: string[] }>;
+		}>;
+	} | null>(null);
+	if (!data) return [];
 	try {
-		const data = (await file.json()) as {
-			groups?: Array<{
-				panes?: Array<{ cwd?: string; referencePaths?: string[] }>;
-			}>;
-		};
 		const paths = new Set<string>();
 		for (const group of data.groups ?? []) {
 			for (const pane of group.panes ?? []) {

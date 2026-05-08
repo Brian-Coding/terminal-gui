@@ -12,12 +12,7 @@ import {
 	isFirstPath,
 	ppidNotIn,
 } from "../../lib/data.ts";
-import {
-	badRequest,
-	readJson,
-	tryRoute,
-	writeJson,
-} from "../../lib/route-helpers.ts";
+import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import {
 	createAgentEnv,
 	resolveInteractiveAgentCommand,
@@ -26,6 +21,10 @@ import { isAllowedLocalPath, resolveAllowedLocalPath } from "../security.ts";
 import { ChatService } from "../services/agent-chat.ts";
 import { ConfigManager } from "../services/config-manager.ts";
 import { PidTracker } from "../services/pid-tracker.ts";
+import {
+	readTerminalState,
+	writeTerminalState,
+} from "../services/terminal-state.ts";
 
 const configManager = new ConfigManager();
 
@@ -542,11 +541,6 @@ async function killPort(pid: number): Promise<{ ok: boolean; error?: string }> {
 	}
 }
 
-const TERMINAL_STATE_PATH = resolve(
-	import.meta.dir,
-	"../../data/terminal-state.json"
-);
-
 interface ClaudeProcess {
 	pid: number;
 	ppid: number;
@@ -665,10 +659,10 @@ export function terminalRoutes() {
 	return {
 		"/api/terminal/state": {
 			GET: tryRoute(async () => {
-				return Response.json(await readJson(TERMINAL_STATE_PATH, null));
+				return Response.json(await readTerminalState<unknown | null>(null));
 			}),
 			POST: tryRoute(async (req) => {
-				await writeJson(TERMINAL_STATE_PATH, await req.json());
+				await writeTerminalState(await req.json());
 				return Response.json({ ok: true });
 			}),
 		},

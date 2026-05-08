@@ -32,6 +32,7 @@ import { isActive, lacksValue } from "../../lib/data.ts";
 import { fetchJsonOr, sendJsonWithBusy } from "../../lib/fetch-json.ts";
 import type { ForgeAccount, GithubRepo } from "../../lib/forge-types.ts";
 import { setupTerminalThemePanelShortcut } from "../../lib/react-events.ts";
+import { removeStoredValue } from "../../lib/stored-json.ts";
 import type { ThemeId } from "../../features/terminal/terminal-utils.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { ONBOARDING_DONE_KEY } from "../OnboardingPage/index.tsx";
@@ -50,7 +51,7 @@ function isFresh(cachedAt: number) {
 export function ProfilePage() {
 	const navigate = useNavigate();
 	const resetOnboarding = () => {
-		localStorage.removeItem(ONBOARDING_DONE_KEY);
+		removeStoredValue(ONBOARDING_DONE_KEY);
 		navigate("/onboarding", { replace: true });
 	};
 	const [accounts, setAccounts] = useState<ForgeAccount[]>(

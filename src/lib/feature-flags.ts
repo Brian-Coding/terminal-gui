@@ -25,6 +25,7 @@ export const DEV_FEATURE_FLAGS: FeatureFlags = {
 export const PUBLISHED_FEATURE_FLAGS: FeatureFlags = {
 	...ENABLED_FEATURE_FLAGS,
 	automations: false,
+	simulators: false,
 };
 
 const buildFeatureFlags =
