@@ -20,6 +20,7 @@ export function usePollingResource<T>(
 	options?: { deferInitialFetch?: boolean }
 ) {
 	const [data, setData] = useState(initialValue);
+	const [loaded, setLoaded] = useState(false);
 	const mountedRef = useRef(true);
 	const dataRef = useRef(data);
 	dataRef.current = data;
@@ -30,6 +31,7 @@ export function usePollingResource<T>(
 				const next = await fetcher(signal);
 				if (mountedRef.current) {
 					setData(next);
+					setLoaded(true);
 				}
 				return next;
 			} catch (error) {
@@ -63,5 +65,5 @@ export function usePollingResource<T>(
 			window.clearInterval(interval);
 		};
 	}, [pollInterval, refetch, deferInitialFetch]);
-	return { data, setData, refetch, mountedRef };
+	return { data, setData, refetch, mountedRef, loaded };
 }

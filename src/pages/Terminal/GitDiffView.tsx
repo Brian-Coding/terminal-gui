@@ -537,29 +537,28 @@ const DiffRow = memo(function DiffRow({
 		}
 	};
 	const rowProps = stylex.props(diffStyles.row);
-	const renderContent = () => {
-		const content =
-			line.content.length > MAX_RENDERED_LINE_CHARS
-				? `${line.content.slice(0, MAX_RENDERED_LINE_CHARS)} ... [line truncated for display]`
-				: line.content;
-		if (highlightedHtml) {
-			return (
-				<span
-					// biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki returns escaped syntax-highlighted HTML.
-					dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-					className="shiki-line"
-				/>
-			);
-		}
-		if (tokens) {
-			return tokens.map((tok, i) => (
-				<span key={i} className={TOKEN_CLASSES[tok.type]}>
-					{tok.text}
-				</span>
-			));
-		}
-		return content;
-	};
+	const content =
+		line.content.length > MAX_RENDERED_LINE_CHARS
+			? `${line.content.slice(0, MAX_RENDERED_LINE_CHARS)} ... [line truncated for display]`
+			: line.content;
+	const lineContent = highlightedHtml ? (
+		<span
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki returns escaped syntax-highlighted HTML.
+			dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+			className="shiki-line"
+		/>
+	) : tokens ? (
+		tokens.map((tok, i) => (
+			<span
+				key={`${tok.type}-${i}-${tok.text}`}
+				className={TOKEN_CLASSES[tok.type]}
+			>
+				{tok.text}
+			</span>
+		))
+	) : (
+		content
+	);
 
 	return (
 		<div
@@ -582,7 +581,7 @@ const DiffRow = memo(function DiffRow({
 					color: highlightedHtml ? undefined : "var(--color-inferay-white)",
 				}}
 			>
-				{renderContent()}
+				{lineContent}
 			</span>
 
 			{line.content && onCopy && (
@@ -1302,33 +1301,44 @@ export const GitDiffView = memo(function GitDiffView({
 		);
 	}
 
-	const renderDiffPane = (
-		side: "left" | "right",
-		borderStyle?: typeof diffStyles.diffPaneBorderRight
-	) => {
-		const isLeft = side === "left";
-		return (
-			<div {...stylex.props(diffStyles.diffPane, borderStyle)}>
-				{isLeft && diff.isNew ? (
-					<div {...stylex.props(diffStyles.emptyPane)}>New file</div>
-				) : (
-					<VirtualPanel
-						lines={isLeft ? diff.oldLines : diff.newLines}
-						ext={ext}
-						scrollRef={isLeft ? leftRef : rightRef}
-						disableTokenize={disableTokenize}
-						onScroll={(st, sl) => sync(side, st, sl)}
-						showMinimap={!isLeft}
-						externalScrollTop={externalScrollTop}
-						filePath={filePath}
-						onCopyLine={handleCopyLine}
-						highlightedChangeIdx={highlightedChangeIdx}
-						changeLineMap={changeLineMap}
-					/>
-				)}
-			</div>
-		);
-	};
+	const leftDiffPane = (
+		<div {...stylex.props(diffStyles.diffPane, diffStyles.diffPaneBorderRight)}>
+			{diff.isNew ? (
+				<div {...stylex.props(diffStyles.emptyPane)}>New file</div>
+			) : (
+				<VirtualPanel
+					lines={diff.oldLines}
+					ext={ext}
+					scrollRef={leftRef}
+					disableTokenize={disableTokenize}
+					onScroll={(st, sl) => sync("left", st, sl)}
+					showMinimap={false}
+					externalScrollTop={externalScrollTop}
+					filePath={filePath}
+					onCopyLine={handleCopyLine}
+					highlightedChangeIdx={highlightedChangeIdx}
+					changeLineMap={changeLineMap}
+				/>
+			)}
+		</div>
+	);
+	const rightDiffPane = (
+		<div {...stylex.props(diffStyles.diffPane)}>
+			<VirtualPanel
+				lines={diff.newLines}
+				ext={ext}
+				scrollRef={rightRef}
+				disableTokenize={disableTokenize}
+				onScroll={(st, sl) => sync("right", st, sl)}
+				showMinimap
+				externalScrollTop={externalScrollTop}
+				filePath={filePath}
+				onCopyLine={handleCopyLine}
+				highlightedChangeIdx={highlightedChangeIdx}
+				changeLineMap={changeLineMap}
+			/>
+		</div>
+	);
 
 	return (
 		<div
@@ -1353,8 +1363,8 @@ export const GitDiffView = memo(function GitDiffView({
 			<div {...stylex.props(diffStyles.body)}>
 				{viewMode === "split" ? (
 					<>
-						{renderDiffPane("left", diffStyles.diffPaneBorderRight)}
-						{renderDiffPane("right")}
+						{leftDiffPane}
+						{rightDiffPane}
 					</>
 				) : (
 					<SinglePanel

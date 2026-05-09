@@ -1,12 +1,13 @@
 import * as stylex from "@stylexjs/stylex";
 import type React from "react";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import {
 	IconChevronRight,
 	IconFolder,
 	IconGitBranch,
 	IconX,
 } from "../../components/ui/Icons.tsx";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { basename } from "../../lib/format.ts";
 import { setInputValue } from "../../lib/react-events.ts";
@@ -28,49 +29,6 @@ interface InlineDirectoryPickerProps {
 	showStartButton?: boolean;
 }
 
-interface SearchState {
-	results: QuickPick[];
-	selectedIndex: number;
-	loading: boolean;
-}
-
-type SearchAction =
-	| { type: "reset" }
-	| { type: "startLoading" }
-	| { type: "setResults"; results: QuickPick[] }
-	| { type: "error" }
-	| { type: "selectNext"; count: number }
-	| { type: "selectPrev"; count: number };
-
-const INITIAL_SEARCH_STATE: SearchState = {
-	results: [],
-	selectedIndex: -1,
-	loading: false,
-};
-
-function searchReducer(state: SearchState, action: SearchAction): SearchState {
-	switch (action.type) {
-		case "reset":
-			return INITIAL_SEARCH_STATE;
-		case "startLoading":
-			return { ...state, loading: true };
-		case "setResults":
-			return { results: action.results, loading: false, selectedIndex: 0 };
-		case "error":
-			return { results: [], loading: false, selectedIndex: -1 };
-		case "selectNext":
-			return {
-				...state,
-				selectedIndex: (state.selectedIndex + 1) % action.count,
-			};
-		case "selectPrev":
-			return {
-				...state,
-				selectedIndex: (state.selectedIndex - 1 + action.count) % action.count,
-			};
-	}
-}
-
 export function InlineDirectoryPicker({
 	onSelect,
 	onCancel,
@@ -81,88 +39,64 @@ export function InlineDirectoryPicker({
 	showStartButton = true,
 }: InlineDirectoryPickerProps) {
 	const [query, setQuery] = useState("");
-	const [pickerData, setPickerData] = useState<{
-		quickPicks: QuickPick[];
-		homePath: string;
-	}>({ quickPicks: [], homePath: "" });
-	const [searchState, dispatchSearch] = useReducer(
-		searchReducer,
-		INITIAL_SEARCH_STATE
+	const deferredQuery = useDeferredValue(query.trim());
+	const { data: pickerData } = useAsyncResource(
+		async () => {
+			const data = await fetchJsonOr<{
+				quickPicks?: QuickPick[];
+				home?: string;
+			}>("/api/terminal/directories?quickPicks=true", {});
+			return {
+				quickPicks: data.quickPicks || [],
+				homePath: data.home || "",
+			};
+		},
+		{ quickPicks: [], homePath: "" },
+		[]
 	);
+	const { data: searchResults, loading: searchLoading } = useAsyncResource<
+		QuickPick[]
+	>(
+		async () => {
+			if (!deferredQuery) return [];
+			const data = await fetchJsonOr<{
+				directories?: Array<{ name: string; path: string }>;
+			}>(
+				`/api/terminal/directories?q=${encodeURIComponent(deferredQuery)}`,
+				{}
+			);
+			return (data.directories || []).map((d) => ({
+				name: d.name,
+				path: d.path,
+				isGitRepo: false,
+			}));
+		},
+		[],
+		[deferredQuery]
+	);
+	const [selectedIndexValue, setSelectedIndex] = useState(-1);
 	const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const isSearching = query.trim().length > 0;
-	const displayList = (
-		isSearching ? searchState.results : pickerData.quickPicks
-	)
+	const displayList = (isSearching ? searchResults : pickerData.quickPicks)
 		.filter((p) => !multiSelect || !selectedPaths.includes(p.path))
 		.slice(0, 5);
 	const itemCount = displayList.length;
-	const selectedIndex = searchState.selectedIndex;
-	const loading = searchState.loading;
+	const selectedIndex =
+		itemCount === 0
+			? -1
+			: selectedIndexValue < 0
+				? 0
+				: Math.min(selectedIndexValue, itemCount - 1);
+	const loading = isSearching && searchLoading;
 
 	useEffect(() => {
-		const controller = new AbortController();
-		const fetchQuickPicks = async () => {
-			try {
-				const data = await fetchJsonOr<{
-					quickPicks?: QuickPick[];
-					home?: string;
-				}>(
-					"/api/terminal/directories?quickPicks=true",
-					{},
-					{ signal: controller.signal }
-				);
-				setPickerData({
-					quickPicks: data.quickPicks || [],
-					homePath: data.home || "",
-				});
-			} catch {
-				if (!controller.signal.aborted)
-					setPickerData((prev) => ({ ...prev, quickPicks: [] }));
-			}
-		};
-		fetchQuickPicks();
-		setTimeout(() => inputRef.current?.focus(), 10);
-		return controller.abort.bind(controller);
-	}, []);
-
-	useEffect(() => {
-		if (!query.trim()) {
-			dispatchSearch({ type: "reset" });
-			return;
-		}
-		const controller = new AbortController();
-		const timer = setTimeout(async () => {
-			dispatchSearch({ type: "startLoading" });
-			try {
-				const data = await fetchJsonOr<{
-					directories?: Array<{ name: string; path: string }>;
-				}>(
-					`/api/terminal/directories?q=${encodeURIComponent(query.trim())}`,
-					{},
-					{ signal: controller.signal }
-				);
-				dispatchSearch({
-					type: "setResults",
-					results: (data.directories || []).map((d: any) => ({
-						name: d.name,
-						path: d.path,
-						isGitRepo: false,
-					})),
-				});
-			} catch {
-				if (!controller.signal.aborted) {
-					dispatchSearch({ type: "error" });
-				}
-			}
-		}, 120);
+		const timer = setTimeout(() => inputRef.current?.focus(), 10);
 		return () => {
 			clearTimeout(timer);
-			controller.abort();
 		};
-	}, [query]);
+	}, []);
 
 	const togglePath = (path: string) => {
 		setSelectedPaths((prev) => {
@@ -201,10 +135,12 @@ export function InlineDirectoryPicker({
 		}
 		if (e.key === "ArrowDown" || e.key === "Tab") {
 			e.preventDefault();
-			dispatchSearch({ type: "selectNext", count: itemCount });
+			setSelectedIndex((current) => (current + 1) % itemCount);
 		} else if (e.key === "ArrowUp") {
 			e.preventDefault();
-			dispatchSearch({ type: "selectPrev", count: itemCount });
+			setSelectedIndex((current) =>
+				current < 0 ? itemCount - 1 : (current - 1 + itemCount) % itemCount
+			);
 		} else if (e.key === "Enter") {
 			e.preventDefault();
 			const idx = selectedIndex >= 0 ? selectedIndex : 0;

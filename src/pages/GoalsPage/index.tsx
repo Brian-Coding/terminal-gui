@@ -4,6 +4,7 @@ import { Markdown } from "../../components/chat/ChatRichContent.tsx";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { hasPaneId } from "../../lib/data.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
+import { usePollingResource } from "../../hooks/usePollingResource.ts";
 import { basename, formatElapsedMs } from "../../lib/format.ts";
 import {
 	color,
@@ -51,36 +52,18 @@ interface GoalInfo {
 }
 
 export function GoalsPage() {
-	const [goals, setGoals] = useState<GoalInfo[]>([]);
 	const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
-	const [loaded, setLoaded] = useState(false);
 
 	const loadGoals = useCallback(async () => {
 		const payload = await fetchJsonOr<{ goals?: GoalInfo[] }>("/api/goals", {
 			goals: [],
 		});
-		setGoals(Array.isArray(payload.goals) ? payload.goals : []);
-		setLoaded(true);
+		return Array.isArray(payload.goals) ? payload.goals : [];
 	}, []);
-
-	useEffect(() => {
-		void loadGoals();
-		const timer = window.setInterval(loadGoals, 1500);
-		return () => window.clearInterval(timer);
-	}, [loadGoals]);
+	const { data: goals, loaded } = usePollingResource(loadGoals, 1500, []);
 
 	const selectedGoal =
 		goals.find(hasPaneId.bind(null, selectedGoalId)) ?? goals[0] ?? null;
-
-	useEffect(() => {
-		if (goals.length === 0) {
-			setSelectedGoalId(null);
-			return;
-		}
-		if (!selectedGoalId || !goals.some(hasPaneId.bind(null, selectedGoalId))) {
-			setSelectedGoalId(goals[0]!.paneId);
-		}
-	}, [goals, selectedGoalId]);
 
 	return (
 		<div {...stylex.props(styles.root)}>

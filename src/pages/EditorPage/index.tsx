@@ -204,6 +204,16 @@ export function EditorPage({
 		() => allSessions.filter((s) => !closedPaneIds.has(s.paneId)),
 		[allSessions, closedPaneIds]
 	);
+	const effectiveSelectedPaneId = useMemo(() => {
+		const activePaneId =
+			activeGroupSelectedPaneId &&
+			sessions.some((s) => s.paneId === activeGroupSelectedPaneId)
+				? activeGroupSelectedPaneId
+				: selectedPaneId;
+		return activePaneId && sessions.some((s) => s.paneId === activePaneId)
+			? activePaneId
+			: (sessions[0]?.paneId ?? null);
+	}, [activeGroupSelectedPaneId, selectedPaneId, sessions]);
 	const { sessions: liveAgentSessions } = useAgentSessions();
 	const trackedDirs = useMemo(
 		() => [...new Set(sessions.map((s) => s.cwd).filter(isNonEmptyString))],
@@ -244,34 +254,16 @@ export function EditorPage({
 	}, [liveAgentSessions]);
 
 	useEffect(() => {
-		if (!sessions.length) {
-			setSelectedPaneId(null);
-			return;
-		}
-		setSelectedPaneId((cur) => {
-			if (
-				activeGroupSelectedPaneId &&
-				sessions.some((s) => s.paneId === activeGroupSelectedPaneId)
-			) {
-				return activeGroupSelectedPaneId;
-			}
-			return cur && sessions.some((s) => s.paneId === cur)
-				? cur
-				: (sessions[0]?.paneId ?? null);
-		});
-	}, [activeGroupSelectedPaneId, sessions]);
-
-	useEffect(() => {
-		if (selectedPaneId) {
-			writeStoredValue("editor-selected-pane", selectedPaneId);
+		if (effectiveSelectedPaneId) {
+			writeStoredValue("editor-selected-pane", effectiveSelectedPaneId);
 		} else {
 			removeStoredValue("editor-selected-pane");
 		}
-	}, [selectedPaneId]);
+	}, [effectiveSelectedPaneId]);
 
 	const sessionIdx = useMemo(
-		() => sessions.findIndex((s) => s.paneId === selectedPaneId),
-		[sessions, selectedPaneId]
+		() => sessions.findIndex((s) => s.paneId === effectiveSelectedPaneId),
+		[effectiveSelectedPaneId, sessions]
 	);
 	const session =
 		sessionIdx >= 0 ? sessions[sessionIdx] : (sessions[0] ?? null);
@@ -467,12 +459,12 @@ export function EditorPage({
 		(paneId: string) => {
 			clearAgentChatMessages(paneId);
 			setClosedPaneIds((prev) => new Set(prev).add(paneId));
-			if (selectedPaneId === paneId) {
+			if (effectiveSelectedPaneId === paneId) {
 				const rest = sessions.filter((s) => s.paneId !== paneId);
 				setSelectedPaneId(rest[0]?.paneId ?? null);
 			}
 		},
-		[selectedPaneId, sessions]
+		[effectiveSelectedPaneId, sessions]
 	);
 	const selectEditorPane = useCallback(
 		(paneId: string) => {
@@ -519,7 +511,7 @@ export function EditorPage({
 		[sidebarWidth]
 	);
 
-	const renderViewer = () =>
+	const viewer =
 		mainViewMode === "diff" ? (
 			diffLoading ? (
 				<Placeholder label="Loading diff..." />
@@ -556,58 +548,69 @@ export function EditorPage({
 				branch={project?.branch}
 			/>
 		);
-
-	const renderSidebar = (showCommitDetails: boolean) =>
-		sidebarVisible ? (
+	const fileSidebarProps = {
+		cwd: session?.cwd,
+		fileViewMode,
+		onFileViewModeChange: setFileViewMode,
+		modified,
+		untracked,
+		staged,
+		selectedFile,
+		onSelectFile: (f: { path: string; staged: boolean }) =>
+			session?.cwd &&
+			selectFile(session.paneId, {
+				cwd: session.cwd,
+				file: f.path,
+				staged: f.staged,
+			}),
+		onStageFile: stageFile,
+		onUnstageFile: unstageFile,
+		onStageAll: stageAll,
+		onUnstageAll: unstageAll,
+		hasProject: !!project,
+		files,
+		branch: project?.branch,
+		commitMessage,
+		onCommitMessageChange: setCommitMessage,
+		onCommit: commit,
+		isCommitting,
+		amendMode,
+		onAmendModeChange: setAmendMode,
+	};
+	const diffSidebar = sidebarVisible ? (
+		<div {...stylex.props(styles.sidebarShell)} style={{ width: sidebarWidth }}>
 			<div
-				{...stylex.props(styles.sidebarShell)}
-				style={{ width: sidebarWidth }}
-			>
-				<div
-					{...stylex.props(styles.sidebarResize)}
-					onMouseDown={handleSidebarDragStart}
-				/>
-				<ChangeFileSidebar
-					cwd={session?.cwd}
-					fileViewMode={fileViewMode}
-					onFileViewModeChange={setFileViewMode}
-					mainViewMode={showCommitDetails ? mainViewMode : "diff"}
-					modified={modified}
-					untracked={untracked}
-					staged={staged}
-					selectedFile={selectedFile}
-					onSelectFile={(f) =>
-						session?.cwd &&
-						selectFile(session.paneId, {
-							cwd: session.cwd,
-							file: f.path,
-							staged: f.staged,
-						})
-					}
-					onStageFile={stageFile}
-					onUnstageFile={unstageFile}
-					onStageAll={stageAll}
-					onUnstageAll={unstageAll}
-					hasProject={!!project}
-					selectedCommitHash={showCommitDetails ? selectedCommitHash : null}
-					commitDetailsLoading={showCommitDetails && commitDetailsLoading}
-					commitDetails={showCommitDetails ? commitDetails : null}
-					files={files}
-					branch={project?.branch}
-					commitMessage={commitMessage}
-					onCommitMessageChange={setCommitMessage}
-					onCommit={commit}
-					isCommitting={isCommitting}
-					amendMode={amendMode}
-					onAmendModeChange={setAmendMode}
-				/>
-			</div>
-		) : null;
-
-	const renderEmptyWorkspace = () => (
+				{...stylex.props(styles.sidebarResize)}
+				onMouseDown={handleSidebarDragStart}
+			/>
+			<ChangeFileSidebar
+				{...fileSidebarProps}
+				mainViewMode="diff"
+				selectedCommitHash={null}
+				commitDetailsLoading={false}
+				commitDetails={null}
+			/>
+		</div>
+	) : null;
+	const detailsSidebar = sidebarVisible ? (
+		<div {...stylex.props(styles.sidebarShell)} style={{ width: sidebarWidth }}>
+			<div
+				{...stylex.props(styles.sidebarResize)}
+				onMouseDown={handleSidebarDragStart}
+			/>
+			<ChangeFileSidebar
+				{...fileSidebarProps}
+				mainViewMode={mainViewMode}
+				selectedCommitHash={selectedCommitHash}
+				commitDetailsLoading={commitDetailsLoading}
+				commitDetails={commitDetails}
+			/>
+		</div>
+	) : null;
+	const emptyWorkspace = (
 		<EditorWorkspace
 			viewer={<Placeholder label="No diff available" />}
-			sidebar={renderSidebar(false)}
+			sidebar={diffSidebar}
 		/>
 	);
 
@@ -633,7 +636,7 @@ export function EditorPage({
 						</div>
 						<EmptyState />
 					</section>
-					{renderEmptyWorkspace()}
+					{emptyWorkspace}
 				</div>
 			) : zenMode ? (
 				/* ===== ZEN MODE LAYOUT ===== */
@@ -650,8 +653,8 @@ export function EditorPage({
 							onDirectoryChange={onDirectoryChange}
 						/>
 					}
-					viewer={renderViewer()}
-					sidebar={renderSidebar(false)}
+					viewer={viewer}
+					sidebar={diffSidebar}
 				/>
 			) : (
 				/* ===== NORMAL MODE LAYOUT ===== */
@@ -683,8 +686,8 @@ export function EditorPage({
 								onDiffViewModeChange={setDiffViewMode}
 							/>
 						}
-						viewer={renderViewer()}
-						sidebar={renderSidebar(true)}
+						viewer={viewer}
+						sidebar={detailsSidebar}
 					/>
 				</div>
 			)}

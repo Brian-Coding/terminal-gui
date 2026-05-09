@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { DiffRequest } from "../../features/git/useGitDiff.ts";
+import { sendJson } from "../../lib/fetch-json.ts";
 import { wsClient } from "../../lib/websocket.ts";
 
 interface UseFileWatcherOptions {
@@ -37,18 +38,10 @@ export function useFileWatcher({
 	useEffect(() => {
 		if (!enabled || !cwd) return;
 
-		fetch("/api/git/watch", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ cwd }),
-		});
+		void sendJson("/api/git/watch", { cwd }, { method: "POST" });
 
 		return () => {
-			fetch("/api/git/unwatch", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ cwd }),
-			});
+			void sendJson("/api/git/unwatch", { cwd }, { method: "POST" });
 		};
 	}, [enabled, cwd]);
 

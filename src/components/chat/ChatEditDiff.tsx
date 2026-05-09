@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useShikiSnippet } from "../../hooks/useShikiHighlighter.ts";
 import { contentOf } from "../../lib/data.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
@@ -180,22 +180,15 @@ function EditDiffCard({
 	stats,
 	allLines,
 	isStreaming,
-	resetKey,
 }: {
 	fileName: string;
 	hunks: DiffLine[][];
 	stats: { added: number; removed: number };
 	allLines: string[];
 	isStreaming?: boolean;
-	resetKey: string;
 }) {
 	const { highlighted, isReady } = useShikiSnippet(allLines, fileName, true);
 	const [isExpanded, setIsExpanded] = useState(true);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: resetKey intentionally resets expansion when edit content changes.
-	useEffect(() => {
-		setIsExpanded(true);
-	}, [resetKey]);
 
 	const removedBg = "rgba(248,81,73,0.08)";
 	const removedBorder = "rgba(248,81,73,0.32)";
@@ -432,12 +425,12 @@ export function MiniEditDiff({
 
 	return (
 		<EditDiffCard
+			key={`${filePath}:${oldStr}:${newStr}:${isStreaming ? "streaming" : "done"}`}
 			fileName={fileName}
 			hunks={hunks}
 			stats={stats}
 			allLines={allLines}
 			isStreaming={isStreaming}
-			resetKey={`${filePath}:${oldStr}:${newStr}:${isStreaming ? "streaming" : "done"}`}
 		/>
 	);
 }
@@ -483,11 +476,11 @@ export function GroupedEditDiff({
 
 	return (
 		<EditDiffCard
+			key={`${filePath}:${edits.length}:${edits.map(contentOf).join("\u0000")}`}
 			fileName={fileName}
 			hunks={hunks}
 			stats={stats}
 			allLines={allLines}
-			resetKey={`${filePath}:${edits.length}:${edits.map(contentOf).join("\u0000")}`}
 		/>
 	);
 }

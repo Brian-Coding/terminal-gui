@@ -1441,18 +1441,16 @@ function FileGroup({
 	const [hoveredActionPath, setHoveredActionPath] = useState<string | null>(
 		null
 	);
-	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() =>
-		getExpandedDirs(files)
-	);
-
-	useEffect(() => {
-		if (viewMode === "tree") {
-			setExpandedDirs(getExpandedDirs(files));
-		}
-	}, [files, viewMode]);
+	const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set());
+	const expandedDirs = useMemo(() => {
+		if (viewMode !== "tree") return new Set<string>();
+		const next = getExpandedDirs(files);
+		for (const path of collapsedDirs) next.delete(path);
+		return next;
+	}, [collapsedDirs, files, viewMode]);
 
 	const toggleDir = useCallback((path: string) => {
-		setExpandedDirs((prev) => {
+		setCollapsedDirs((prev) => {
 			const next = new Set(prev);
 			if (next.has(path)) {
 				next.delete(path);

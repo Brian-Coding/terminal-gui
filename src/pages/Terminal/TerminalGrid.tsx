@@ -138,48 +138,32 @@ export const TerminalGrid = memo(function TerminalGrid(
 			opacity: dragIndex === idx ? 0.4 : 1,
 		}) as React.CSSProperties;
 
-	const renderPaneCell = (
-		pane: TerminalPaneModel,
-		idx: number,
-		className: string
-	) => (
-		<div
-			key={pane.id}
-			className={className}
-			style={
-				layoutMode === "rows"
-					? { ...cellStyle(idx), width: 400 }
-					: cellStyle(idx)
-			}
-			onDragOver={(e) => handleDragOver(e, idx)}
-			onDrop={(e) => handleDrop(e, idx)}
-			onDragLeave={() => setDragOverIndex(null)}
-		>
-			<TerminalPaneView
-				{...paneViewProps(
-					props,
-					pane,
-					idx,
-					handleHeaderDragStart,
-					handleHeaderDragEnd
-				)}
-			/>
-		</div>
-	);
-
 	if (layoutMode === "rows") {
 		return (
 			<div
 				ref={containerRef}
 				className="flex bg-inferay-black h-full overflow-x-auto overscroll-none"
 			>
-				{panes.map((pane, idx) =>
-					renderPaneCell(
-						pane,
-						idx,
-						"shrink-0 h-full overflow-hidden border-r border-inferay-gray-border transition-all"
-					)
-				)}
+				{panes.map((pane, idx) => (
+					<div
+						key={pane.id}
+						className="shrink-0 h-full overflow-hidden border-r border-inferay-gray-border transition-all"
+						style={{ ...cellStyle(idx), width: 400 }}
+						onDragOver={(e) => handleDragOver(e, idx)}
+						onDrop={(e) => handleDrop(e, idx)}
+						onDragLeave={() => setDragOverIndex(null)}
+					>
+						<TerminalPaneView
+							{...paneViewProps(
+								props,
+								pane,
+								idx,
+								handleHeaderDragStart,
+								handleHeaderDragEnd
+							)}
+						/>
+					</div>
+				))}
 			</div>
 		);
 	}
@@ -198,13 +182,26 @@ export const TerminalGrid = memo(function TerminalGrid(
 				gridTemplateRows: `repeat(${totalGridRows}, ${rowHeight}px)`,
 			}}
 		>
-			{panes.map((pane, idx) =>
-				renderPaneCell(
-					pane,
-					idx,
-					"overflow-hidden border-r border-b border-inferay-gray-border transition-all"
-				)
-			)}
+			{panes.map((pane, idx) => (
+				<div
+					key={pane.id}
+					className="overflow-hidden border-r border-b border-inferay-gray-border transition-all"
+					style={cellStyle(idx)}
+					onDragOver={(e) => handleDragOver(e, idx)}
+					onDrop={(e) => handleDrop(e, idx)}
+					onDragLeave={() => setDragOverIndex(null)}
+				>
+					<TerminalPaneView
+						{...paneViewProps(
+							props,
+							pane,
+							idx,
+							handleHeaderDragStart,
+							handleHeaderDragEnd
+						)}
+					/>
+				</div>
+			))}
 		</div>
 	);
 });

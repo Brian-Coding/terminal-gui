@@ -1,6 +1,7 @@
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { GitProjectStatus } from "../../features/git/useGitStatus.ts";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { hasId, hasPath } from "../../lib/data.ts";
 import {
 	color,
@@ -137,50 +138,27 @@ export function ProjectFileGraphView({
 	onSelectCwd: (cwd: string) => void;
 	project: GitProjectStatus | null;
 }) {
-	const [files, setFiles] = useState<FileSearchEntry[]>([]);
-	const [loading, setLoading] = useState(false);
+	const { data: files, loading } = useAsyncResource<FileSearchEntry[]>(
+		async () => {
+			if (!activeCwd) return [];
+			const response = await fetch(
+				`/api/files/search?cwd=${encodeURIComponent(activeCwd)}&limit=50`
+			);
+			const data = (await response.json()) as { results?: FileSearchEntry[] };
+			return data.results ?? [];
+		},
+		[],
+		[activeCwd]
+	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-
-	useEffect(() => {
-		if (!activeCwd) {
-			setFiles([]);
-			return;
-		}
-		const controller = new AbortController();
-		const { signal } = controller;
-		setLoading(true);
-		void fetch(
-			`/api/files/search?cwd=${encodeURIComponent(activeCwd)}&limit=50`
-		)
-			.then((response) => response.json())
-			.then((data: { results?: FileSearchEntry[] }) => {
-				if (signal.aborted) return;
-				setFiles(data.results ?? []);
-			})
-			.catch(() => {
-				if (!signal.aborted) setFiles([]);
-			})
-			.finally(() => {
-				if (!signal.aborted) setLoading(false);
-			});
-		return controller.abort.bind(controller);
-	}, [activeCwd]);
 
 	const nodes = useMemo(
 		() => buildGraphNodes(project, files),
 		[project, files]
 	);
-
-	useEffect(() => {
-		setSelectedNodeId((current) =>
-			current && nodes.some(hasId.bind(null, current))
-				? current
-				: (nodes[0]?.id ?? null)
-		);
-	}, [nodes]);
-
-	const selectedNode = nodes.find(hasId.bind(null, selectedNodeId)) ?? null;
+	const selectedNode =
+		nodes.find(hasId.bind(null, selectedNodeId)) ?? nodes[0] ?? null;
 	const selectedConnections = useMemo(
 		() =>
 			selectedNode

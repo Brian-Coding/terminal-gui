@@ -10,23 +10,15 @@ import {
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
 import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
 import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
-import { Button } from "../../components/ui/Button.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
-import {
-	IconArrowLeft,
-	IconExternalLink,
-	IconGitBranch,
-	IconX,
-} from "../../components/ui/Icons.tsx";
+import { IconGitBranch, IconX } from "../../components/ui/Icons.tsx";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
-import { useRunningPorts } from "../../hooks/useRunningPorts.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { EditorPage } from "../EditorPage/index.tsx";
 import { GitPage } from "../GitPage/index.tsx";
 import { InlineDirectoryPicker } from "./InlineDirectoryPicker.tsx";
 import { NewSessionButtons } from "./NewSessionButtons.tsx";
-import { PopoutHeader } from "./PopoutHeader.tsx";
 import { TerminalGrid } from "./TerminalGrid.tsx";
 import { TerminalSettingsPanel } from "./TerminalSettingsPanel.tsx";
 
@@ -35,11 +27,9 @@ import "@xterm/xterm/css/xterm.css";
 import {
 	type AgentKind,
 	cacheTerminalState,
-	createGroupId,
 	createPendingAgentChatPane,
 	createTerminalPane,
 	DEFAULT_CHAT_AGENT_KIND,
-	DEFAULT_COLUMNS,
 	DEFAULT_FONT_FAMILY,
 	DEFAULT_FONT_SIZE,
 	DEFAULT_OPACITY,
@@ -50,7 +40,6 @@ import {
 	loadTerminalLayoutMode,
 	loadTerminalState,
 	migrateGroup,
-	POPOUT_CHANNEL,
 	saveTerminalState,
 	syncTerminalLayoutMode,
 	type GroupId,
@@ -71,25 +60,6 @@ import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
 type MainViewMode = "editor" | "chat" | "graph" | "changes";
-
-interface TerminalPageProps {
-	isPopout?: boolean;
-	isStandalone?: boolean;
-}
-
-function wasPopoutRestored(): boolean {
-	try {
-		return sessionStorage.getItem("inferay-popout-restored") === "true";
-	} catch {
-		return false;
-	}
-}
-
-function markPopoutRestored() {
-	try {
-		sessionStorage.setItem("inferay-popout-restored", "true");
-	} catch {}
-}
 
 function GraphEmptyState({ message }: { message: string }) {
 	return (
@@ -142,23 +112,10 @@ const styles = stylex.create({
 		flexDirection: "column",
 		backgroundColor: color.background,
 	},
-	standaloneRoot: {
-		display: "flex",
-		height: "100vh",
-		flexDirection: "column",
-		backgroundColor: color.background,
-	},
-	popoutBody: {
-		flex: 1,
-		overflowY: "auto",
-	},
 	appRoot: {
 		display: "flex",
 		flexDirection: "column",
 		backgroundColor: color.background,
-	},
-	standaloneHeight: {
-		height: "100vh",
 	},
 	fullHeight: {
 		height: "100%",
@@ -193,67 +150,6 @@ const styles = stylex.create({
 	mainPaneScroll: {
 		overflowY: "auto",
 		overscrollBehavior: "none",
-	},
-	sideColumn: {
-		order: 9999,
-		display: "flex",
-		flexShrink: 0,
-		flexDirection: "column",
-		borderLeftWidth: 1,
-		borderLeftStyle: "solid",
-		borderLeftColor: color.border,
-		backgroundColor: color.background,
-	},
-	portRow: {
-		display: "flex",
-		width: "100%",
-		alignItems: "center",
-		gap: controlSize._2,
-		marginBottom: "0.125rem",
-		borderRadius: 6,
-		paddingBlock: "0.375rem",
-		paddingInline: controlSize._2,
-		textAlign: "left",
-		backgroundColor: {
-			default: "transparent",
-			":hover": color.backgroundRaised,
-		},
-		transitionProperty: "background-color",
-		transitionDuration: "120ms",
-	},
-	noShrink: {
-		flexShrink: 0,
-	},
-	accentCircle: {
-		fill: "var(--color-inferay-accent)",
-		color: "var(--color-inferay-accent)",
-	},
-	portText: {
-		minWidth: 0,
-		flex: 1,
-	},
-	portNumber: {
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-		color: color.textMain,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-	},
-	portName: {
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-		color: color.textMuted,
-		fontSize: font.size_1,
-	},
-	portActions: {
-		display: "flex",
-		alignItems: "center",
-		gap: "0.125rem",
-		opacity: 0.75,
-		transitionProperty: "opacity",
-		transitionDuration: "120ms",
 	},
 	centerState: {
 		display: "flex",
@@ -319,42 +215,6 @@ const styles = stylex.create({
 		overflowX: "auto",
 		marginBottom: controlSize._1,
 		paddingInline: controlSize._1,
-	},
-	popoutSpacer: {
-		position: "relative",
-		height: "3rem",
-		flexShrink: 0,
-		borderBottomWidth: 1,
-		borderBottomStyle: "solid",
-		borderBottomColor: color.border,
-		backgroundColor: color.background,
-	},
-	popoutIconWrap: {
-		display: "flex",
-		justifyContent: "center",
-		marginBottom: controlSize._4,
-	},
-	popoutIconBox: {
-		borderRadius: "999px",
-		backgroundColor: color.backgroundRaised,
-		padding: controlSize._4,
-	},
-	accentIcon: {
-		color: "var(--color-inferay-accent)",
-	},
-	popoutTitle: {
-		marginBottom: controlSize._2,
-		color: color.textMain,
-		fontSize: "1.125rem",
-		fontWeight: font.weight_5,
-	},
-	popoutText: {
-		marginBottom: controlSize._4,
-		color: color.textMuted,
-		fontSize: "0.875rem",
-	},
-	buttonIcon: {
-		marginRight: "0.375rem",
 	},
 });
 
@@ -434,11 +294,7 @@ type GroupAction =
 			path: string | null;
 			referencePaths?: string[];
 	  }
-	| { type: "setColumns"; groupId: string; columns: number }
-	| { type: "setRows"; groupId: string; rows: number }
-	| { type: "addGroup"; group: TerminalGroupModel }
 	| { type: "removeGroup"; groupId: string }
-	| { type: "renameGroup"; groupId: string; name: string }
 	| {
 			type: "reorderPanes";
 			groupId: string;
@@ -522,22 +378,8 @@ function groupsReducer(
 						}
 					: g
 			);
-		case "setColumns":
-			return state.map((g) =>
-				g.id === action.groupId ? { ...g, columns: action.columns } : g
-			);
-		case "setRows":
-			return state.map((g) =>
-				g.id === action.groupId ? { ...g, rows: action.rows } : g
-			);
-		case "addGroup":
-			return [...state, action.group];
 		case "removeGroup":
 			return state.filter(lacksId.bind(null, action.groupId));
-		case "renameGroup":
-			return state.map((g) =>
-				g.id === action.groupId ? { ...g, name: action.name } : g
-			);
 		case "reorderPanes":
 			return state.map((g) => {
 				if (g.id !== action.groupId) return g;
@@ -570,12 +412,8 @@ function groupsReducer(
 	}
 }
 
-export function TerminalPage({
-	isPopout = false,
-	isStandalone = false,
-}: TerminalPageProps) {
+export function TerminalPage() {
 	useEffect(wsClient.connect.bind(wsClient), []);
-	const [compactMode, setCompactMode] = useState(false);
 	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
 	const [mainView, setMainView] = useState<MainViewMode>(() => {
 		const stored = readStoredValue("terminal-main-view");
@@ -595,7 +433,6 @@ export function TerminalPage({
 	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
 		() => initialState?.selectedGroupId ?? initGroups[0]?.id ?? null
 	);
-	const [isPoppedOut, setIsPoppedOut] = useState(false);
 	const [showSettings, setShowSettings] = useState(false);
 	const [appearance, setAppearance] = useState(() => ({
 		themeId: (initialState?.themeId ??
@@ -605,13 +442,7 @@ export function TerminalPage({
 		opacity: initialState?.opacity ?? DEFAULT_OPACITY,
 	}));
 	const { themeId, fontSize, fontFamily, opacity } = appearance;
-	const popoutWindowRef = useRef<Window | null>(null);
-	const broadcastChannel = useRef<BroadcastChannel | null>(null);
 	const chatRefs = useRef<Map<string, AgentChatHandle>>(new Map());
-	const [agentStatuses, setAgentStatuses] = useState<Map<string, string>>(
-		new Map()
-	);
-	const { ports: runningPorts, killPort, openInBrowser } = useRunningPorts();
 	useAgentSessions();
 	const theme = useMemo(() => getThemeById(themeId), [themeId]);
 	const currentGroup = useMemo(
@@ -649,7 +480,6 @@ export function TerminalPage({
 		: null;
 	const restoreSavedState = useCallback(
 		(s: ReturnType<typeof loadTerminalState>) => {
-			setIsPoppedOut(false);
 			if (!s) return;
 			groupsDispatch({
 				type: "replaceAll",
@@ -676,72 +506,6 @@ export function TerminalPage({
 		},
 		[selectedGroupId]
 	);
-	const handleRestore = useCallback(() => {
-		if (isPopout) {
-			markPopoutRestored();
-			broadcastChannel.current?.postMessage({ type: "popout-restored" });
-			try {
-				window.close();
-			} catch {}
-			return;
-		}
-		popoutWindowRef.current = null;
-		restoreSavedState(loadTerminalState());
-		broadcastChannel.current?.postMessage({ type: "request-restore" });
-	}, [isPopout, restoreSavedState]);
-	useEffect(() => {
-		if (isStandalone) return;
-		if (isPopout) {
-			if (wasPopoutRestored()) return;
-			broadcastChannel.current = new BroadcastChannel(POPOUT_CHANNEL);
-			broadcastChannel.current.postMessage({ type: "popout-opened" });
-			const handleMessage = (event: MessageEvent) => {
-				if (event.data.type === "request-restore") {
-					handleRestore();
-				} else if (event.data.type === "popout-ping") {
-					if (!wasPopoutRestored()) {
-						broadcastChannel.current?.postMessage({ type: "popout-pong" });
-					}
-				}
-			};
-			broadcastChannel.current.onmessage = handleMessage;
-			const handleUnload = () => {
-				broadcastChannel.current?.postMessage({ type: "popout-closed" });
-			};
-			window.addEventListener("beforeunload", handleUnload);
-			return () => {
-				window.removeEventListener("beforeunload", handleUnload);
-				broadcastChannel.current?.close();
-			};
-		} else {
-			const bc = new BroadcastChannel(POPOUT_CHANNEL);
-			broadcastChannel.current = bc;
-			let staleTimeout: ReturnType<typeof setTimeout> | null = null;
-			const handleMessage = (event: MessageEvent) => {
-				const { type } = event.data;
-				if (type === "popout-opened" || type === "popout-pong") {
-					if (staleTimeout) {
-						clearTimeout(staleTimeout);
-						staleTimeout = null;
-					}
-					setIsPoppedOut(true);
-				} else if (type === "popout-closed" || type === "popout-restored") {
-					popoutWindowRef.current = null;
-					restoreSavedState(loadTerminalState());
-				}
-			};
-			bc.addEventListener("message", handleMessage);
-			bc.postMessage({ type: "popout-ping" });
-			staleTimeout = setTimeout(() => {
-				staleTimeout = null;
-			}, 1500);
-			return () => {
-				if (staleTimeout) clearTimeout(staleTimeout);
-				bc.removeEventListener("message", handleMessage);
-				bc.close();
-			};
-		}
-	}, [handleRestore, isPopout, isStandalone, restoreSavedState]);
 	const latestStateRef = useRef({
 		groups,
 		selectedGroupId,
@@ -828,15 +592,6 @@ export function TerminalPage({
 		return listenWindowEvent("terminal-shell-change", handleShellChange);
 	}, [groups, mainView, restoreSavedState, selectedGroupId, themeId]);
 	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
-	const handleAgentStatusChange = useCallback(
-		(paneId: string, status: string) => {
-			setAgentStatuses((prev) => {
-				if (prev.get(paneId) === status) return prev;
-				return new Map(prev).set(paneId, status);
-			});
-		},
-		[]
-	);
 	const handleAddPane = useCallback(
 		(agentKind: AgentKind) =>
 			withSelectedGroup((groupId) =>
@@ -925,29 +680,6 @@ export function TerminalPage({
 			),
 		[withSelectedGroup]
 	);
-	const addGroup = useCallback(
-		(name: string) => {
-			const pane = createPendingAgentChatPane();
-			const group: TerminalGroupModel = {
-				id: createGroupId(),
-				name: name || `Group ${groups.length + 1}`,
-				panes: [pane],
-				selectedPaneId: pane.id,
-				columns: currentGroup?.columns ?? DEFAULT_COLUMNS,
-				rows: currentGroup?.rows ?? DEFAULT_ROWS,
-			};
-			groupsDispatch({ type: "addGroup", group });
-			setSelectedGroupId(group.id);
-		},
-		[groups.length, currentGroup?.columns, currentGroup?.rows]
-	);
-	const setGroupColumns = useCallback(
-		(columns: number) =>
-			withSelectedGroup((groupId) =>
-				groupsDispatch({ type: "setColumns", groupId, columns })
-			),
-		[withSelectedGroup]
-	);
 	const removeGroup = useCallback(
 		(groupId: string) => {
 			if (groups.length <= 1) return;
@@ -963,10 +695,6 @@ export function TerminalPage({
 		},
 		[groups, selectedGroupId, cleanupPane]
 	);
-	const renameGroup = useCallback((groupId: string, name: string) => {
-		if (!name.trim()) return;
-		groupsDispatch({ type: "renameGroup", groupId, name });
-	}, []);
 	const closeCurrentStartPane = useCallback(() => {
 		if (!selectedGroupId || groups.length <= 1) return;
 		removeGroup(selectedGroupId);
@@ -984,7 +712,7 @@ export function TerminalPage({
 			.map((pane) => `${pane.id}:${pane.cwd ?? ""}`)
 			.join(",")}`;
 	}, [currentGroup]);
-	const renderStartPane = () => (
+	const startPane = (
 		<AgentStartPane
 			onStart={handleStartAgentPane}
 			onClose={
@@ -992,94 +720,28 @@ export function TerminalPage({
 			}
 		/>
 	);
-	const renderTerminalGrid = (mode: "grid" | "rows" = layoutMode) =>
-		currentGroup ? (
-			<TerminalGrid
-				panes={currentGroup.panes}
-				selectedPaneId={currentGroup.selectedPaneId}
-				columns={currentGroup.columns}
-				rows={currentGroup.rows ?? DEFAULT_ROWS}
-				layoutMode={mode}
-				theme={theme}
-				fontSize={fontSize}
-				fontFamily={fontFamily}
-				onSelectPane={selectPane}
-				onClosePane={removePane}
-				onDirectorySelect={handleDirectorySelected}
-				onDirectoryCancel={removePane}
-				onChatRef={handleChatRef}
-				onAgentStatusChange={handleAgentStatusChange}
-				onReorderPanes={reorderPanes}
-				onAddPane={handleAddPane}
-				onSetPaneAgentKind={handleSetPaneAgentKind}
-			/>
-		) : null;
-	if (isPopout || (isStandalone && compactMode)) {
-		return (
-			<div {...stylex.props(styles.standaloneRoot)}>
-				<PopoutHeader
-					groups={groups}
-					currentGroup={currentGroup}
-					selectedGroupId={selectedGroupId}
-					columns={currentGroup?.columns ?? DEFAULT_COLUMNS}
-					agentStatuses={agentStatuses}
-					onRestore={isStandalone ? () => setCompactMode(false) : handleRestore}
-					onSelectGroup={(id) => setSelectedGroupId(id as GroupId)}
-					onAddGroup={addGroup}
-					onRenameGroup={renameGroup}
-					onRemoveGroup={removeGroup}
-					onSelectPane={selectPane}
-					onRemovePane={removePane}
-					onAddPane={handleAddPane}
-					onColumnsChange={setGroupColumns}
-					ports={runningPorts}
-					onKillPort={killPort}
-					onOpenInBrowser={openInBrowser}
-				/>
-				<div {...stylex.props(styles.popoutBody)}>
-					{!currentGroup || currentGroup.panes.length === 0
-						? renderStartPane()
-						: renderTerminalGrid("grid")}
-				</div>
-			</div>
-		);
-	}
-	if (isPoppedOut) {
-		return (
-			<div {...stylex.props(styles.panelRoot)}>
-				<div {...stylex.props(styles.popoutSpacer)} />
-				<div {...stylex.props(styles.centerState)}>
-					<div {...stylex.props(styles.centerTextBox)}>
-						<div {...stylex.props(styles.popoutIconWrap)}>
-							<div {...stylex.props(styles.popoutIconBox)}>
-								<IconExternalLink
-									size={32}
-									{...stylex.props(styles.accentIcon)}
-								/>
-							</div>
-						</div>
-						<h2 {...stylex.props(styles.popoutTitle)}>
-							Terminal in Separate Window
-						</h2>
-						<p {...stylex.props(styles.popoutText)}>
-							The terminal is currently open in a pop-out window.
-						</p>
-						<Button variant="primary" onClick={handleRestore}>
-							<IconArrowLeft size={14} {...stylex.props(styles.buttonIcon)} />
-							Restore Here
-						</Button>
-					</div>
-				</div>
-			</div>
-		);
-	}
+	const terminalGrid = currentGroup ? (
+		<TerminalGrid
+			panes={currentGroup.panes}
+			selectedPaneId={currentGroup.selectedPaneId}
+			columns={currentGroup.columns}
+			rows={currentGroup.rows ?? DEFAULT_ROWS}
+			layoutMode={layoutMode}
+			theme={theme}
+			fontSize={fontSize}
+			fontFamily={fontFamily}
+			onSelectPane={selectPane}
+			onClosePane={removePane}
+			onDirectorySelect={handleDirectorySelected}
+			onDirectoryCancel={removePane}
+			onChatRef={handleChatRef}
+			onReorderPanes={reorderPanes}
+			onAddPane={handleAddPane}
+			onSetPaneAgentKind={handleSetPaneAgentKind}
+		/>
+	) : null;
 	return (
-		<div
-			{...stylex.props(
-				styles.appRoot,
-				isStandalone ? styles.standaloneHeight : styles.fullHeight
-			)}
-		>
+		<div {...stylex.props(styles.appRoot, styles.fullHeight)}>
 			<div {...stylex.props(styles.appFrame)}>
 				<div {...stylex.props(styles.appColumn)}>
 					<div {...stylex.props(styles.appBody)}>
@@ -1092,7 +754,7 @@ export function TerminalPage({
 							)}
 						>
 							{!currentGroup || currentGroup.panes.length === 0 ? (
-								renderStartPane()
+								startPane
 							) : mainView === "editor" ? (
 								<EditorPage
 									key={editorViewKey}
@@ -1105,7 +767,7 @@ export function TerminalPage({
 							) : mainView === "changes" ? (
 								<GitPage />
 							) : mainView === "chat" ? (
-								renderTerminalGrid()
+								terminalGrid
 							) : mainView === "graph" ? (
 								graphCwds.length === 0 ? (
 									<GraphEmptyState message="Open a project directory in one of this group's panes to populate the file graph." />
@@ -1118,7 +780,7 @@ export function TerminalPage({
 									/>
 								)
 							) : (
-								renderTerminalGrid()
+								terminalGrid
 							)}
 							{showSettings && (
 								<TerminalSettingsPanel

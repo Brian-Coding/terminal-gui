@@ -24,6 +24,7 @@ import {
 	loadDefaultChatSettings,
 	saveDefaultChatSettings,
 } from "../../features/agents/agents.ts";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
@@ -48,26 +49,77 @@ function isFresh(cachedAt: number) {
 	return Date.now() - cachedAt < PROFILE_CACHE_TTL_MS;
 }
 
+async function fetchSimulatorProjectFolders(): Promise<string[]> {
+	const response = await fetch("/api/simulator/project-folders");
+	if (!response.ok) throw new Error(await response.text());
+	const payload = (await response.json()) as { folders?: string[] };
+	return Array.isArray(payload.folders) ? payload.folders : [];
+}
+
+async function fetchAccounts(): Promise<ForgeAccount[]> {
+	if (cachedAccounts && isFresh(cachedAccounts.cachedAt)) {
+		return cachedAccounts.value;
+	}
+	const response = await fetch("/api/forge/accounts");
+	if (!response.ok) throw new Error(await response.text());
+	const payload = (await response.json()) as { accounts?: ForgeAccount[] };
+	const nextAccounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+	cachedAccounts = { value: nextAccounts, cachedAt: Date.now() };
+	return nextAccounts;
+}
+
+async function fetchRepos(): Promise<GithubRepo[]> {
+	if (cachedRepos && isFresh(cachedRepos.cachedAt)) {
+		return cachedRepos.value;
+	}
+	const response = await fetch("/api/forge/repos?limit=50");
+	if (!response.ok) throw new Error(await response.text());
+	const payload = (await response.json()) as { repos?: GithubRepo[] };
+	const nextRepos = Array.isArray(payload.repos) ? payload.repos : [];
+	cachedRepos = { value: nextRepos, cachedAt: Date.now() };
+	return nextRepos;
+}
+
 export function ProfilePage() {
 	const navigate = useNavigate();
 	const resetOnboarding = () => {
 		removeStoredValue(ONBOARDING_DONE_KEY);
 		navigate("/onboarding", { replace: true });
 	};
-	const [accounts, setAccounts] = useState<ForgeAccount[]>(
+	const initialAccounts =
 		cachedAccounts && isFresh(cachedAccounts.cachedAt)
 			? cachedAccounts.value
-			: []
-	);
-	const [loadState, setLoadState] = useState<LoadState>(
-		cachedAccounts && isFresh(cachedAccounts.cachedAt) ? "ready" : "idle"
+			: [];
+	const {
+		data: accounts,
+		loading: accountsLoading,
+		error: accountsError,
+		refresh: refreshAccounts,
+	} = useAsyncResource(fetchAccounts, initialAccounts, []);
+	const loadState: LoadState = accountsLoading
+		? "loading"
+		: accountsError
+			? "error"
+			: accounts.length > 0
+				? "ready"
+				: "idle";
+	const {
+		data: simProjectFolders,
+		setData: setSimProjectFolders,
+		error: simProjectFoldersError,
+	} = useAsyncResource(fetchSimulatorProjectFolders, [], []);
+	const {
+		data: repos,
+		loading: reposLoading,
+		error: reposError,
+		refresh: refreshRepos,
+	} = useAsyncResource(
+		async () => (accounts.length > 0 ? fetchRepos() : []),
+		cachedRepos && isFresh(cachedRepos.cachedAt) ? cachedRepos.value : [],
+		[accounts.length]
 	);
 	const [error, setError] = useState<string | null>(null);
 	const [connecting, setConnecting] = useState(false);
-	const [repos, setRepos] = useState<GithubRepo[]>(
-		cachedRepos && isFresh(cachedRepos.cachedAt) ? cachedRepos.value : []
-	);
-	const [reposLoading, setReposLoading] = useState(false);
 	const [repoQuery, setRepoQuery] = useState("");
 	const [cloneDirectory, setCloneDirectory] = useState("~/Desktop");
 	const [cloneStatus, setCloneStatus] = useState<string | null>(null);
@@ -79,7 +131,6 @@ export function ProfilePage() {
 	const [defaultChatSettings, setDefaultChatSettings] = useState(() =>
 		loadDefaultChatSettings()
 	);
-	const [simProjectFolders, setSimProjectFolders] = useState<string[]>([]);
 	const [simFoldersLoading, setSimFoldersLoading] = useState(false);
 	const [simFoldersStatus, setSimFoldersStatus] = useState<string | null>(null);
 	const defaultAgentDefinition = getAgentDefinition(
@@ -106,27 +157,6 @@ export function ProfilePage() {
 		saveDefaultChatSettings(normalized);
 		setDefaultChatSettings(loadDefaultChatSettings());
 	};
-
-	const loadSimulatorProjectFolders = useCallback(async () => {
-		try {
-			const response = await fetch("/api/simulator/project-folders");
-			if (!response.ok) throw new Error(await response.text());
-			const payload = (await response.json()) as { folders?: string[] };
-			setSimProjectFolders(
-				Array.isArray(payload.folders) ? payload.folders : []
-			);
-		} catch (err) {
-			setError(
-				err instanceof Error
-					? err.message
-					: "Unable to load simulator project folders"
-			);
-		}
-	}, []);
-
-	useEffect(() => {
-		void loadSimulatorProjectFolders();
-	}, [loadSimulatorProjectFolders]);
 
 	const saveSimulatorProjectFolders = async (folders: string[]) => {
 		const uniqueFolders = [...new Set(folders.map((folder) => folder.trim()))]
@@ -216,69 +246,28 @@ export function ProfilePage() {
 		}
 	};
 
-	const loadAccounts = useCallback(async (force = false) => {
-		if (!force && cachedAccounts && isFresh(cachedAccounts.cachedAt)) {
-			setAccounts(cachedAccounts.value);
-			setLoadState("ready");
-			return;
-		}
-		if (force || !cachedAccounts || !isFresh(cachedAccounts.cachedAt)) {
-			setLoadState("loading");
-		}
-		setError(null);
-		try {
-			const response = await fetch("/api/forge/accounts");
-			if (!response.ok) {
-				throw new Error(await response.text());
-			}
-			const payload = (await response.json()) as { accounts?: ForgeAccount[] };
-			const nextAccounts = Array.isArray(payload.accounts)
-				? payload.accounts
-				: [];
-			cachedAccounts = { value: nextAccounts, cachedAt: Date.now() };
-			setAccounts(nextAccounts);
-			setLoadState("ready");
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "Unable to load accounts");
-			setLoadState("error");
-		}
-	}, []);
-
-	useEffect(() => {
-		void loadAccounts();
-	}, [loadAccounts]);
+	const loadAccounts = useCallback(
+		async (force = false) => {
+			setError(null);
+			if (force) cachedAccounts = null;
+			await refreshAccounts();
+		},
+		[refreshAccounts]
+	);
 
 	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
 
-	const loadRepos = useCallback(async (force = false) => {
-		if (!force && cachedRepos && isFresh(cachedRepos.cachedAt)) {
-			setRepos(cachedRepos.value);
-			return;
-		}
-		setReposLoading(true);
-		try {
-			const response = await fetch("/api/forge/repos?limit=50");
-			if (!response.ok) throw new Error(await response.text());
-			const payload = (await response.json()) as { repos?: GithubRepo[] };
-			const nextRepos = Array.isArray(payload.repos) ? payload.repos : [];
-			cachedRepos = { value: nextRepos, cachedAt: Date.now() };
-			setRepos(nextRepos);
-		} catch (err) {
-			setError(
-				err instanceof Error
-					? err.message
-					: "Unable to load GitHub repositories"
-			);
-		} finally {
-			setReposLoading(false);
-		}
-	}, []);
+	const loadRepos = useCallback(
+		async (force = false) => {
+			setError(null);
+			if (force) cachedRepos = null;
+			await refreshRepos();
+		},
+		[refreshRepos]
+	);
 
-	useEffect(() => {
-		if (accounts.length > 0) {
-			void loadRepos();
-		}
-	}, [accounts.length, loadRepos]);
+	const resourceError =
+		error ?? simProjectFoldersError ?? accountsError ?? reposError;
 
 	const activeAccount = useMemo(
 		() => accounts.find(isActive) ?? accounts[0] ?? null,
@@ -557,7 +546,7 @@ export function ProfilePage() {
 						</div>
 					</header>
 
-					{error ? <ErrorBanner message={error} /> : null}
+					{resourceError ? <ErrorBanner message={resourceError} /> : null}
 					{cloneStatus ? <SuccessBanner message={cloneStatus} /> : null}
 
 					{loadState === "loading" || accounts.length === 0 ? (

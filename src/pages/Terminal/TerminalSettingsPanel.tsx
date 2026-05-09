@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import { IconX } from "../../components/ui/Icons.tsx";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import {
 	APP_THEMES,
 	type AppThemeId,
@@ -127,19 +128,22 @@ function ThemeOrb({
 }
 
 function SearchFoldersSection() {
-	const [folders, setFolders] = useState<string[]>([]);
+	const { data: loadedFolders, setData: setFolders } = useAsyncResource<
+		string[] | null
+	>(
+		async () => {
+			const data = await fetchJsonOr<{ folders: string[] }>(
+				"/api/config/search-folders",
+				{ folders: [] }
+			);
+			return data.folders;
+		},
+		null,
+		[]
+	);
+	const folders = loadedFolders ?? [];
 	const [newFolder, setNewFolder] = useState("");
-	const [loaded, setLoaded] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
-
-	useEffect(() => {
-		fetchJsonOr<{ folders: string[] }>("/api/config/search-folders", {
-			folders: [],
-		}).then((data) => {
-			setFolders(data.folders);
-			setLoaded(true);
-		});
-	}, []);
 
 	const saveFolders = useCallback(async (next: string[]) => {
 		setFolders(next);
@@ -178,7 +182,7 @@ function SearchFoldersSection() {
 		} catch {}
 	}, [folders, saveFolders]);
 
-	if (!loaded) return null;
+	if (!loadedFolders) return null;
 
 	return (
 		<div {...stylex.props(styles.section)}>

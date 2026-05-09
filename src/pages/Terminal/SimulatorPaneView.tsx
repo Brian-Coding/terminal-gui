@@ -25,13 +25,8 @@ import {
 	IconSimulator,
 	IconSwift,
 } from "../../components/ui/Icons.tsx";
-import {
-	hasId,
-	hasUdid,
-	noop,
-	runAsync,
-	toggleBoolean,
-} from "../../lib/data.ts";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
+import { hasId, hasUdid, noop, toggleBoolean } from "../../lib/data.ts";
 import { isBootedSimulatorDevice } from "../../lib/simulator-utils.ts";
 import {
 	readStoredJson,
@@ -72,6 +67,28 @@ interface SimulatorProject {
 	bootedDeviceUdid?: string | null;
 	installed: boolean;
 	running: boolean;
+}
+
+interface SimulatorSnapshot {
+	devices: SimulatorDevice[];
+	projects: SimulatorProject[];
+	status: BaguetteStatus | null;
+}
+
+async function loadSimulatorSnapshot(): Promise<SimulatorSnapshot> {
+	const [listRes, statusRes, projectsRes] = await Promise.all([
+		fetch("/api/simulator/list"),
+		fetch("/api/simulator/baguette/status"),
+		fetch("/api/simulator/projects"),
+	]);
+	const listJson = await listRes.json();
+	const statusJson = (await statusRes.json()) as BaguetteStatus;
+	const projectsJson = await projectsRes.json();
+	return {
+		devices: (listJson.devices ?? []) as SimulatorDevice[],
+		projects: (projectsJson.projects ?? []) as SimulatorProject[],
+		status: statusJson,
+	};
 }
 
 type LaunchPhase = "booting" | "building" | "launching";
@@ -523,13 +540,17 @@ function FarmTile({
 }
 
 export function SimulatorPaneView() {
-	const [devices, setDevices] = useState<SimulatorDevice[]>([]);
-	const [projects, setProjects] = useState<SimulatorProject[]>([]);
+	const { data: simulatorSnapshot, refresh } =
+		useAsyncResource<SimulatorSnapshot>(
+			loadSimulatorSnapshot,
+			{ devices: [], projects: [], status: null },
+			[]
+		);
+	const { devices, projects, status } = simulatorSnapshot;
 	const [selectedUdid, setSelectedUdid] = useState<string | null>(null);
 	const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
 		null
 	);
-	const [status, setStatus] = useState<BaguetteStatus | null>(null);
 	const [launchProgress, setLaunchProgress] = useState<{
 		projectId: string;
 		udid: string;
@@ -622,59 +643,6 @@ export function SimulatorPaneView() {
 			return true;
 		});
 	}, [devices, farmPlatforms, farmStates]);
-
-	const refresh = useCallback(async () => {
-		try {
-			const [listRes, statusRes, projectsRes] = await Promise.all([
-				fetch("/api/simulator/list"),
-				fetch("/api/simulator/baguette/status"),
-				fetch("/api/simulator/projects"),
-			]);
-			const listJson = await listRes.json();
-			const statusJson = (await statusRes.json()) as BaguetteStatus;
-			const projectsJson = await projectsRes.json();
-			const nextDevices = (listJson.devices ?? []) as SimulatorDevice[];
-			const nextProjects = (projectsJson.projects ?? []) as SimulatorProject[];
-			setDevices(nextDevices);
-			setProjects(nextProjects);
-			setStatus(statusJson);
-			setSelectedUdid((current) => {
-				if (current && nextDevices.some(hasUdid.bind(null, current))) {
-					return current;
-				}
-				return (
-					nextDevices.find(isBootedSimulatorDevice)?.udid ??
-					nextDevices[0]?.udid ??
-					null
-				);
-			});
-			setSelectedProjectId((current) => {
-				if (current && nextProjects.some(hasId.bind(null, current))) {
-					return current;
-				}
-				return nextProjects[0]?.id ?? null;
-			});
-			setLaunchedProjectId((current) => {
-				const runningProject = nextProjects.find((project) => project.running);
-				const hasBootedDevice = nextDevices.some(isBootedSimulatorDevice);
-				const nextId =
-					runningProject?.id ??
-					(hasBootedDevice &&
-					current &&
-					nextProjects.some(hasId.bind(null, current))
-						? current
-						: null);
-				if (nextId) {
-					writeStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY, nextId);
-				} else {
-					removeStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY);
-				}
-				return nextId;
-			});
-		} catch {}
-	}, []);
-
-	useEffect(runAsync.bind(null, refresh), [refresh]);
 
 	const shutdownSelectedSimulator = useCallback(
 		async (device?: SimulatorDevice) => {

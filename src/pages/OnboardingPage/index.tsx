@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
@@ -16,6 +16,7 @@ import {
 	IconUser,
 	IconX,
 } from "../../components/ui/Icons.tsx";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { writeStoredValue } from "../../lib/stored-json.ts";
 import {
@@ -57,21 +58,39 @@ function stepClass(
 	return ci < ti ? before : after;
 }
 
+async function fetchAccounts(): Promise<ForgeAccount[]> {
+	const data = await fetchJsonOr<{ accounts?: ForgeAccount[] }>(
+		"/api/forge/accounts",
+		{}
+	);
+	return Array.isArray(data.accounts) ? data.accounts : [];
+}
+
+async function fetchRepos(): Promise<GithubRepo[]> {
+	const data = await fetchJsonOr<{ repos?: GithubRepo[] }>(
+		"/api/forge/repos?limit=50",
+		{}
+	);
+	return Array.isArray(data.repos) ? data.repos : [];
+}
+
 /* ─── Main component ─── */
 
 export function OnboardingPage() {
 	const navigate = useNavigate();
 	const [step, setStep] = useState<Step>("intro");
 
-	// GitHub state — fetched eagerly on mount
-	const [accounts, setAccounts] = useState<ForgeAccount[]>([]);
-	const [accountsLoading, setAccountsLoading] = useState(true);
+	const {
+		data: accounts,
+		loading: accountsLoading,
+		refresh: refreshAccountsResource,
+	} = useAsyncResource(fetchAccounts, [], []);
 	const [connecting, setConnecting] = useState(false);
-
-	// Repos state
-	const [repos, setRepos] = useState<GithubRepo[]>([]);
-	const [reposLoading, setReposLoading] = useState(false);
-	const reposFetched = useRef(false);
+	const { data: repos, loading: reposLoading } = useAsyncResource(
+		async () => (accounts.length > 0 ? fetchRepos() : []),
+		[],
+		[accounts.length]
+	);
 
 	// Local folders
 	const [localFolders, setLocalFolders] = useState<string[]>([]);
@@ -79,56 +98,6 @@ export function OnboardingPage() {
 
 	// Selected repos
 	const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-
-	const loadAccounts = useCallback(async () => {
-		setAccountsLoading(true);
-		try {
-			const data = await fetchJsonOr<{ accounts?: ForgeAccount[] }>(
-				"/api/forge/accounts",
-				{}
-			);
-			const found = Array.isArray(data.accounts) ? data.accounts : [];
-			setAccounts(found);
-			return found;
-		} catch {
-			setAccounts([]);
-			return [];
-		} finally {
-			setAccountsLoading(false);
-		}
-	}, []);
-
-	const loadRepos = useCallback(async () => {
-		setReposLoading(true);
-		try {
-			const data = await fetchJsonOr<{ repos?: GithubRepo[] }>(
-				"/api/forge/repos?limit=50",
-				{}
-			);
-			setRepos(Array.isArray(data.repos) ? data.repos : []);
-		} catch {
-			setRepos([]);
-		} finally {
-			setReposLoading(false);
-		}
-	}, []);
-
-	// Prefetch on mount
-	useEffect(() => {
-		loadAccounts().then((found) => {
-			if (found.length > 0 && !reposFetched.current) {
-				reposFetched.current = true;
-				void loadRepos();
-			}
-		});
-	}, [loadAccounts, loadRepos]);
-
-	useEffect(() => {
-		if (accounts.length > 0 && !reposFetched.current) {
-			reposFetched.current = true;
-			void loadRepos();
-		}
-	}, [accounts, loadRepos]);
 
 	const connectGithub = sendJsonWithBusy.bind(
 		null,
@@ -139,10 +108,7 @@ export function OnboardingPage() {
 	);
 
 	const refreshAccounts = async () => {
-		const found = await loadAccounts();
-		if (found.length > 0) {
-			reposFetched.current = false;
-		}
+		await refreshAccountsResource();
 	};
 
 	const pickFolder = async () => {

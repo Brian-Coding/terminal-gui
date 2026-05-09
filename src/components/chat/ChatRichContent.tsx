@@ -431,14 +431,6 @@ const styles = stylex.create({
 		paddingBlock: controlSize._1_5,
 		paddingInline: controlSize._3,
 	},
-	questionBadge: {
-		borderRadius: radius.pill,
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		paddingBlock: controlSize._0_5,
-		paddingInline: controlSize._2,
-		textTransform: "uppercase",
-	},
 	multiSelectLabel: {
 		fontSize: font.size_0_5,
 		letterSpacing: 0,
@@ -561,6 +553,7 @@ export function AskUserQuestionCard({
 	);
 	const [submitted, setSubmitted] = useState(false);
 	const accentColor = "var(--color-inferay-accent)";
+	const accentForeground = "var(--color-inferay-accent-foreground)";
 	const fgMuted = "var(--color-inferay-soft-white)";
 	const fgDim = "var(--color-inferay-muted-gray)";
 
@@ -621,17 +614,6 @@ export function AskUserQuestionCard({
 					<div key={qi} {...stylex.props(styles.questionCard)}>
 						<div {...stylex.props(styles.questionHeader)}>
 							<IconHelpCircle size={12} style={{ color: accentColor }} />
-							{q.header && (
-								<span
-									{...stylex.props(styles.questionBadge)}
-									style={{
-										backgroundColor: `${accentColor}18`,
-										color: accentColor,
-									}}
-								>
-									{q.header}
-								</span>
-							)}
 							{q.multiSelect && (
 								<span
 									{...stylex.props(styles.multiSelectLabel)}
@@ -678,7 +660,7 @@ export function AskUserQuestionCard({
 													backgroundColor: isSelected
 														? accentColor
 														: `${accentColor}20`,
-													color: isSelected ? "#fff" : accentColor,
+													color: isSelected ? accentForeground : accentColor,
 												}}
 											>
 												{isSelected ? (
@@ -716,7 +698,7 @@ export function AskUserQuestionCard({
 					{...stylex.props(styles.sendSelectionsButton)}
 					style={{
 						backgroundColor: hasSelections ? accentColor : `${accentColor}30`,
-						color: hasSelections ? "#fff" : fgDim,
+						color: hasSelections ? accentForeground : fgDim,
 						cursor: hasSelections ? "pointer" : "not-allowed",
 						opacity: hasSelections ? 1 : 0.6,
 					}}

@@ -207,6 +207,15 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					? defaults.model
 					: definition.defaultModel;
 		});
+		const agentDefinition = useMemo(
+			() => getAgentDefinition(agentKind),
+			[agentKind]
+		);
+		const effectiveSelectedModel = agentDefinition.models.some(
+			hasId.bind(null, selectedModel)
+		)
+			? selectedModel
+			: getDefaultModel(agentKind);
 		const [selectedReasoningLevel, setSelectedReasoningLevel] = useState(() => {
 			const stored = loadStoredReasoningLevel(paneId);
 			const defaults = loadDefaultChatSettings();
@@ -331,14 +340,6 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				clearStoredSessionId(paneId);
 			}
 		}, [agentKind, paneId]);
-		useEffect(() => {
-			const definition = getAgentDefinition(agentKind);
-			if (!definition.models.length) return;
-			if (definition.models.some(hasId.bind(null, selectedModel))) return;
-			const nextModel = definition.defaultModel;
-			setSelectedModel(nextModel);
-			saveStoredModel(paneId, nextModel);
-		}, [agentKind, paneId, selectedModel]);
 
 		const [chatUiState, setChatUiState] = useState<{
 			isLoading: boolean;
@@ -666,7 +667,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 					referencePaths: effectiveReferencePaths,
 					sessionId,
 					agentKind,
-					model: selectedModel || getDefaultModel(agentKind),
+					model: effectiveSelectedModel || getDefaultModel(agentKind),
 					reasoningLevel:
 						agentKind === "codex" ? selectedReasoningLevel : undefined,
 				});
@@ -676,7 +677,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 				cwd,
 				referencePaths,
 				agentKind,
-				selectedModel,
+				effectiveSelectedModel,
 				selectedReasoningLevel,
 				getDefaultModel,
 				setLoadingState,
@@ -1675,7 +1676,7 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 							showInput={showInput}
 							agentKind={agentKind}
 							agentKindOptions={agentKindOptions}
-							model={selectedModel}
+							model={effectiveSelectedModel}
 							reasoningLevel={selectedReasoningLevel}
 							onAgentKindChange={handleAgentKindChange}
 							onModelChange={handleModelChange}

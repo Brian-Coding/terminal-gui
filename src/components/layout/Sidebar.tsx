@@ -10,6 +10,7 @@ import {
 import { NavLink, useNavigate } from "react-router-dom";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
 import {
@@ -66,6 +67,15 @@ interface ForgeAccount {
 	avatarUrl: string | null;
 	email: string | null;
 	active: boolean;
+}
+
+async function loadGithubAccount(): Promise<ForgeAccount | null> {
+	const payload = await fetchJsonOr<{ accounts?: ForgeAccount[] }>(
+		"/api/forge/accounts",
+		{}
+	);
+	const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+	return accounts.find((item) => item.active) ?? accounts[0] ?? null;
 }
 
 const logoUrl = resolveServerUrl("/logo.png");
@@ -352,7 +362,8 @@ export function Sidebar() {
 	});
 	const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
 	const [resizing, setResizing] = useState(false);
-	const [githubAccount, setGithubAccount] = useState<ForgeAccount | null>(null);
+	const { data: githubAccount, refresh: refreshGithubAccount } =
+		useAsyncResource(loadGithubAccount, null, []);
 	const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 	const resizeWidthRef = useRef(sidebarWidth);
 
@@ -505,31 +516,10 @@ export function Sidebar() {
 		[collapsed, sidebarWidth]
 	);
 
-	useEffect(() => {
-		let cancelled = false;
-		async function loadGithubAccount() {
-			try {
-				const payload = await fetchJsonOr<{ accounts?: ForgeAccount[] }>(
-					"/api/forge/accounts",
-					{}
-				);
-				const accounts = Array.isArray(payload.accounts)
-					? payload.accounts
-					: [];
-				const account =
-					accounts.find((item) => item.active) ?? accounts[0] ?? null;
-				if (!cancelled) setGithubAccount(account);
-			} catch {
-				if (!cancelled) setGithubAccount(null);
-			}
-		}
-		void loadGithubAccount();
-		const removeFocusListener = listenWindowEvent("focus", loadGithubAccount);
-		return () => {
-			cancelled = true;
-			removeFocusListener();
-		};
-	}, []);
+	useEffect(
+		() => listenWindowEvent("focus", () => void refreshGithubAccount()),
+		[refreshGithubAccount]
+	);
 
 	const githubLabel = githubAccount?.login || githubAccount?.name || "";
 	const shellProps = stylex.props(

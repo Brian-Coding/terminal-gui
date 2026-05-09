@@ -186,8 +186,6 @@ const TERMINAL_STORAGE_KEY = "inferay-terminal-state" as const;
 
 const CUSTOM_THEME_KEY = "inferay-custom-theme" as const;
 
-export const POPOUT_CHANNEL = "inferay-terminal-popout" as const;
-
 const DEFAULT_THEME_ID: ThemeId = "default";
 
 export const DEFAULT_FONT_SIZE = 13 as const;

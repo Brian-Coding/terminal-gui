@@ -17,6 +17,7 @@ import {
 	IconTerminal,
 	IconWorkflow,
 } from "../../components/ui/Icons.tsx";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { hasId, isPresent, lacksId } from "../../lib/data.ts";
 import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
@@ -358,7 +359,19 @@ function isTextEditingTarget(target: EventTarget | null) {
 }
 
 export function AutomationsPage() {
-	const [flows, setFlows] = useState<AutomationFlow[]>(defaultFlows);
+	const { data: flows, setData: setFlows } = useAsyncResource(
+		async () => {
+			const payload = await fetchJsonOr<{ flows?: AutomationFlow[] }>(
+				"/api/automations",
+				{ flows: [] }
+			);
+			return Array.isArray(payload.flows) && payload.flows.length > 0
+				? payload.flows
+				: defaultFlows;
+		},
+		defaultFlows,
+		[]
+	);
 	const [selectedFlowId, setSelectedFlowId] = useState(defaultFlows[0]!.id);
 	const [selectedNodeId, setSelectedNodeId] = useState(
 		defaultFlows[0]!.nodes[0]!.id
@@ -397,40 +410,6 @@ export function AutomationsPage() {
 			dragCleanupRef.current?.();
 		};
 	}, []);
-
-	useEffect(() => {
-		const controller = new AbortController();
-		const { signal } = controller;
-		const load = async () => {
-			const payload = await fetchJsonOr<{ flows?: AutomationFlow[] }>(
-				"/api/automations",
-				{ flows: [] }
-			);
-			if (
-				signal.aborted ||
-				!Array.isArray(payload.flows) ||
-				payload.flows.length < 1
-			) {
-				return;
-			}
-			setFlows(payload.flows);
-			setSelectedFlowId((current) =>
-				payload.flows!.some(hasId.bind(null, current))
-					? current
-					: payload.flows![0]!.id
-			);
-			setSelectedNodeId((current) => {
-				const activeFlow =
-					payload.flows!.find(hasId.bind(null, selectedFlowId)) ??
-					payload.flows![0]!;
-				return activeFlow.nodes.some(hasId.bind(null, current))
-					? current
-					: (activeFlow.nodes[0]?.id ?? "");
-			});
-		};
-		void load();
-		return controller.abort.bind(controller);
-	}, [selectedFlowId]);
 
 	const persistFlows = useCallback((nextFlows: AutomationFlow[]) => {
 		setFlows(nextFlows);
