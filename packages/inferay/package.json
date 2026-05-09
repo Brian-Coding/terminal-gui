@@ -1,6 +1,6 @@
 {
 	"name": "inferay",
-	"version": "0.1.11",
+	"version": "0.1.12",
 	"description": "Command-line installer and launcher for Inferay.",
 	"type": "module",
 	"main": "./index.js",
