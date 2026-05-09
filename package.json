@@ -11,8 +11,8 @@
 		"build": "bun run build:renderer && bun run build:native && bash scripts/electrobun.sh build",
 		"start": "bash scripts/electrobun.sh run",
 		"release": "bun scripts/release.ts",
-		"release:publish": "bun scripts/release.ts --publish-existing",
-		"publish:cli": "npm publish ./packages/inferay --access public --cache /private/tmp/inferay-npm-cache",
+		"release:prepare": "bun scripts/release.ts --prepare",
+		"release:resume": "bun scripts/release.ts --resume",
 		"format": "bunx biome format --write ./src",
 		"format:prettier": "prettier . --write",
 		"check": "bunx biome check --write ./src"

@@ -76,26 +76,24 @@ After the build completes, you'll find the installer at `artifacts/inferay-insta
 
 ## Release
 
-Use the release script so the CLI version, DMG asset, GitHub release, and npm
-package stay in sync.
+Use one command so the CLI version, DMG asset, GitHub release, and npm package
+stay in sync.
 
 ```bash
-# Prepare the next patch release locally:
-bun run release patch
+# Standard release: bump patch, build, tag, GitHub release, npm publish
+bun run release
 
-# Prepare and publish in one run:
-bun run release patch --publish
+# Use only when you need a different version bump:
+bun run release minor
+bun run release 0.2.0
 
-# Retry publishing an already prepared release:
-bun run release:publish
-
-# Retry only the npm CLI publish:
-bun run publish:cli
+# Use only if publishing was interrupted after prepare/build:
+bun run release:resume
 ```
 
 The script updates `packages/inferay`, builds the DMG, creates
 `artifacts/inferay-macos-arm64.dmg`, writes `artifacts/checksums.txt`, commits
-`release vX.Y.Z`, tags `vX.Y.Z`, and optionally publishes the GitHub release and
+`release vX.Y.Z`, tags `vX.Y.Z`, publishes the GitHub release, and publishes the
 npm CLI package.
 
 ### Installing

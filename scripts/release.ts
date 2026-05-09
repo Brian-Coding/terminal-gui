@@ -26,14 +26,15 @@ interface Options {
 
 function usage() {
 	console.log(`Usage:
-  bun run release [patch|minor|major|new|x.y.z] [--publish] [--repo owner/repo]
-  bun run release --publish-existing [--repo owner/repo]
+  bun run release [patch|minor|major|new|x.y.z] [--prepare] [--repo owner/repo]
+  bun run release --resume [--repo owner/repo]
 
 Examples:
-  bun run release patch
-  bun run release new --publish
-  bun run release 0.1.9 --publish
-  bun run release --publish-existing
+  bun run release
+  bun run release minor
+  bun run release 0.2.0
+  bun run release --prepare
+  bun run release --resume
 `);
 }
 
@@ -58,8 +59,9 @@ function parseArgs(): Options {
 
 	return {
 		bumpOrVersion: positional[0] ?? "patch",
-		publish: args.includes("--publish"),
-		publishExisting: args.includes("--publish-existing"),
+		publish: !args.includes("--prepare"),
+		publishExisting:
+			args.includes("--resume") || args.includes("--publish-existing"),
 		repo,
 	};
 }
@@ -308,9 +310,7 @@ async function main() {
 		await publishRelease(next, options.repo);
 		console.log(`Published ${tag}`);
 	} else {
-		console.log(
-			`Prepared ${tag}. Publish with: bun run release --publish-existing`
-		);
+		console.log(`Prepared ${tag}. Publish with: bun run release --resume`);
 	}
 }
 
