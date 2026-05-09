@@ -834,7 +834,15 @@ export const ChatService = {
 
 		try {
 			const proc = Bun.spawn(
-				[claudeCmd, "-p", text, "--output-format", "stream-json", "--verbose"],
+				[
+					claudeCmd,
+					"-p",
+					text,
+					"--dangerously-skip-permissions",
+					"--output-format",
+					"stream-json",
+					"--verbose",
+				],
 				{
 					stdout: "pipe",
 					stderr: "pipe",

@@ -115,6 +115,7 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 						resolveAgentBinary("claude"),
 						"-p",
 						prompt,
+						"--dangerously-skip-permissions",
 						"--output-format",
 						"stream-json",
 						"--verbose",
