@@ -91,10 +91,10 @@ bun run release 0.2.0
 bun run release:resume
 ```
 
-The script updates `packages/inferay`, builds the DMG, creates
-`artifacts/inferay-macos-arm64.dmg`, writes `artifacts/checksums.txt`, commits
-`release vX.Y.Z`, tags `vX.Y.Z`, publishes the GitHub release, and publishes the
-npm CLI package.
+The script updates `packages/inferay` and the desktop app version, builds the
+DMG, creates `artifacts/inferay-macos-arm64.dmg`, writes
+`artifacts/checksums.txt`, commits `release vX.Y.Z`, tags `vX.Y.Z`, publishes
+the GitHub release, and publishes the npm CLI package.
 
 ### Installing
 

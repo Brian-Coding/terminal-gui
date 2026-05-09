@@ -6,19 +6,21 @@ Command-line installer and launcher for Inferay.
 npx inferay
 ```
 
-The package is intentionally small. It does not contain the desktop app. It resolves the right release asset, opens the installer, launches an installed app, and runs setup checks.
+The package is intentionally small. It does not contain the desktop app. It
+resolves the right release asset, installs the app, launches an installed app,
+and runs setup checks.
 
 ## Commands
 
 ```sh
 inferay                 # install or launch Inferay
 inferay .               # open the current folder
-inferay install         # download/open the latest release installer
+inferay install         # install or replace the latest release
 inferay install --local ./build/stable-macos-arm64/inferay.app
 inferay launch ~/code   # open a workspace
 inferay doctor          # check user setup
 inferay doctor --dev    # check contributor setup
-inferay update          # show latest release asset
+inferay update          # replace Inferay with the latest release
 inferay channel nightly # switch release channel
 ```
 

@@ -12,10 +12,10 @@ Usage:
   inferay                 Install or launch Inferay
   inferay .               Open the current folder in Inferay
   inferay <path>          Open a folder in Inferay
-  inferay install         Install Inferay from the latest release
+  inferay install         Install or replace Inferay from the latest release
   inferay install --local <app>
   inferay launch [path]   Launch Inferay with a workspace
-  inferay update          Re-run the release installer
+  inferay update          Replace Inferay with the latest release
   inferay doctor [--dev]  Check local setup
   inferay channel [name]  Show or set release channel
   inferay version         Print CLI version
@@ -47,7 +47,7 @@ async function update() {
 
 async function installAndReport(args) {
 	const local = optionValue(args, "--local");
-	const result = await install({ local });
+	const result = await install({ local, force: true });
 	console.log(result.message);
 }
 

@@ -8,6 +8,7 @@ const ROOT = resolve(import.meta.dir, "..");
 const CLI_DIR = join(ROOT, "packages", "inferay");
 const CLI_PACKAGE_JSON = join(CLI_DIR, "package.json");
 const CLI_SOURCE = join(CLI_DIR, "src", "cli.js");
+const ELECTROBUN_CONFIG = join(ROOT, "electrobun.config.ts");
 const ARTIFACTS_DIR = join(ROOT, "artifacts");
 const INSTALLER_DMG = join(ARTIFACTS_DIR, "inferay-installer.dmg");
 const PLATFORM_DMG = join(ARTIFACTS_DIR, "inferay-macos-arm64.dmg");
@@ -154,6 +155,18 @@ async function setCliVersion(version: string) {
 	await writeFile(CLI_SOURCE, next);
 }
 
+async function setDesktopVersion(version: string) {
+	const source = await readFile(ELECTROBUN_CONFIG, "utf8");
+	const next = source.replace(
+		/version:\s*"\d+\.\d+\.\d+"/,
+		`version: "${version}"`
+	);
+	if (next === source) {
+		throw new Error("could not update desktop app version");
+	}
+	await writeFile(ELECTROBUN_CONFIG, next);
+}
+
 async function assertCleanGit() {
 	const status = await capture(["git", "status", "--short"]);
 	if (status) {
@@ -213,6 +226,7 @@ async function commitAndTag(version: string) {
 	await run([
 		"git",
 		"add",
+		"electrobun.config.ts",
 		"packages/inferay/package.json",
 		"packages/inferay/src/cli.js",
 	]);
@@ -303,6 +317,7 @@ async function main() {
 
 	console.log(`Preparing ${tag}`);
 	await setCliVersion(next);
+	await setDesktopVersion(next);
 	await buildArtifacts(next);
 	await commitAndTag(next);
 
