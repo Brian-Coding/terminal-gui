@@ -27,8 +27,7 @@ echo "Creating polished DMG installer..."
 # Rename dev app bundle for distribution
 if [ -d "${BUILD_DIR}/inferay-dev.app" ]; then
   mv "${BUILD_DIR}/inferay-dev.app" "${BUILD_DIR}/${APP_NAME}.app"
-  # Fix bundle name in Info.plist
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName ${APP_NAME}" "${BUILD_DIR}/${APP_NAME}.app/Contents/Info.plist"
+  bun scripts/prepare-release-app.ts "${BUILD_DIR}/${APP_NAME}.app"
 else
   echo "Expected app bundle not found: ${BUILD_DIR}/inferay-dev.app"
   exit 1

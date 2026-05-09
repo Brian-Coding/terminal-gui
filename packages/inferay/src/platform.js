@@ -21,17 +21,25 @@ export function defaultInstallPath() {
 	return "/Applications/inferay.app";
 }
 
+function installedAppCandidates() {
+	return [join(homedir(), "Applications/inferay.app"), defaultInstallPath()];
+}
+
 function devAppCandidates(cwd = process.cwd()) {
 	return [
 		resolve(cwd, "build/dev-macos-arm64/inferay-dev.app"),
 		resolve(cwd, "build/dev-macos-arm64/inferay.app"),
 		resolve(cwd, "build/stable-macos-arm64/inferay.app"),
 		resolve(cwd, "build/macos-arm64/inferay.app"),
-		join(homedir(), "Applications/inferay.app"),
-		defaultInstallPath(),
 	];
 }
 
-export function findExistingApp(cwd = process.cwd()) {
-	return devAppCandidates(cwd).find((candidate) => existsSync(candidate));
+export function findExistingApp(
+	cwd = process.cwd(),
+	{ includeDev = false } = {}
+) {
+	const candidates = includeDev
+		? [...devAppCandidates(cwd), ...installedAppCandidates()]
+		: installedAppCandidates();
+	return candidates.find((candidate) => existsSync(candidate));
 }

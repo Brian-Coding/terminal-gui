@@ -40,7 +40,7 @@ async function appVersion(appPath) {
 
 export async function doctor({ dev = false } = {}) {
 	const platform = platformInfo();
-	const appPath = findExistingApp();
+	const appPath = findExistingApp(process.cwd(), { includeDev: dev });
 	const version = await appVersion(appPath);
 	const channel = await getChannel();
 	const checks = [
