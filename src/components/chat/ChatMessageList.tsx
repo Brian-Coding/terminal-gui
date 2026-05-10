@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
 	color,
 	controlSize,
@@ -8,7 +8,12 @@ import {
 	radius,
 } from "../../tokens.stylex.ts";
 import { ThinkingIndicator } from "../ui/DotMatrixLoader.tsx";
-import { IconChevronDown, IconClock } from "../ui/Icons.tsx";
+import {
+	IconCheck,
+	IconChevronDown,
+	IconClock,
+	IconCopy,
+} from "../ui/Icons.tsx";
 import { GroupedEditDiff, MiniEditDiff } from "./ChatEditDiff.tsx";
 import { AskUserQuestionCard, Markdown } from "./ChatRichContent.tsx";
 import { renderTextPills } from "./chat-token-decorators.tsx";
@@ -284,6 +289,18 @@ const Bubble = React.memo(function Bubble({
 	onMdFileClick?: (path: string) => void;
 	slashCommandNames: readonly string[];
 }) {
+	const [copied, setCopied] = useState(false);
+	const handleCopyMessage = useCallback(() => {
+		if (!msg.content) return;
+		navigator.clipboard
+			.writeText(msg.content)
+			.then(() => {
+				setCopied(true);
+				setTimeout(() => setCopied(false), 1500);
+			})
+			.catch(() => setCopied(false));
+	}, [msg.content]);
+
 	if (msg.role === "user") {
 		const commandMatch = msg.content.match(/^\/([a-zA-Z0-9_-]+)(\s|$)/);
 		if (
@@ -425,6 +442,23 @@ const Bubble = React.memo(function Bubble({
 	return (
 		<div {...stylex.props(styles.assistantMessage)}>
 			<Markdown text={msg.content} onMdFileClick={onMdFileClick} />
+			{!msg.isStreaming && msg.content.trim() ? (
+				<div {...stylex.props(styles.messageActionRow)}>
+					<button
+						type="button"
+						onClick={handleCopyMessage}
+						title={copied ? "Copied" : "Copy message"}
+						aria-label={copied ? "Copied message" : "Copy message"}
+						{...stylex.props(
+							styles.copyMessageButton,
+							copied && styles.copyMessageButtonCopied
+						)}
+					>
+						{copied ? <IconCheck size={11} /> : <IconCopy size={11} />}
+						<span>{copied ? "Copied" : "Copy"}</span>
+					</button>
+				</div>
+			) : null}
 		</div>
 	);
 });
@@ -763,6 +797,37 @@ const styles = stylex.create({
 		color: color.textSoft,
 		fontSize: font.size_3,
 		lineHeight: 1.6,
+	},
+	messageActionRow: {
+		display: "flex",
+		justifyContent: "flex-end",
+		marginTop: controlSize._1,
+	},
+	copyMessageButton: {
+		alignItems: "center",
+		backgroundColor: {
+			default: color.transparent,
+			":hover": color.surfaceControl,
+		},
+		borderRadius: radius.sm,
+		color: {
+			default: color.textMuted,
+			":hover": color.textSoft,
+		},
+		display: "inline-flex",
+		fontSize: font.size_2,
+		fontWeight: font.weight_5,
+		gap: controlSize._1,
+		minHeight: controlSize._6,
+		paddingBlock: controlSize._0_5,
+		paddingInline: controlSize._1_5,
+		transitionDuration: motion.durationBase,
+		transitionProperty: "background-color, color",
+		transitionTimingFunction: motion.ease,
+	},
+	copyMessageButtonCopied: {
+		backgroundColor: color.successWash,
+		color: color.success,
 	},
 	messageList: {
 		display: "flex",
