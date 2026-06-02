@@ -1,5 +1,28 @@
 import { platform } from "node:os";
 
+export function runInferayUpdate(): boolean {
+	const command = [
+		"if command -v npx >/dev/null 2>&1; then",
+		"npx --yes inferay update;",
+		"elif command -v bunx >/dev/null 2>&1; then",
+		"bunx inferay update;",
+		"else",
+		"echo 'npx or bunx is required to update Inferay' >&2;",
+		"exit 127;",
+		"fi",
+	].join(" ");
+	try {
+		Bun.spawn(["/bin/zsh", "-lc", command], {
+			stdout: "ignore",
+			stderr: "ignore",
+			stdin: "ignore",
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export async function openNativePath(
 	path: string,
 	reveal: boolean
