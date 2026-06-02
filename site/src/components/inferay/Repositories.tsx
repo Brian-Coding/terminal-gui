@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Icons } from "./Icons";
 
 type Repository = {
@@ -58,7 +58,6 @@ function RepoCard({
 }) {
 	return (
 		<button
-			type="button"
 			onClick={onSelect}
 			className={`w-full text-left p-3 rounded-lg border transition-colors ${
 				isSelected
@@ -156,34 +155,22 @@ function RepoDetail({ repo }: { repo: Repository }) {
 						Quick Actions
 					</span>
 					<div className="mt-2 space-y-1">
-						<button
-							type="button"
-							className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors"
-						>
+						<button className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors">
 							<Icons.Terminal className="text-inferay-text-3" />
 							Open in Terminal
 						</button>
-						<button
-							type="button"
-							className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors"
-						>
+						<button className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors">
 							<Icons.Code className="text-inferay-text-3" />
 							Open in Editor
 						</button>
 						{repo.status === "changes" && (
-							<button
-								type="button"
-								className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors"
-							>
+							<button className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors">
 								<Icons.Git className="text-inferay-text-3" />
 								Commit Changes
 							</button>
 						)}
 						{repo.status === "behind" && (
-							<button
-								type="button"
-								className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors"
-							>
+							<button className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-inferay-border text-[9px] text-inferay-text-2 hover:bg-inferay-surface transition-colors">
 								<Icons.ArrowDown className="text-inferay-text-3" />
 								Pull Latest
 							</button>
@@ -258,10 +245,7 @@ function RepoDetail({ repo }: { repo: Repository }) {
 
 			{/* Footer */}
 			<div className="shrink-0 p-3 border-t border-inferay-border">
-				<button
-					type="button"
-					className="w-full h-7 rounded-md border border-red-500/30 text-[9px] text-red-400 hover:bg-red-500/10 transition-colors"
-				>
+				<button className="w-full h-7 rounded-md border border-red-500/30 text-[9px] text-red-400 hover:bg-red-500/10 transition-colors">
 					Remove Repository
 				</button>
 			</div>
@@ -271,7 +255,7 @@ function RepoDetail({ repo }: { repo: Repository }) {
 
 export function Repositories() {
 	const [selectedRepo, setSelectedRepo] = useState<Repository | null>(
-		repositories[0] ?? null
+		repositories[0]
 	);
 
 	return (
@@ -283,10 +267,7 @@ export function Repositories() {
 					<span className="text-[11px] font-medium text-inferay-text">
 						Repositories
 					</span>
-					<button
-						type="button"
-						className="p-1.5 rounded-md text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2 transition-colors"
-					>
+					<button className="p-1.5 rounded-md text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2 transition-colors">
 						<Icons.Plus />
 					</button>
 				</div>
@@ -317,10 +298,7 @@ export function Repositories() {
 
 				{/* Add new */}
 				<div className="shrink-0 p-3 border-t border-inferay-border">
-					<button
-						type="button"
-						className="w-full flex items-center justify-center gap-1.5 h-8 rounded-md border border-dashed border-inferay-border text-[9px] text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2 hover:border-inferay-text-3 transition-colors"
-					>
+					<button className="w-full flex items-center justify-center gap-1.5 h-8 rounded-md border border-dashed border-inferay-border text-[9px] text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2 hover:border-inferay-text-3 transition-colors">
 						<Icons.Plus />
 						Add Repository
 					</button>
