@@ -2,7 +2,7 @@
  * Watches server-side sources and the Bun entrypoint for .ts changes and
  * restarts the electrobun dev process when they change.
  */
-import { existsSync, mkdirSync, watch } from "node:fs";
+import { existsSync, watch } from "node:fs";
 import { resolve } from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { resolveExitCode } from "./watch-utils.ts";
@@ -12,7 +12,6 @@ const ELECTROBUN =
 	Bun.which("electrobun", {
 		PATH: `./node_modules/electrobun/.cache:./node_modules/.bin`,
 	}) ?? "./node_modules/.bin/electrobun";
-const DEV_BUILD_DIR = resolve(ROOT, "build", "dev-macos-arm64");
 
 const watchTargets = [
 	{ path: resolve(ROOT, "src/server"), recursive: true },
@@ -59,7 +58,6 @@ async function killDevApps(): Promise<void> {
 
 function runElectrobun(args: string[]): Promise<number> {
 	return new Promise((resolve) => {
-		if (args[0] === "dev") mkdirSync(DEV_BUILD_DIR, { recursive: true });
 		const proc = spawn(ELECTROBUN, args, {
 			stdio: "inherit",
 			env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
@@ -93,7 +91,6 @@ async function startApp() {
 		await killDevApps();
 		// Brief pause to let ports and file locks release
 		await new Promise((r) => setTimeout(r, 200));
-		mkdirSync(DEV_BUILD_DIR, { recursive: true });
 		child = spawn(ELECTROBUN, ["dev"], {
 			stdio: "inherit",
 			env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
