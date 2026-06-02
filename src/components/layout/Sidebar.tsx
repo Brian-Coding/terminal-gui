@@ -388,6 +388,9 @@ export function Sidebar() {
 	});
 	const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
 	const [resizing, setResizing] = useState(false);
+	const [updateStatus, setUpdateStatus] = useState<
+		"idle" | "updating" | "error"
+	>("idle");
 	const { data: githubAccount, refresh: refreshGithubAccount } =
 		useAsyncResource(loadGithubAccount, null);
 	const { data: appInfo } = useAppInfo();
@@ -555,7 +558,13 @@ export function Sidebar() {
 	const updateInfo = appInfo.update;
 	const updateAvailable = updateInfo.available && !!updateInfo.url;
 	const openUpdate = useCallback(() => {
-		void postJson<{ ok?: boolean }>("/api/native/update").catch(() => {});
+		setUpdateStatus("updating");
+		void postJson<{ ok?: boolean; error?: string; logPath?: string }>(
+			"/api/native/update"
+		).catch((error) => {
+			console.error("[update] failed", error);
+			setUpdateStatus("error");
+		});
 	}, []);
 	const goToRoute = useCallback(
 		(path: string) => {
@@ -700,8 +709,10 @@ export function Sidebar() {
 					<button
 						type="button"
 						onClick={openUpdate}
+						disabled={updateStatus === "updating"}
 						{...stylex.props(
 							styles.updateButton,
+							updateStatus === "updating" && styles.updateButtonBusy,
 							collapsed ? styles.updateButtonCollapsed : styles.updateButtonOpen
 						)}
 						title={
@@ -711,7 +722,11 @@ export function Sidebar() {
 						<IconRefreshCw size={12} />
 						{!collapsed ? (
 							<span {...stylex.props(styles.updateLabel)}>
-								Update to {updateInfo.latestVersion}
+								{updateStatus === "updating"
+									? "Updating..."
+									: updateStatus === "error"
+										? "Update failed"
+										: `Update to ${updateInfo.latestVersion}`}
 							</span>
 						) : null}
 					</button>
@@ -1155,6 +1170,10 @@ const styles = stylex.create({
 		transitionDuration: "150ms",
 		transitionProperty: "background-color, box-shadow, color",
 		transitionTimingFunction: "ease",
+	},
+	updateButtonBusy: {
+		cursor: "wait",
+		opacity: 0.75,
 	},
 	updateButtonOpen: {
 		height: controlSize._7,
