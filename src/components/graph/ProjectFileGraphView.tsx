@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { GitProjectStatus } from "../../features/git/types.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { hasId, hasPath } from "../../lib/data.ts";
@@ -138,17 +138,17 @@ export function ProjectFileGraphView({
 	onSelectCwd: (cwd: string) => void;
 	project: GitProjectStatus | null;
 }) {
+	const fetchFiles = useCallback(async () => {
+		if (!activeCwd) return [];
+		const response = await fetch(
+			`/api/files/search?cwd=${encodeURIComponent(activeCwd)}&limit=50`
+		);
+		const data = (await response.json()) as { results?: FileSearchEntry[] };
+		return data.results ?? [];
+	}, [activeCwd]);
 	const { data: files, loading } = useAsyncResource<FileSearchEntry[]>(
-		async () => {
-			if (!activeCwd) return [];
-			const response = await fetch(
-				`/api/files/search?cwd=${encodeURIComponent(activeCwd)}&limit=50`
-			);
-			const data = (await response.json()) as { results?: FileSearchEntry[] };
-			return data.results ?? [];
-		},
-		[],
-		[activeCwd]
+		fetchFiles,
+		[]
 	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);

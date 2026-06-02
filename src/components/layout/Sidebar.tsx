@@ -7,11 +7,26 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
-import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
+import {
+	loadStoredMessages,
+	loadStoredSummary,
+	saveStoredSummary,
+} from "../../features/chat/chat-session-store.ts";
+import {
+	createGroupId,
+	createPendingAgentChatPane,
+	DEFAULT_COLUMNS,
+	DEFAULT_ROWS,
+	loadTerminalLayoutMode,
+	loadTerminalState,
+	saveTerminalState,
+	type TerminalPaneModel,
+} from "../../features/terminal/terminal-utils.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
 import {
@@ -35,26 +50,12 @@ import {
 	writeStoredValue,
 } from "../../lib/stored-json.ts";
 import {
-	createGroupId,
-	createPendingAgentChatPane,
-	DEFAULT_COLUMNS,
-	DEFAULT_ROWS,
-	loadTerminalState,
-	saveTerminalState,
-	type TerminalPaneModel,
-} from "../../features/terminal/terminal-utils.ts";
-import {
 	color,
 	controlSize,
 	effect,
 	font,
 	shadow,
 } from "../../tokens.stylex.ts";
-import {
-	loadStoredMessages,
-	loadStoredSummary,
-	saveStoredSummary,
-} from "../../features/chat/chat-session-store.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import {
 	IconChevronRight,
@@ -95,6 +96,23 @@ const pendingTitleRequests = new Set<string>();
 
 function getPaneBaseFolder(pane: TerminalPaneModel): string {
 	return pane.cwd?.split("/").filter(Boolean).pop() || "No folder";
+}
+
+function getNewWorkspacePaneCount(
+	selectedGroup: {
+		columns?: number;
+		rows?: number;
+		panes?: TerminalPaneModel[];
+	} | null
+): number {
+	if (loadTerminalLayoutMode() === "rows") {
+		return Math.max(1, selectedGroup?.panes?.length ?? 1);
+	}
+	return Math.max(
+		1,
+		(selectedGroup?.columns ?? DEFAULT_COLUMNS) *
+			(selectedGroup?.rows ?? DEFAULT_ROWS)
+	);
 }
 
 function loadSidebarWidth() {
@@ -364,13 +382,14 @@ function WorkspaceItem({
 
 export function Sidebar() {
 	const navigate = useNavigate();
+	const location = useLocation();
 	const [collapsed, setCollapsed] = useState(() => {
 		return readStoredBoolean("sidebar-collapsed");
 	});
 	const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
 	const [resizing, setResizing] = useState(false);
 	const { data: githubAccount, refresh: refreshGithubAccount } =
-		useAsyncResource(loadGithubAccount, null, []);
+		useAsyncResource(loadGithubAccount, null);
 	const { data: appInfo } = useAppInfo();
 	const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 	const resizeWidthRef = useRef(sidebarWidth);
@@ -445,12 +464,15 @@ export function Sidebar() {
 		const selectedGroup =
 			state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
 			state.groups[0];
-		const pane = createPendingAgentChatPane();
+		const paneCount = getNewWorkspacePaneCount(selectedGroup ?? null);
+		const panes = Array.from({ length: paneCount }, () =>
+			createPendingAgentChatPane()
+		);
 		const group = {
 			id: createGroupId(),
 			name: `Workspace ${state.groups.length + 1}`,
-			panes: [pane],
-			selectedPaneId: pane.id,
+			panes,
+			selectedPaneId: panes[0]?.id ?? null,
 			columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
 			rows: selectedGroup?.rows ?? DEFAULT_ROWS,
 		};
@@ -535,6 +557,12 @@ export function Sidebar() {
 	const openUpdate = useCallback(() => {
 		void postJson<{ ok?: boolean }>("/api/native/update").catch(() => {});
 	}, []);
+	const goToRoute = useCallback(
+		(path: string) => {
+			navigate(path);
+		},
+		[navigate]
+	);
 	const shellProps = stylex.props(
 		styles.shell,
 		collapsed ? styles.shellCollapsed : styles.shellOpen,
@@ -545,6 +573,12 @@ export function Sidebar() {
 	const workspaceSectionProps = stylex.props(styles.workspaceSection);
 	const footerProps = stylex.props(styles.footer);
 	const resizeHandleProps = stylex.props(styles.resizeHandle);
+	const isProfileActive = location.pathname === "/profile";
+	const profileButtonProps = stylex.props(
+		styles.profileButton,
+		isProfileActive ? styles.profileButtonActive : styles.profileButtonIdle,
+		collapsed ? styles.profileButtonCollapsed : styles.profileButtonOpen
+	);
 
 	return (
 		<aside
@@ -581,24 +615,24 @@ export function Sidebar() {
 			<nav {...stylex.props(styles.nav)}>
 				{SIDEBAR_NAV_ROUTES.map((item) => {
 					const Icon = item.icon;
+					const isActive = location.pathname === item.path;
+					const itemProps = stylex.props(
+						styles.navItem,
+						isActive ? styles.navItemActive : styles.navItemIdle,
+						collapsed ? styles.navItemCollapsed : styles.navItemOpen
+					);
 					return (
-						<NavLink
+						<button
 							key={item.path}
-							to={item.path}
-							className={({ isActive }) =>
-								`electrobun-webkit-app-region-no-drag ${
-									stylex.props(
-										styles.navItem,
-										isActive ? styles.navItemActive : styles.navItemIdle,
-										collapsed ? styles.navItemCollapsed : styles.navItemOpen
-									).className ?? ""
-								}`
-							}
+							type="button"
+							onClick={() => goToRoute(item.path)}
+							{...itemProps}
+							className={`electrobun-webkit-app-region-no-drag ${itemProps.className ?? ""}`}
 							title={collapsed ? item.label : undefined}
 						>
 							<Icon size={14} className="shrink-0" />
 							{!collapsed && <span>{item.label}</span>}
-						</NavLink>
+						</button>
 					);
 				})}
 
@@ -682,23 +716,18 @@ export function Sidebar() {
 						) : null}
 					</button>
 				) : null}
-				<NavLink
-					to="/profile"
-					className={
-						stylex.props(
-							styles.profileButton,
-							collapsed
-								? styles.profileButtonCollapsed
-								: styles.profileButtonOpen
-						).className ?? ""
-					}
+				<button
+					type="button"
+					onClick={() => goToRoute("/profile")}
+					{...profileButtonProps}
+					className={`electrobun-webkit-app-region-no-drag ${profileButtonProps.className ?? ""}`}
 					title={collapsed ? githubLabel : undefined}
 				>
 					<SidebarAccountAvatar account={githubAccount} />
 					{!collapsed ? (
 						<span {...stylex.props(styles.profileLabel)}>{githubLabel}</span>
 					) : null}
-				</NavLink>
+				</button>
 			</div>
 		</aside>
 	);
@@ -1026,10 +1055,13 @@ const styles = stylex.create({
 	},
 	navItem: {
 		alignItems: "center",
+		appearance: "none",
+		backgroundColor: "transparent",
 		borderRadius: 8,
 		borderStyle: "solid",
 		borderWidth: 1,
 		color: color.textSoft,
+		cursor: "pointer",
 		display: "flex",
 		fontSize: "0.6875rem",
 		fontWeight: font.weight_5,
@@ -1037,9 +1069,11 @@ const styles = stylex.create({
 		marginBlockEnd: controlSize._1,
 		marginInline: "0.375rem",
 		paddingInline: controlSize._2,
+		textAlign: "left",
 		transitionDuration: "150ms",
 		transitionProperty: "background-color, border-color, color",
 		transitionTimingFunction: "ease",
+		width: "calc(100% - 0.75rem)",
 	},
 	navItemOpen: {
 		height: controlSize._7,
@@ -1139,15 +1173,34 @@ const styles = stylex.create({
 	},
 	profileButton: {
 		alignItems: "center",
+		appearance: "none",
+		backgroundColor: "transparent",
 		borderColor: "transparent",
 		borderRadius: 8,
 		borderStyle: "solid",
 		borderWidth: 1,
 		color: color.textSoft,
+		cursor: "pointer",
 		display: "flex",
 		fontSize: "0.6875rem",
 		fontWeight: font.weight_5,
 		gap: controlSize._1,
+		textAlign: "left",
+	},
+	profileButtonIdle: {
+		backgroundColor: {
+			default: "transparent",
+			":hover": color.backgroundRaised,
+		},
+		color: {
+			default: color.textSoft,
+			":hover": color.textMain,
+		},
+	},
+	profileButtonActive: {
+		backgroundColor: color.controlActive,
+		borderColor: color.border,
+		color: color.textMain,
 	},
 	profileButtonOpen: {
 		height: controlSize._7,

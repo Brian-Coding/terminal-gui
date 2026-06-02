@@ -1,6 +1,12 @@
 import * as stylex from "@stylexjs/stylex";
 import type React from "react";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useDeferredValue,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import {
 	IconChevronRight,
 	IconFolder,
@@ -46,40 +52,34 @@ export function InlineDirectoryPicker({
 }: InlineDirectoryPickerProps) {
 	const [query, setQuery] = useState("");
 	const deferredQuery = useDeferredValue(query.trim());
-	const { data: pickerData } = useAsyncResource(
-		async () => {
-			const data = await fetchJsonOr<{
-				quickPicks?: QuickPick[];
-				home?: string;
-			}>("/api/terminal/directories?quickPicks=true", {});
-			return {
-				quickPicks: data.quickPicks || [],
-				homePath: data.home || "",
-			};
-		},
-		{ quickPicks: [], homePath: "" },
-		[]
-	);
+	const fetchPickerData = useCallback(async () => {
+		const data = await fetchJsonOr<{
+			quickPicks?: QuickPick[];
+			home?: string;
+		}>("/api/terminal/directories?quickPicks=true", {});
+		return {
+			quickPicks: data.quickPicks || [],
+			homePath: data.home || "",
+		};
+	}, []);
+	const { data: pickerData } = useAsyncResource(fetchPickerData, {
+		quickPicks: [],
+		homePath: "",
+	});
+	const fetchSearchResults = useCallback(async () => {
+		if (!deferredQuery) return [];
+		const data = await fetchJsonOr<{
+			directories?: Array<{ name: string; path: string }>;
+		}>(`/api/terminal/directories?q=${encodeURIComponent(deferredQuery)}`, {});
+		return (data.directories || []).map((d) => ({
+			name: d.name,
+			path: d.path,
+			isGitRepo: false,
+		}));
+	}, [deferredQuery]);
 	const { data: searchResults, loading: searchLoading } = useAsyncResource<
 		QuickPick[]
-	>(
-		async () => {
-			if (!deferredQuery) return [];
-			const data = await fetchJsonOr<{
-				directories?: Array<{ name: string; path: string }>;
-			}>(
-				`/api/terminal/directories?q=${encodeURIComponent(deferredQuery)}`,
-				{}
-			);
-			return (data.directories || []).map((d) => ({
-				name: d.name,
-				path: d.path,
-				isGitRepo: false,
-			}));
-		},
-		[],
-		[deferredQuery]
-	);
+	>(fetchSearchResults, []);
 	const [selectedIndexValue, setSelectedIndex] = useState(-1);
 	const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
 	const inputRef = useRef<HTMLInputElement>(null);

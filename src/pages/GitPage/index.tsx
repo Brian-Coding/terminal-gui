@@ -6,6 +6,7 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
+	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -91,21 +92,124 @@ function selectRepositoryPath(
 	path ? void addRepo(path) : closePicker();
 }
 
+type StateValue<T> = T | ((current: T) => T);
+
+type GitUiState = {
+	activeCwd: string | null;
+	pickerOpen: boolean;
+	pickerError: string | null;
+	actionBusy: string | null;
+	fileViewMode: "path" | "tree";
+	openActionMenu: "repo" | "file" | null;
+	sidebarWidth: number;
+	sidebarVisible: boolean;
+	selFile: SelectedFile | null;
+	checkpointVersion: number;
+};
+
+type GitUiAction<K extends keyof GitUiState = keyof GitUiState> = {
+	type: "fieldChanged";
+	field: K;
+	value: StateValue<GitUiState[K]>;
+};
+
+const initialGitUiState: GitUiState = {
+	activeCwd: null,
+	pickerOpen: false,
+	pickerError: null,
+	actionBusy: null,
+	fileViewMode: "path",
+	openActionMenu: null,
+	sidebarWidth: 280,
+	sidebarVisible: true,
+	selFile: null,
+	checkpointVersion: 0,
+};
+
+function resolveStateValue<T>(current: T, value: StateValue<T>): T {
+	return typeof value === "function"
+		? (value as (current: T) => T)(current)
+		: value;
+}
+
+function gitUiReducer(state: GitUiState, action: GitUiAction): GitUiState {
+	switch (action.type) {
+		case "fieldChanged":
+			return {
+				...state,
+				[action.field]: resolveStateValue(state[action.field], action.value),
+			};
+	}
+}
+
 export function GitPage() {
 	const navigate = useNavigate();
 	const [dirs, setDirs] = useState<string[]>(() =>
 		readStoredJson<string[]>("git-watched-dirs", [])
 	);
-	const [activeCwd, setActiveCwd] = useState<string | null>(null);
-	const [pickerOpen, setPickerOpen] = useState(false);
-	const [pickerError, setPickerError] = useState<string | null>(null);
-	const [actionBusy, setActionBusy] = useState<string | null>(null);
-	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("path");
-	const [openActionMenu, setOpenActionMenu] = useState<"repo" | "file" | null>(
-		null
+	const [gitUiState, gitUiDispatch] = useReducer(
+		gitUiReducer,
+		initialGitUiState
 	);
-	const [sidebarWidth, setSidebarWidth] = useState(280);
-	const [sidebarVisible, setSidebarVisible] = useState(true);
+	const {
+		activeCwd,
+		pickerOpen,
+		pickerError,
+		actionBusy,
+		fileViewMode,
+		openActionMenu,
+		sidebarWidth,
+		sidebarVisible,
+		selFile,
+		checkpointVersion,
+	} = gitUiState;
+	const setGitUiField = useCallback(
+		<K extends keyof GitUiState>(field: K, value: StateValue<GitUiState[K]>) =>
+			gitUiDispatch({ type: "fieldChanged", field, value } as GitUiAction),
+		[]
+	);
+	const setActiveCwd = useCallback(
+		(value: StateValue<string | null>) => setGitUiField("activeCwd", value),
+		[setGitUiField]
+	);
+	const setPickerOpen = useCallback(
+		(value: StateValue<boolean>) => setGitUiField("pickerOpen", value),
+		[setGitUiField]
+	);
+	const setPickerError = useCallback(
+		(value: StateValue<string | null>) => setGitUiField("pickerError", value),
+		[setGitUiField]
+	);
+	const setActionBusy = useCallback(
+		(value: StateValue<string | null>) => setGitUiField("actionBusy", value),
+		[setGitUiField]
+	);
+	const setFileViewMode = useCallback(
+		(value: StateValue<"path" | "tree">) =>
+			setGitUiField("fileViewMode", value),
+		[setGitUiField]
+	);
+	const setOpenActionMenu = useCallback(
+		(value: StateValue<"repo" | "file" | null>) =>
+			setGitUiField("openActionMenu", value),
+		[setGitUiField]
+	);
+	const setSidebarWidth = useCallback(
+		(value: StateValue<number>) => setGitUiField("sidebarWidth", value),
+		[setGitUiField]
+	);
+	const setSidebarVisible = useCallback(
+		(value: StateValue<boolean>) => setGitUiField("sidebarVisible", value),
+		[setGitUiField]
+	);
+	const setSelFile = useCallback(
+		(value: StateValue<SelectedFile | null>) => setGitUiField("selFile", value),
+		[setGitUiField]
+	);
+	const setCheckpointVersion = useCallback(
+		(value: StateValue<number>) => setGitUiField("checkpointVersion", value),
+		[setGitUiField]
+	);
 	const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(
 		null
 	);
@@ -125,21 +229,19 @@ export function GitPage() {
 		}
 		return projects[0] || null;
 	}, [projects, activeCwd]);
-	const [selFile, setSelFile] = useState<SelectedFile | null>(null);
-	const [checkpointVersion, setCheckpointVersion] = useState(0);
 	const prevCwd = useRef<string | null>(null);
 	const hasAutoSelected = useRef(false);
 	const allFiles = useMemo(
-		(orderProjectGitFiles<SelectedFile>).bind(null, project),
+		() => orderProjectGitFiles<SelectedFile>(project),
 		[project]
 	);
 	const selectFile = useCallback(
 		(path: string, staged: boolean) => {
-			if (!project) return;
+			if (!project?.cwd) return;
 			setSelFile({ path, staged });
 			loadDiff({ cwd: project.cwd, file: path, staged });
 		},
-		[project?.cwd, loadDiff, project]
+		[project?.cwd, loadDiff, setSelFile]
 	);
 	const handleSidebarDragStart = useCallback(
 		(e: ReactMouseEvent) => {
@@ -169,7 +271,7 @@ export function GitPage() {
 			document.addEventListener("mousemove", handleMouseMove);
 			document.addEventListener("mouseup", handleMouseUp);
 		},
-		[sidebarWidth]
+		[setSidebarWidth, sidebarWidth]
 	);
 	useEffect(() => {
 		if (!project || project.files.length === 0) return;
@@ -220,7 +322,7 @@ export function GitPage() {
 			setPickerOpen(false);
 			setPickerError(null);
 		},
-		[clearDiff]
+		[clearDiff, setActiveCwd, setPickerError, setPickerOpen, setSelFile]
 	);
 
 	const addRepo = useCallback(
@@ -241,7 +343,7 @@ export function GitPage() {
 			prevCwd.current = null;
 			setActiveCwd(dir);
 		},
-		[dirs]
+		[dirs, setActiveCwd, setPickerError, setPickerOpen]
 	);
 
 	const removeRepo = useCallback(
@@ -256,13 +358,13 @@ export function GitPage() {
 			setSelFile(null);
 			clearDiff();
 		},
-		[dirs, activeCwd, clearDiff]
+		[dirs, activeCwd, clearDiff, setActiveCwd, setSelFile]
 	);
 
 	const closePicker = useCallback(() => {
 		setPickerOpen(false);
 		setPickerError(null);
-	}, []);
+	}, [setPickerError, setPickerOpen]);
 
 	const staged = project?.files.filter(isStagedChange) || [];
 	const modified = project?.files.filter(isUnstagedTrackedChange) || [];
@@ -316,7 +418,7 @@ export function GitPage() {
 		} finally {
 			setActionBusy(null);
 		}
-	}, [refetch, project, selFile, loadDiff]);
+	}, [refetch, project, selFile, loadDiff, setActionBusy]);
 
 	const openPane = useCallback(
 		(agentKind: AgentKind, initialInput?: string, autoSend = false) => {
@@ -368,18 +470,21 @@ export function GitPage() {
 		}
 	}, [openPane, project]);
 
-	const openNativePath = useCallback(async (path: string, reveal = false) => {
-		setActionBusy(reveal ? "reveal" : "open-path");
-		try {
-			await postJson<{ ok: boolean }>("/api/native/open-path", {
-				path,
-				reveal,
-			});
-		} catch {
-		} finally {
-			setActionBusy(null);
-		}
-	}, []);
+	const openNativePath = useCallback(
+		async (path: string, reveal = false) => {
+			setActionBusy(reveal ? "reveal" : "open-path");
+			try {
+				await postJson<{ ok: boolean }>("/api/native/open-path", {
+					path,
+					reveal,
+				});
+			} catch {
+			} finally {
+				setActionBusy(null);
+			}
+		},
+		[setActionBusy]
+	);
 
 	const copyText = useCallback(async (text: string) => {
 		try {
@@ -410,7 +515,7 @@ export function GitPage() {
 		} finally {
 			setActionBusy(null);
 		}
-	}, [loadReviewPrompt, copyText]);
+	}, [loadReviewPrompt, copyText, setActionBusy]);
 
 	const summarizeChanges = useCallback(async () => {
 		if (!project) return;
@@ -424,7 +529,7 @@ export function GitPage() {
 		} finally {
 			setActionBusy(null);
 		}
-	}, [loadReviewPrompt, openPane, project]);
+	}, [loadReviewPrompt, openPane, project, setActionBusy]);
 
 	const openReviewPane = useCallback(
 		async (agentKind: "claude" | "codex", autoSend = false) => {
@@ -438,7 +543,7 @@ export function GitPage() {
 				setActionBusy(null);
 			}
 		},
-		[loadReviewPrompt, openPane]
+		[loadReviewPrompt, openPane, setActionBusy]
 	);
 
 	const copyCommitMessage = useCallback(async () => {
@@ -456,7 +561,7 @@ export function GitPage() {
 		};
 		writeStoredJson(checkpointKey(project.cwd), checkpoint);
 		setCheckpointVersion((version) => version + 1);
-	}, [project, changeSignature]);
+	}, [project, changeSignature, setCheckpointVersion]);
 
 	const explainRepo = useCallback(() => {
 		if (!project) return;

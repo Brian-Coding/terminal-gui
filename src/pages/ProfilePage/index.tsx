@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useReducer, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button.tsx";
 import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
@@ -49,6 +49,54 @@ import {
 } from "./ProfileStatus.tsx";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type StateValue<T> = T | ((current: T) => T);
+
+type ProfileUiState = {
+	error: string | null;
+	connecting: boolean;
+	repoQuery: string;
+	cloneDirectory: string;
+	cloneStatus: string | null;
+	cloningRepo: string | null;
+	simFoldersLoading: boolean;
+	simFoldersStatus: string | null;
+};
+
+type ProfileUiAction<K extends keyof ProfileUiState = keyof ProfileUiState> = {
+	type: "fieldChanged";
+	field: K;
+	value: StateValue<ProfileUiState[K]>;
+};
+
+const initialProfileUiState: ProfileUiState = {
+	error: null,
+	connecting: false,
+	repoQuery: "",
+	cloneDirectory: "~/Desktop",
+	cloneStatus: null,
+	cloningRepo: null,
+	simFoldersLoading: false,
+	simFoldersStatus: null,
+};
+
+function resolveStateValue<T>(current: T, value: StateValue<T>): T {
+	return typeof value === "function"
+		? (value as (current: T) => T)(current)
+		: value;
+}
+
+function profileUiReducer(
+	state: ProfileUiState,
+	action: ProfileUiAction
+): ProfileUiState {
+	switch (action.type) {
+		case "fieldChanged":
+			return {
+				...state,
+				[action.field]: resolveStateValue(state[action.field], action.value),
+			};
+	}
+}
 
 async function fetchSimulatorProjectFolders(): Promise<string[]> {
 	const response = await fetch("/api/simulator/project-folders");
@@ -68,7 +116,7 @@ export function ProfilePage() {
 		data: accounts,
 		loading: accountsLoading,
 		error: accountsError,
-	} = useAsyncResource(fetchForgeAccounts, initialAccounts, []);
+	} = useAsyncResource(fetchForgeAccounts, initialAccounts);
 	const loadState: LoadState = accountsLoading
 		? "loading"
 		: accountsError
@@ -80,23 +128,18 @@ export function ProfilePage() {
 		data: simProjectFolders,
 		setData: setSimProjectFolders,
 		error: simProjectFoldersError,
-	} = useAsyncResource(fetchSimulatorProjectFolders, [], []);
+	} = useAsyncResource(fetchSimulatorProjectFolders, []);
+	const fetchRepos = useCallback(
+		async () => (accounts.length > 0 ? fetchGithubRepos() : []),
+		[accounts.length]
+	);
 	const {
 		data: repos,
 		loading: reposLoading,
 		error: reposError,
 		refresh: refreshRepos,
-	} = useAsyncResource(
-		async () => (accounts.length > 0 ? fetchGithubRepos() : []),
-		getCachedGithubRepos(),
-		[accounts.length]
-	);
-	const {
-		data: agentAccountStatuses,
-		loading: agentAccountStatusesLoading,
-		error: agentAccountStatusesError,
-		refresh: refreshAgentAccountStatuses,
-	} = useAsyncResource(
+	} = useAsyncResource(fetchRepos, getCachedGithubRepos());
+	const fetchAgentAccountStatuses = useCallback(
 		async () =>
 			fetchJsonOr<{ providers?: AgentAccountProviderStatus[] }>(
 				"/api/agents/account-status",
@@ -104,20 +147,79 @@ export function ProfilePage() {
 			).then((payload) =>
 				Array.isArray(payload.providers) ? payload.providers : []
 			),
-		[],
 		[]
 	);
-	const [error, setError] = useState<string | null>(null);
-	const [connecting, setConnecting] = useState(false);
-	const [repoQuery, setRepoQuery] = useState("");
-	const [cloneDirectory, setCloneDirectory] = useState("~/Desktop");
-	const [cloneStatus, setCloneStatus] = useState<string | null>(null);
-	const [cloningRepo, setCloningRepo] = useState<string | null>(null);
+	const {
+		data: agentAccountStatuses,
+		loading: agentAccountStatusesLoading,
+		error: agentAccountStatusesError,
+		refresh: refreshAgentAccountStatuses,
+	} = useAsyncResource(fetchAgentAccountStatuses, []);
+	const [profileUiState, profileUiDispatch] = useReducer(
+		profileUiReducer,
+		initialProfileUiState
+	);
+	const {
+		error,
+		connecting,
+		repoQuery,
+		cloneDirectory,
+		cloneStatus,
+		cloningRepo,
+		simFoldersLoading,
+		simFoldersStatus,
+	} = profileUiState;
+	const setProfileUiField = useCallback(
+		<K extends keyof ProfileUiState>(
+			field: K,
+			value: StateValue<ProfileUiState[K]>
+		) =>
+			profileUiDispatch({
+				type: "fieldChanged",
+				field,
+				value,
+			} as ProfileUiAction),
+		[]
+	);
+	const setError = useCallback(
+		(value: StateValue<string | null>) => setProfileUiField("error", value),
+		[setProfileUiField]
+	);
+	const setConnecting = useCallback(
+		(value: StateValue<boolean>) => setProfileUiField("connecting", value),
+		[setProfileUiField]
+	);
+	const setRepoQuery = useCallback(
+		(value: StateValue<string>) => setProfileUiField("repoQuery", value),
+		[setProfileUiField]
+	);
+	const setCloneDirectory = useCallback(
+		(value: StateValue<string>) => setProfileUiField("cloneDirectory", value),
+		[setProfileUiField]
+	);
+	const setCloneStatus = useCallback(
+		(value: StateValue<string | null>) =>
+			setProfileUiField("cloneStatus", value),
+		[setProfileUiField]
+	);
+	const setCloningRepo = useCallback(
+		(value: StateValue<string | null>) =>
+			setProfileUiField("cloningRepo", value),
+		[setProfileUiField]
+	);
+	const setSimFoldersLoading = useCallback(
+		(value: StateValue<boolean>) =>
+			setProfileUiField("simFoldersLoading", value),
+		[setProfileUiField]
+	);
+	const setSimFoldersStatus = useCallback(
+		(value: StateValue<string | null>) =>
+			setProfileUiField("simFoldersStatus", value),
+		[setProfileUiField]
+	);
 	const [defaultChatSettings, setDefaultChatSettings] = useState(() =>
 		loadDefaultChatSettings()
 	);
-	const [simFoldersLoading, setSimFoldersLoading] = useState(false);
-	const [simFoldersStatus, setSimFoldersStatus] = useState<string | null>(null);
 	const { data: appInfo } = useAppInfo();
 	const defaultAgentDefinition = getAgentDefinition(
 		defaultChatSettings.agentKind
@@ -240,7 +342,7 @@ export function ProfilePage() {
 			if (force) invalidateGithubReposCache();
 			await refreshRepos();
 		},
-		[refreshRepos]
+		[refreshRepos, setError]
 	);
 
 	const resourceError =

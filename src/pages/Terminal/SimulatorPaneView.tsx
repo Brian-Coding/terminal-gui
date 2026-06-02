@@ -5,6 +5,7 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
+	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -83,6 +84,78 @@ type FarmLayout = "grid" | "wall" | "list";
 type FarmPlatform = "iphone" | "ipad";
 type FarmState = "live" | "boot" | "off";
 type StreamProfile = "thumb" | "full";
+
+type StateValue<T> = T | ((current: T) => T);
+
+type LaunchProgress = {
+	projectId: string;
+	udid: string;
+	phase: LaunchPhase;
+};
+
+type SimulatorUiState = {
+	selectedUdid: string | null;
+	selectedProjectId: string | null;
+	launchProgress: LaunchProgress | null;
+	launchError: string | null;
+	launchedProjectId: string | null;
+	deviceProjectIds: Record<string, string>;
+	projectSearch: string;
+	streamState: StreamState;
+	viewMode: "focus" | "farm";
+	farmLayout: FarmLayout;
+	farmPreviewStreams: boolean;
+	farmPlatforms: Set<FarmPlatform>;
+	farmStates: Set<FarmState>;
+};
+
+type SimulatorUiAction<
+	K extends keyof SimulatorUiState = keyof SimulatorUiState,
+> = {
+	type: "fieldChanged";
+	field: K;
+	value: StateValue<SimulatorUiState[K]>;
+};
+
+function getInitialSimulatorUiState(): SimulatorUiState {
+	return {
+		selectedUdid: null,
+		selectedProjectId: null,
+		launchProgress: null,
+		launchError: null,
+		launchedProjectId: readStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY),
+		deviceProjectIds: readStoredJson<Record<string, string>>(
+			SIMULATOR_DEVICE_PROJECTS_KEY,
+			{}
+		),
+		projectSearch: "",
+		streamState: "idle",
+		viewMode: "focus",
+		farmLayout: "grid",
+		farmPreviewStreams: false,
+		farmPlatforms: new Set(["iphone", "ipad"]),
+		farmStates: new Set(["live", "boot", "off"]),
+	};
+}
+
+function resolveStateValue<T>(current: T, value: StateValue<T>): T {
+	return typeof value === "function"
+		? (value as (current: T) => T)(current)
+		: value;
+}
+
+function simulatorUiReducer(
+	state: SimulatorUiState,
+	action: SimulatorUiAction
+): SimulatorUiState {
+	switch (action.type) {
+		case "fieldChanged":
+			return {
+				...state,
+				[action.field]: resolveStateValue(state[action.field], action.value),
+			};
+	}
+}
 
 interface BaguettePoint {
 	x: number;
@@ -528,45 +601,111 @@ function FarmTile({
 
 export function SimulatorPaneView() {
 	const { data: simulatorSnapshot, refresh } =
-		useAsyncResource<SimulatorSnapshot>(
-			loadSimulatorSnapshot,
-			{ devices: [], projects: [], status: null },
-			[]
-		);
+		useAsyncResource<SimulatorSnapshot>(loadSimulatorSnapshot, {
+			devices: [],
+			projects: [],
+			status: null,
+		});
 	const {
 		devices,
 		projects,
 		status,
 		error: simulatorError,
 	} = simulatorSnapshot;
-	const [selectedUdid, setSelectedUdid] = useState<string | null>(null);
-	const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-		null
+	const [simulatorUiState, simulatorUiDispatch] = useReducer(
+		simulatorUiReducer,
+		undefined,
+		getInitialSimulatorUiState
 	);
-	const [launchProgress, setLaunchProgress] = useState<{
-		projectId: string;
-		udid: string;
-		phase: LaunchPhase;
-	} | null>(null);
-	const [launchError, setLaunchError] = useState<string | null>(null);
-	const [launchedProjectId, setLaunchedProjectId] = useState<string | null>(
-		() => readStoredValue(SIMULATOR_LAUNCHED_PROJECT_KEY)
+	const {
+		selectedUdid,
+		selectedProjectId,
+		launchProgress,
+		launchError,
+		launchedProjectId,
+		deviceProjectIds,
+		projectSearch,
+		streamState,
+		viewMode,
+		farmLayout,
+		farmPreviewStreams,
+		farmPlatforms,
+		farmStates,
+	} = simulatorUiState;
+	const setSimulatorUiField = useCallback(
+		<K extends keyof SimulatorUiState>(
+			field: K,
+			value: StateValue<SimulatorUiState[K]>
+		) =>
+			simulatorUiDispatch({
+				type: "fieldChanged",
+				field,
+				value,
+			} as SimulatorUiAction),
+		[]
 	);
-	const [deviceProjectIds, setDeviceProjectIds] = useState<
-		Record<string, string>
-	>(() =>
-		readStoredJson<Record<string, string>>(SIMULATOR_DEVICE_PROJECTS_KEY, {})
+	const setSelectedUdid = useCallback(
+		(value: StateValue<string | null>) =>
+			setSimulatorUiField("selectedUdid", value),
+		[setSimulatorUiField]
 	);
-	const [projectSearch, setProjectSearch] = useState("");
-	const [streamState, setStreamState] = useState<StreamState>("idle");
-	const [viewMode, setViewMode] = useState<"focus" | "farm">("focus");
-	const [farmLayout, setFarmLayout] = useState<FarmLayout>("grid");
-	const [farmPreviewStreams, setFarmPreviewStreams] = useState(false);
-	const [farmPlatforms, setFarmPlatforms] = useState<Set<FarmPlatform>>(
-		() => new Set(["iphone", "ipad"])
+	const setSelectedProjectId = useCallback(
+		(value: StateValue<string | null>) =>
+			setSimulatorUiField("selectedProjectId", value),
+		[setSimulatorUiField]
 	);
-	const [farmStates, setFarmStates] = useState<Set<FarmState>>(
-		() => new Set(["live", "boot", "off"])
+	const setLaunchProgress = useCallback(
+		(value: StateValue<LaunchProgress | null>) =>
+			setSimulatorUiField("launchProgress", value),
+		[setSimulatorUiField]
+	);
+	const setLaunchError = useCallback(
+		(value: StateValue<string | null>) =>
+			setSimulatorUiField("launchError", value),
+		[setSimulatorUiField]
+	);
+	const setLaunchedProjectId = useCallback(
+		(value: StateValue<string | null>) =>
+			setSimulatorUiField("launchedProjectId", value),
+		[setSimulatorUiField]
+	);
+	const setDeviceProjectIds = useCallback(
+		(value: StateValue<Record<string, string>>) =>
+			setSimulatorUiField("deviceProjectIds", value),
+		[setSimulatorUiField]
+	);
+	const setProjectSearch = useCallback(
+		(value: StateValue<string>) => setSimulatorUiField("projectSearch", value),
+		[setSimulatorUiField]
+	);
+	const setStreamState = useCallback(
+		(value: StateValue<StreamState>) =>
+			setSimulatorUiField("streamState", value),
+		[setSimulatorUiField]
+	);
+	const setViewMode = useCallback(
+		(value: StateValue<"focus" | "farm">) =>
+			setSimulatorUiField("viewMode", value),
+		[setSimulatorUiField]
+	);
+	const setFarmLayout = useCallback(
+		(value: StateValue<FarmLayout>) => setSimulatorUiField("farmLayout", value),
+		[setSimulatorUiField]
+	);
+	const setFarmPreviewStreams = useCallback(
+		(value: StateValue<boolean>) =>
+			setSimulatorUiField("farmPreviewStreams", value),
+		[setSimulatorUiField]
+	);
+	const setFarmPlatforms = useCallback(
+		(value: StateValue<Set<FarmPlatform>>) =>
+			setSimulatorUiField("farmPlatforms", value),
+		[setSimulatorUiField]
+	);
+	const setFarmStates = useCallback(
+		(value: StateValue<Set<FarmState>>) =>
+			setSimulatorUiField("farmStates", value),
+		[setSimulatorUiField]
 	);
 	const selectedDevice = useMemo(
 		() => devices.find(hasUdid.bind(null, selectedUdid)) ?? devices[0],
@@ -591,12 +730,17 @@ export function SimulatorPaneView() {
 		() => new Map(projects.map((project) => [project.id, project])),
 		[projects]
 	);
-	const selectedDeviceProject = selectedDevice
-		? (projectById.get(deviceProjectIds[selectedDevice.udid]) ?? null)
+	const selectedDeviceProjectId = selectedDevice
+		? deviceProjectIds[selectedDevice.udid]
+		: undefined;
+	const selectedDeviceProject = selectedDeviceProjectId
+		? (projectById.get(selectedDeviceProjectId) ?? null)
 		: null;
 	const projectNameForDevice = useCallback(
-		(device: SimulatorDevice) =>
-			projectById.get(deviceProjectIds[device.udid])?.name ?? null,
+		(device: SimulatorDevice) => {
+			const projectId = deviceProjectIds[device.udid];
+			return projectId ? (projectById.get(projectId)?.name ?? null) : null;
+		},
 		[deviceProjectIds, projectById]
 	);
 	const filteredProjects = useMemo(() => {
@@ -651,7 +795,7 @@ export function SimulatorPaneView() {
 			}
 			await refresh();
 		},
-		[refresh, selectedDevice, viewportDevice]
+		[refresh, selectedDevice, setLaunchedProjectId, viewportDevice]
 	);
 
 	const bootSelectedSimulator = useCallback(
@@ -666,17 +810,17 @@ export function SimulatorPaneView() {
 			}).catch(noop);
 			await refresh();
 		},
-		[refresh, selectedDevice, selectedLaunchDevice]
+		[refresh, selectedDevice, selectedLaunchDevice, setSelectedUdid]
 	);
 
 	const toggleFarmPlatform = useCallback(
 		(platform: FarmPlatform) => setFarmPlatforms(toggleSet(platform)),
-		[]
+		[setFarmPlatforms]
 	);
 
 	const toggleFarmState = useCallback(
 		(state: FarmState) => setFarmStates(toggleSet(state)),
-		[]
+		[setFarmStates]
 	);
 
 	const buildLaunchProject = useCallback(
@@ -734,7 +878,16 @@ export function SimulatorPaneView() {
 				setLaunchProgress(null);
 			}
 		},
-		[refresh, selectedDevice, selectedLaunchDevice]
+		[
+			refresh,
+			selectedDevice,
+			selectedLaunchDevice,
+			setDeviceProjectIds,
+			setLaunchError,
+			setLaunchedProjectId,
+			setLaunchProgress,
+			setSelectedUdid,
+		]
 	);
 
 	const canStream =
@@ -745,7 +898,7 @@ export function SimulatorPaneView() {
 
 	useEffect(() => {
 		if (!canStream) setStreamState("idle");
-	}, [canStream]);
+	}, [canStream, setStreamState]);
 
 	return (
 		<div {...stylex.props(styles.root)}>

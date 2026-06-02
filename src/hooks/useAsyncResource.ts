@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { runAsync } from "../lib/data.ts";
 
 /**
@@ -8,18 +8,19 @@ import { runAsync } from "../lib/data.ts";
  */
 export function useAsyncResource<T>(
 	fetcher: () => Promise<T> | null,
-	initial: T,
-	deps: React.DependencyList
+	initial: T
 ) {
 	const [data, setData] = useState<T>(initial);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const initialRef = useRef(initial);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: deps are explicit
+	initialRef.current = initial;
+
 	const refresh = useCallback(async () => {
 		const promise = fetcher();
 		if (!promise) {
-			setData(initial);
+			setData(initialRef.current);
 			return;
 		}
 		setLoading(true);
@@ -28,13 +29,15 @@ export function useAsyncResource<T>(
 			setData(await promise);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Unknown error");
-			setData(initial);
+			setData(initialRef.current);
 		} finally {
 			setLoading(false);
 		}
-	}, deps);
+	}, [fetcher]);
 
-	useEffect(runAsync.bind(null, refresh), [refresh]);
+	useEffect(() => {
+		runAsync(refresh);
+	}, [refresh]);
 
 	return { data, setData, loading, error, refresh };
 }

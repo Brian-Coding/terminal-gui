@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button.tsx";
 import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
@@ -54,6 +54,7 @@ const VISIBLE_APP_THEMES = APP_THEMES.filter(
 	(theme) => !HIDDEN_APP_THEME_IDS.has(theme.id)
 );
 const ENABLE_CUSTOM_THEME_PICKER = false;
+const EMPTY_FOLDERS: string[] = [];
 
 function ColorInput({
 	label,
@@ -152,31 +153,34 @@ function ThemeOrb({
 }
 
 function SearchFoldersSection() {
+	const fetchSearchFolders = useCallback(async () => {
+		const data = await fetchJsonOr<{ folders: string[] }>(
+			"/api/config/search-folders",
+			{ folders: [] }
+		);
+		return data.folders;
+	}, []);
 	const { data: loadedFolders, setData: setFolders } = useAsyncResource<
 		string[] | null
-	>(
-		async () => {
-			const data = await fetchJsonOr<{ folders: string[] }>(
-				"/api/config/search-folders",
-				{ folders: [] }
-			);
-			return data.folders;
-		},
-		null,
-		[]
+	>(fetchSearchFolders, null);
+	const folders = useMemo(
+		() => loadedFolders ?? EMPTY_FOLDERS,
+		[loadedFolders]
 	);
-	const folders = loadedFolders ?? [];
 	const [newFolder, setNewFolder] = useState("");
 	const inputRef = useRef<HTMLInputElement>(null);
 
-	const saveFolders = useCallback(async (next: string[]) => {
-		setFolders(next);
-		await fetch("/api/config/search-folders", {
-			method: "PUT",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ folders: next }),
-		});
-	}, []);
+	const saveFolders = useCallback(
+		async (next: string[]) => {
+			setFolders(next);
+			await fetch("/api/config/search-folders", {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ folders: next }),
+			});
+		},
+		[setFolders]
+	);
 
 	const addFolder = useCallback(() => {
 		const trimmed = newFolder.trim();

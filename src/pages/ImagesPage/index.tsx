@@ -111,18 +111,18 @@ function ensureChatPaneId(): string | null {
 
 export function ImagesPage() {
 	const navigate = useNavigate();
-	const {
-		data: files,
-		setData: setFiles,
-		loading,
-	} = useAsyncResource<FileEntry[]>(
+	const fetchImageFiles = useCallback(
 		() =>
 			fetchJsonOr<{ images?: FileEntry[] }>("/api/images", {}).then(
 				(d) => d.images ?? []
 			),
-		[],
 		[]
 	);
+	const {
+		data: files,
+		setData: setFiles,
+		loading,
+	} = useAsyncResource<FileEntry[]>(fetchImageFiles, []);
 	const [query, setQuery] = useState("");
 	const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
 		() => new Set()

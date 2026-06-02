@@ -32,10 +32,10 @@ export const FALLBACK_APP_INFO: AppInfo = {
 	},
 };
 
+function fetchAppInfo() {
+	return fetchJsonOr("/api/app-info", FALLBACK_APP_INFO);
+}
+
 export function useAppInfo() {
-	return useAsyncResource<AppInfo>(
-		() => fetchJsonOr("/api/app-info", FALLBACK_APP_INFO),
-		FALLBACK_APP_INFO,
-		[]
-	);
+	return useAsyncResource<AppInfo>(fetchAppInfo, FALLBACK_APP_INFO);
 }

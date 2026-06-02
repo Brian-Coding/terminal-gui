@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useReducer } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../components/ui/Button.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
@@ -42,6 +42,66 @@ export const ONBOARDING_DONE_KEY = "inferay-onboarding-done";
 /* ─── Types ─── */
 
 type Step = "intro" | "github" | "projects" | "complete";
+type StateValue<T> = T | ((current: T) => T);
+
+type OnboardingState = {
+	step: Step;
+	connecting: boolean;
+	localFolders: string[];
+	isAddingFolder: boolean;
+	selectedRepos: Set<string>;
+};
+
+type OnboardingAction =
+	| { type: "stepChanged"; value: Step }
+	| { type: "connectingChanged"; value: StateValue<boolean> }
+	| { type: "localFoldersChanged"; value: StateValue<string[]> }
+	| { type: "isAddingFolderChanged"; value: StateValue<boolean> }
+	| { type: "selectedReposChanged"; value: StateValue<Set<string>> };
+
+const initialOnboardingState: OnboardingState = {
+	step: "intro",
+	connecting: false,
+	localFolders: [],
+	isAddingFolder: false,
+	selectedRepos: new Set(),
+};
+
+function resolveStateValue<T>(current: T, value: StateValue<T>): T {
+	return typeof value === "function"
+		? (value as (current: T) => T)(current)
+		: value;
+}
+
+function onboardingReducer(
+	state: OnboardingState,
+	action: OnboardingAction
+): OnboardingState {
+	switch (action.type) {
+		case "stepChanged":
+			return { ...state, step: action.value };
+		case "connectingChanged":
+			return {
+				...state,
+				connecting: resolveStateValue(state.connecting, action.value),
+			};
+		case "localFoldersChanged":
+			return {
+				...state,
+				localFolders: resolveStateValue(state.localFolders, action.value),
+			};
+		case "isAddingFolderChanged":
+			return {
+				...state,
+				isAddingFolder: resolveStateValue(state.isAddingFolder, action.value),
+			};
+		case "selectedReposChanged":
+			return {
+				...state,
+				selectedRepos: resolveStateValue(state.selectedRepos, action.value),
+			};
+	}
+}
 
 const EASING = "cubic-bezier(.22,.82,.2,1)";
 const logoUrl = resolveServerUrl("/logo.png");
@@ -64,31 +124,51 @@ function stepClass(
 
 export function OnboardingPage() {
 	const navigate = useNavigate();
-	const [step, setStep] = useState<Step>("intro");
+	const [onboardingState, onboardingDispatch] = useReducer(
+		onboardingReducer,
+		initialOnboardingState
+	);
+	const { step, connecting, localFolders, isAddingFolder, selectedRepos } =
+		onboardingState;
+	const setStep = useCallback(
+		(value: Step) => onboardingDispatch({ type: "stepChanged", value }),
+		[]
+	);
+	const setConnecting = useCallback(
+		(value: StateValue<boolean>) =>
+			onboardingDispatch({ type: "connectingChanged", value }),
+		[]
+	);
+	const setLocalFolders = useCallback(
+		(value: StateValue<string[]>) =>
+			onboardingDispatch({ type: "localFoldersChanged", value }),
+		[]
+	);
+	const setIsAddingFolder = useCallback(
+		(value: StateValue<boolean>) =>
+			onboardingDispatch({ type: "isAddingFolderChanged", value }),
+		[]
+	);
+	const setSelectedRepos = useCallback(
+		(value: StateValue<Set<string>>) =>
+			onboardingDispatch({ type: "selectedReposChanged", value }),
+		[]
+	);
 
 	const {
 		data: accounts,
 		setData: setAccounts,
 		loading: accountsLoading,
-	} = useAsyncResource(fetchForgeAccounts, [], []);
-	const [connecting, setConnecting] = useState(false);
+	} = useAsyncResource(fetchForgeAccounts, []);
+	const fetchRepos = useCallback(
+		async () => (accounts.length > 0 ? fetchGithubRepos() : []),
+		[accounts.length]
+	);
 	const {
 		data: repos,
 		loading: reposLoading,
 		refresh: refreshRepos,
-	} = useAsyncResource(
-		async () => (accounts.length > 0 ? fetchGithubRepos() : []),
-		[],
-		[accounts.length]
-	);
-
-	// Local folders
-	const [localFolders, setLocalFolders] = useState<string[]>([]);
-	const [isAddingFolder, setIsAddingFolder] = useState(false);
-
-	// Selected repos
-	const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-
+	} = useAsyncResource(fetchRepos, []);
 	const refreshAccounts = async () => {
 		invalidateForgeAccountsCache();
 		setAccounts(await fetchForgeAccounts(true));
@@ -111,7 +191,7 @@ export function OnboardingPage() {
 				.catch(() => undefined);
 		}, 3000);
 		return () => window.clearInterval(id);
-	}, [accounts.length, connecting, step]);
+	}, [accounts.length, connecting, setAccounts, step]);
 
 	const pickFolder = async () => {
 		if (isAddingFolder) return;
@@ -169,7 +249,7 @@ export function OnboardingPage() {
 	const completeOnboarding = useCallback(() => {
 		setStep("complete");
 		window.setTimeout(finish, 600);
-	}, [finish]);
+	}, [finish, setStep]);
 
 	return (
 		<main {...stylex.props(styles.root)}>

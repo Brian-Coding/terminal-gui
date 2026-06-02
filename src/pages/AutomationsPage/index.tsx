@@ -5,7 +5,7 @@ import {
 	useEffect,
 	useMemo,
 	useRef,
-	useState,
+	useReducer,
 } from "react";
 import {
 	IconClock,
@@ -101,6 +101,58 @@ interface RunState {
 	failedNodeId: string | null;
 	isRunning: boolean;
 	nodeOutputs: Record<string, string>;
+}
+
+type AutomationsState = {
+	selectedFlowId: string;
+	selectedNodeId: string;
+	showGrid: boolean;
+	showAddMenu: boolean;
+	dragState: NodeDragState | null;
+	runState: RunState | null;
+};
+
+type AutomationsAction =
+	| { type: "flowSelected"; flowId: string; nodeId: string }
+	| { type: "nodeSelected"; nodeId: string }
+	| { type: "showGridChanged"; value: boolean }
+	| { type: "showAddMenuChanged"; value: boolean }
+	| { type: "dragStateChanged"; value: NodeDragState | null }
+	| { type: "runStateChanged"; value: RunState | null };
+
+function getInitialAutomationsState(): AutomationsState {
+	return {
+		selectedFlowId: defaultFlows[0]!.id,
+		selectedNodeId: defaultFlows[0]!.nodes[0]!.id,
+		showGrid: false,
+		showAddMenu: false,
+		dragState: null,
+		runState: null,
+	};
+}
+
+function automationsReducer(
+	state: AutomationsState,
+	action: AutomationsAction
+): AutomationsState {
+	switch (action.type) {
+		case "flowSelected":
+			return {
+				...state,
+				selectedFlowId: action.flowId,
+				selectedNodeId: action.nodeId,
+			};
+		case "nodeSelected":
+			return { ...state, selectedNodeId: action.nodeId };
+		case "showGridChanged":
+			return { ...state, showGrid: action.value };
+		case "showAddMenuChanged":
+			return { ...state, showAddMenu: action.value };
+		case "dragStateChanged":
+			return { ...state, dragState: action.value };
+		case "runStateChanged":
+			return { ...state, runState: action.value };
+	}
 }
 
 const NODE_WIDTH = 200;
@@ -358,28 +410,64 @@ function isTextEditingTarget(target: EventTarget | null) {
 	);
 }
 
+function cleanupAutomationDrag({
+	dragFrameRef,
+	dragCleanupRef,
+}: {
+	dragFrameRef: { current: number | null };
+	dragCleanupRef: { current: (() => void) | null };
+}) {
+	if (dragFrameRef.current !== null) {
+		window.cancelAnimationFrame(dragFrameRef.current);
+	}
+	dragCleanupRef.current?.();
+}
+
 export function AutomationsPage() {
+	const fetchAutomationFlows = useCallback(async () => {
+		const payload = await fetchJsonOr<{ flows?: AutomationFlow[] }>(
+			"/api/automations",
+			{ flows: [] }
+		);
+		return Array.isArray(payload.flows) && payload.flows.length > 0
+			? payload.flows
+			: defaultFlows;
+	}, []);
 	const { data: flows, setData: setFlows } = useAsyncResource(
-		async () => {
-			const payload = await fetchJsonOr<{ flows?: AutomationFlow[] }>(
-				"/api/automations",
-				{ flows: [] }
-			);
-			return Array.isArray(payload.flows) && payload.flows.length > 0
-				? payload.flows
-				: defaultFlows;
-		},
-		defaultFlows,
-		[]
+		fetchAutomationFlows,
+		defaultFlows
 	);
-	const [selectedFlowId, setSelectedFlowId] = useState(defaultFlows[0]!.id);
-	const [selectedNodeId, setSelectedNodeId] = useState(
-		defaultFlows[0]!.nodes[0]!.id
+	const [automationsState, automationsDispatch] = useReducer(
+		automationsReducer,
+		undefined,
+		getInitialAutomationsState
 	);
-	const [showGrid, setShowGrid] = useState(false);
-	const [showAddMenu, setShowAddMenu] = useState(false);
-	const [dragState, setDragState] = useState<NodeDragState | null>(null);
-	const [runState, setRunState] = useState<RunState | null>(null);
+	const {
+		selectedFlowId,
+		selectedNodeId,
+		showGrid,
+		showAddMenu,
+		dragState,
+		runState,
+	} = automationsState;
+	const setSelectedFlow = useCallback((flowId: string, nodeId: string) => {
+		automationsDispatch({ type: "flowSelected", flowId, nodeId });
+	}, []);
+	const setSelectedNodeId = useCallback((nodeId: string) => {
+		automationsDispatch({ type: "nodeSelected", nodeId });
+	}, []);
+	const setShowGrid = useCallback((value: boolean) => {
+		automationsDispatch({ type: "showGridChanged", value });
+	}, []);
+	const setShowAddMenu = useCallback((value: boolean) => {
+		automationsDispatch({ type: "showAddMenuChanged", value });
+	}, []);
+	const setDragState = useCallback((value: NodeDragState | null) => {
+		automationsDispatch({ type: "dragStateChanged", value });
+	}, []);
+	const setRunState = useCallback((value: RunState | null) => {
+		automationsDispatch({ type: "runStateChanged", value });
+	}, []);
 	const flowsRef = useRef(flows);
 	const dragStateRef = useRef<NodeDragState | null>(null);
 	const dragCleanupRef = useRef<(() => void) | null>(null);
@@ -404,32 +492,39 @@ export function AutomationsPage() {
 
 	useEffect(() => {
 		return () => {
-			if (dragFrameRef.current !== null) {
-				window.cancelAnimationFrame(dragFrameRef.current);
-			}
-			dragCleanupRef.current?.();
+			cleanupAutomationDrag({ dragFrameRef, dragCleanupRef });
 		};
 	}, []);
 
-	const persistFlows = useCallback((nextFlows: AutomationFlow[]) => {
-		setFlows(nextFlows);
-		flowsRef.current = nextFlows;
-		if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-		persistTimerRef.current = setTimeout(() => {
-			void sendJson(
+	const persistFlows = useCallback(
+		(nextFlows: AutomationFlow[]) => {
+			setFlows(nextFlows);
+			flowsRef.current = nextFlows;
+			if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+			persistTimerRef.current = setTimeout(() => {
+				void sendJson(
+					"/api/automations",
+					{ flows: flowsRef.current },
+					{ method: "PUT" }
+				);
+			}, 400);
+		},
+		[setFlows]
+	);
+
+	const persistFlowsNow = useCallback(
+		async (nextFlows: AutomationFlow[]) => {
+			setFlows(nextFlows);
+			flowsRef.current = nextFlows;
+			if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+			await sendJson(
 				"/api/automations",
-				{ flows: flowsRef.current },
+				{ flows: nextFlows },
 				{ method: "PUT" }
 			);
-		}, 400);
-	}, []);
-
-	const persistFlowsNow = useCallback(async (nextFlows: AutomationFlow[]) => {
-		setFlows(nextFlows);
-		flowsRef.current = nextFlows;
-		if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-		await sendJson("/api/automations", { flows: nextFlows }, { method: "PUT" });
-	}, []);
+		},
+		[setFlows]
+	);
 
 	const updateSelectedFlow = useCallback(
 		(updater: (flow: AutomationFlow) => AutomationFlow) => {
@@ -483,8 +578,7 @@ export function AutomationsPage() {
 	};
 
 	const selectFlow = (flow: AutomationFlow) => {
-		setSelectedFlowId(flow.id);
-		setSelectedNodeId(flow.nodes[0]?.id ?? "");
+		setSelectedFlow(flow.id, flow.nodes[0]?.id ?? "");
 	};
 
 	const handleAddWorkflow = async () => {
@@ -515,8 +609,7 @@ export function AutomationsPage() {
 		};
 		const nextFlows = [...flows, flow];
 		await persistFlowsNow(nextFlows);
-		setSelectedFlowId(flow.id);
-		setSelectedNodeId(flow.nodes[0]!.id);
+		setSelectedFlow(flow.id, flow.nodes[0]!.id);
 	};
 
 	const handleAddNode = (kind: NodeKind) => {
@@ -565,7 +658,7 @@ export function AutomationsPage() {
 		});
 		setSelectedNodeId(fallbackNode.id);
 		await persistFlowsNow(nextFlows);
-	}, [persistFlowsNow, selectedFlow, selectedNode.id]);
+	}, [persistFlowsNow, selectedFlow, selectedNode.id, setSelectedNodeId]);
 
 	useEffect(() => {
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -593,7 +686,7 @@ export function AutomationsPage() {
 			window.addEventListener("click", handleClick, true);
 			return () => window.removeEventListener("click", handleClick, true);
 		}
-	}, [showAddMenu]);
+	}, [setShowAddMenu, showAddMenu]);
 
 	const handleRunOnce = async () => {
 		const nodes = selectedFlow.nodes;
