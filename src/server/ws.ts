@@ -90,7 +90,7 @@ export const websocketHandler = {
 					msg.cwd,
 					msg.referencePaths,
 					msg.sessionId,
-					msg.agentKind ?? "codex",
+					msg.agentKind ?? "claude",
 					msg.model,
 					msg.reasoningLevel,
 					msg.systemPrefix

@@ -19,14 +19,14 @@ export interface ModelOption {
 export interface ReasoningLevel {
 	readonly id: string;
 	readonly label: string;
-	readonly detail?: string;
+	readonly detail: string;
 }
 
 export const CODEX_REASONING_LEVELS: readonly ReasoningLevel[] = [
-	{ id: "low", label: "Low" },
-	{ id: "medium", label: "Medium" },
-	{ id: "high", label: "High" },
-	{ id: "xhigh", label: "Extra High" },
+	{ id: "low", label: "Low", detail: "Fast responses" },
+	{ id: "medium", label: "Medium", detail: "Balanced (default)" },
+	{ id: "high", label: "High", detail: "Greater depth" },
+	{ id: "xhigh", label: "Extra High", detail: "Maximum reasoning" },
 ] as const;
 
 export interface AgentDefinition {
@@ -155,26 +155,34 @@ export interface DefaultChatSettings {
 	readonly reasoningLevel: string;
 }
 
-export const DEFAULT_CHAT_SETTINGS_KEY = "inferay-default-chat-settings";
-const DEFAULT_CHAT_AGENT_KIND: ChatAgentKind = "codex";
-const DEFAULT_REASONING_LEVEL = CODEX_REASONING_LEVELS[0]!.id;
+const DEFAULT_CHAT_SETTINGS_KEY = "inferay-default-chat-settings";
 
-export function normalizeDefaultChatSettings(
+const FALLBACK_DEFAULT_CHAT_SETTINGS: DefaultChatSettings = {
+	agentKind: "codex",
+	model: "gpt-5.5",
+	reasoningLevel: "low",
+};
+
+function normalizeDefaultChatSettings(
 	settings: Partial<DefaultChatSettings> | null | undefined
 ): DefaultChatSettings {
 	const agentKind: ChatAgentKind =
 		settings?.agentKind === "claude" || settings?.agentKind === "codex"
 			? settings.agentKind
-			: DEFAULT_CHAT_AGENT_KIND;
+			: FALLBACK_DEFAULT_CHAT_SETTINGS.agentKind;
 	const definition = getAgentDefinition(agentKind);
+	const fallbackModel =
+		agentKind === FALLBACK_DEFAULT_CHAT_SETTINGS.agentKind
+			? FALLBACK_DEFAULT_CHAT_SETTINGS.model
+			: definition.defaultModel;
 	const model = definition.models.some(hasId.bind(null, settings?.model))
 		? settings!.model!
-		: definition.defaultModel;
+		: fallbackModel;
 	const reasoningLevel = CODEX_REASONING_LEVELS.some(
 		hasId.bind(null, settings?.reasoningLevel)
 	)
 		? settings!.reasoningLevel!
-		: DEFAULT_REASONING_LEVEL;
+		: FALLBACK_DEFAULT_CHAT_SETTINGS.reasoningLevel;
 	return { agentKind, model, reasoningLevel };
 }
 

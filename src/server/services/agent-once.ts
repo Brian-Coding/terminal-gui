@@ -2,10 +2,9 @@ import type { ChatAgentKind } from "../../features/agents/agents.ts";
 import { noop } from "../../lib/data.ts";
 import { getAgentAdapter, resolveAgentModel } from "../agents/registry.ts";
 import type { AgentRunContext } from "../agents/types.ts";
-import { loadDefaultAgentRunSettings } from "./default-chat-settings.ts";
 
 interface RunAgentOnceOptions {
-	agentKind?: ChatAgentKind;
+	agentKind: ChatAgentKind;
 	prompt: string;
 	cwd: string;
 	model?: string;
@@ -42,26 +41,16 @@ export async function runAgentOnce({
 	reasoningLevel,
 	timeoutMs = 30_000,
 }: RunAgentOnceOptions): Promise<string | null> {
-	const defaults = await loadDefaultAgentRunSettings();
-	const effectiveAgentKind = agentKind ?? defaults.agentKind;
-	const effectiveModel =
-		model ??
-		(agentKind && agentKind !== defaults.agentKind
-			? undefined
-			: defaults.model);
-	const effectiveReasoningLevel =
-		reasoningLevel ??
-		(effectiveAgentKind === "codex" ? defaults.reasoningLevel : undefined);
-	const adapter = getAgentAdapter(effectiveAgentKind);
+	const adapter = getAgentAdapter(agentKind);
 	let sessionId: string | null = null;
 	let resultText = "";
 	let streamedText = "";
 
 	const ctx: AgentRunContext = {
-		paneId: `one-off-${effectiveAgentKind}-${Date.now()}`,
+		paneId: `one-off-${agentKind}-${Date.now()}`,
 		cwd,
-		model: resolveAgentModel(effectiveAgentKind, effectiveModel),
-		reasoningLevel: effectiveReasoningLevel,
+		model: resolveAgentModel(agentKind, model),
+		reasoningLevel,
 		getSessionId: () => sessionId,
 		isCancelled: () => false,
 		updateSessionId: (nextSessionId) => {

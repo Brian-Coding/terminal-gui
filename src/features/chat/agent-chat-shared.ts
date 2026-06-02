@@ -19,34 +19,6 @@ export interface AttachedImageInfo {
 	previewUrl: string;
 }
 
-export type MessageIntent =
-	| "plan"
-	| "fix"
-	| "refactor"
-	| "explain"
-	| "test"
-	| "review"
-	| "docs";
-
-export type ComposerContextSource =
-	| "diff"
-	| "terminal"
-	| "file"
-	| "handover"
-	| "artifact";
-
-export interface ComposerContextBlock {
-	id: string;
-	source: ComposerContextSource;
-	title: string;
-	subtitle?: string;
-	path?: string;
-	lineStart?: number;
-	lineEnd?: number;
-	content: string;
-	createdAt: number;
-}
-
 export interface ChatMessage {
 	id: string;
 	role: "user" | "assistant" | "tool" | "system" | "btw";
@@ -55,8 +27,6 @@ export interface ChatMessage {
 	isStreaming?: boolean;
 	btwQuestion?: string;
 	images?: string[];
-	intent?: MessageIntent;
-	contextBlocks?: ComposerContextBlock[];
 }
 
 export interface CheckpointInfo {
@@ -66,13 +36,6 @@ export interface CheckpointInfo {
 	changedFiles: { path: string; action: "created" | "modified" | "deleted" }[];
 	reverted: boolean;
 	afterMessageId: string | null;
-}
-
-export interface WorktreeLaunchInfo {
-	branchName: string;
-	basePath: string;
-	worktreePath: string;
-	createdAt: number;
 }
 
 export interface SlashCommand {
@@ -86,6 +49,9 @@ export interface SlashCommand {
 	isFromLibrary?: boolean;
 }
 
+const MAX_RETAINED_MESSAGES = 500;
+const MAX_RETAINED_CHARS = 1_000_000;
+
 let msgId = 0;
 
 export function nextId() {
@@ -93,7 +59,20 @@ export function nextId() {
 }
 
 export function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
-	return msgs;
+	let trimmed =
+		msgs.length > MAX_RETAINED_MESSAGES
+			? msgs.slice(-MAX_RETAINED_MESSAGES)
+			: msgs;
+	let totalChars = trimmed.reduce(
+		(sum, message) => sum + message.content.length,
+		0
+	);
+	while (totalChars > MAX_RETAINED_CHARS && trimmed.length > 1) {
+		totalChars -= trimmed[0]?.content.length ?? 0;
+		trimmed = trimmed.slice(1);
+	}
+
+	return trimmed;
 }
 
 export function appendMessage(

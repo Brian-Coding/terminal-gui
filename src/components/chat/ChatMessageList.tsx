@@ -8,46 +8,24 @@ import React, {
 	useRef,
 	useState,
 } from "react";
-import { isChatAgentKind } from "../../features/agents/agents.ts";
-import {
-	createDocumentArtifact,
-	loadDocumentArtifacts,
-} from "../../features/artifacts/artifact-workspace-store.ts";
-import { describeComposerContextBlock } from "../../features/chat/composer-context.ts";
-import {
-	loadStoredMessages,
-	loadStoredSummary,
-} from "../../features/chat/chat-session-store.ts";
-import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
-import {
-	getPaneTitle,
-	loadTerminalState,
-	type TerminalPaneModel,
-} from "../../features/terminal/terminal-utils.ts";
 import {
 	color,
 	controlSize,
-	effect,
 	font,
 	motion,
 	radius,
-	shadow,
 } from "../../tokens.stylex.ts";
 import { ThinkingIndicator } from "../ui/DotMatrixLoader.tsx";
-import { DropdownButton } from "../ui/DropdownButton.tsx";
 import {
-	IconAlertTriangle,
 	IconCheck,
 	IconChevronDown,
+	IconClock,
 	IconCopy,
-	IconFilePlus,
-	IconSend,
 } from "../ui/Icons.tsx";
 import { GroupedEditDiff, MiniEditDiff } from "./ChatEditDiff.tsx";
 import { AskUserQuestionCard, Markdown } from "./ChatRichContent.tsx";
 import {
 	buildRenderItems,
-	formatSystemMessageNotice,
 	type RenderChatMessage,
 	type RenderItem,
 } from "./chat-message-render-utils.ts";
@@ -55,80 +33,24 @@ import { renderTextPills } from "./chat-token-decorators.tsx";
 
 export type ChatMessage = RenderChatMessage;
 
+type CheckpointInfo = {
+	id: string;
+	timestamp: number;
+	changedFileCount: number;
+	changedFiles: { path: string; action: "created" | "modified" | "deleted" }[];
+	reverted: boolean;
+	afterMessageId: string | null;
+};
+
 export type ChatVirtualizerControls = {
 	scrollToEnd: (behavior?: ScrollBehavior) => void;
 	isAtEnd: () => boolean;
 	getDistanceFromEnd: () => number;
 };
 
-const APP_REGION_DRAG_CLASS = "electrobun-webkit-app-region-drag";
-const APP_REGION_NO_DRAG_CLASS = "electrobun-webkit-app-region-no-drag";
-const CHAT_SCROLL_DISTANCE_KEY_PREFIX = "inferay-scroll-distance:";
-
-function dragClassName(className?: string) {
-	return className
-		? `${APP_REGION_DRAG_CLASS} ${className}`
-		: APP_REGION_DRAG_CLASS;
-}
-
-function noDragClassName(className?: string) {
-	return className
-		? `${APP_REGION_NO_DRAG_CLASS} ${className}`
-		: APP_REGION_NO_DRAG_CLASS;
-}
-
 type ChatRenderRow =
 	| RenderItem
 	| { type: "thinking"; key: string; startTime: number };
-
-type HandoverTarget = {
-	id: string;
-	label: string;
-	detail?: string;
-};
-
-function compactTitle(text: string) {
-	const normalized = text.trim().split("\n")[0]?.trim() ?? "";
-	return normalized.length > 60
-		? `${normalized.slice(0, 57).trim()}...`
-		: normalized;
-}
-
-function getPaneBaseFolder(pane: TerminalPaneModel): string | undefined {
-	return pane.cwd?.split("/").filter(Boolean).pop();
-}
-
-function getSidebarLikePaneTitle(pane: TerminalPaneModel): string {
-	const storedSummary = loadStoredSummary(pane.id) ?? pane.summary ?? null;
-	if (storedSummary?.trim()) return storedSummary.trim();
-
-	const firstUser = loadStoredMessages<{ role?: string; content?: string }>(
-		pane.id
-	).find((message) => message.role === "user" && message.content?.trim());
-	if (firstUser?.content) {
-		const title = compactTitle(firstUser.content);
-		if (title) return title;
-	}
-
-	return pane.title || getPaneTitle(pane);
-}
-
-function loadHandoverTargets(currentPaneId: string): HandoverTarget[] {
-	const targets: HandoverTarget[] = [];
-	for (const group of loadTerminalState()?.groups ?? []) {
-		for (const pane of group.panes) {
-			if (pane.id === currentPaneId || !isChatAgentKind(pane.agentKind)) {
-				continue;
-			}
-			targets.push({
-				id: pane.id,
-				label: getSidebarLikePaneTitle(pane),
-				detail: getPaneBaseFolder(pane),
-			});
-		}
-	}
-	return targets;
-}
 
 function estimateRowSize(row: ChatRenderRow | undefined): number {
 	if (!row) return 80;
@@ -159,68 +81,6 @@ function getRowKey(row: ChatRenderRow | undefined, index: number) {
 		return `edit-group:${row.filePath}:${row.edits.map((edit) => edit.id).join(":")}`;
 	}
 	return row.message.id;
-}
-
-function loadScrollDistance(paneId: string): number | null {
-	try {
-		const stored = readStoredValue(
-			`${CHAT_SCROLL_DISTANCE_KEY_PREFIX}${paneId}`
-		);
-		if (stored === null) return null;
-		const value = Number(stored);
-		return Number.isFinite(value) && value >= 0 ? value : null;
-	} catch {
-		return null;
-	}
-}
-
-function saveScrollDistance(paneId: string, distance: number): void {
-	try {
-		writeStoredValue(
-			`${CHAT_SCROLL_DISTANCE_KEY_PREFIX}${paneId}`,
-			String(Math.max(0, Math.round(distance)))
-		);
-	} catch {}
-}
-
-function dispatchPaneFocus(paneId: string | null) {
-	window.dispatchEvent(
-		new CustomEvent("inferay:pane-focus-highlight", {
-			detail: { paneId },
-		})
-	);
-}
-
-function buildHandoverPrompt({
-	sourcePaneId,
-	sourceRole,
-	content,
-}: {
-	sourcePaneId: string;
-	sourceRole: string;
-	content: string;
-}) {
-	return [
-		"You are receiving a handoff from another Inferay agent pane.",
-		"",
-		"Read the transferred context, identify the current state, and continue from it without asking the user to repeat themselves.",
-		"",
-		`Source pane: ${sourcePaneId}`,
-		`Source role: ${sourceRole}`,
-		"",
-		"Transferred context:",
-		content.trim(),
-	].join("\n");
-}
-
-function findSavedArtifactForMessage(paneId: string, messageId: string) {
-	return (
-		loadDocumentArtifacts().find(
-			(artifact) =>
-				artifact.sourcePaneId === paneId &&
-				artifact.sourceMessageId === messageId
-		) ?? null
-	);
 }
 
 function ToolOutputHighlight({ content }: { content: string }) {
@@ -290,6 +150,95 @@ function ToolOutputHighlight({ content }: { content: string }) {
 	return <>{content}</>;
 }
 
+function CheckpointMarker({
+	checkpoint,
+	onRevert,
+	disabled,
+}: {
+	checkpoint: CheckpointInfo;
+	onRevert: (id: string) => void;
+	disabled?: boolean;
+}) {
+	const [expanded, setExpanded] = useState(false);
+	return (
+		<div {...stylex.props(styles.checkpointCard)}>
+			<div
+				{...stylex.props(styles.checkpointHeader)}
+				style={{
+					borderBottom: expanded
+						? "1px solid var(--color-inferay-gray-border)"
+						: "none",
+				}}
+			>
+				<button
+					type="button"
+					onClick={() => setExpanded(!expanded)}
+					{...stylex.props(styles.checkpointToggle)}
+				>
+					<IconChevronDown
+						size={11}
+						{...stylex.props(
+							styles.checkpointChevron,
+							!expanded && styles.rotateClosed
+						)}
+					/>
+					<IconClock
+						size={11}
+						{...stylex.props(
+							styles.checkpointIcon,
+							checkpoint.reverted && styles.revertedIcon
+						)}
+					/>
+					<span {...stylex.props(styles.checkpointTitle)}>
+						{checkpoint.changedFileCount} file
+						{checkpoint.changedFileCount !== 1 ? "s" : ""} changed
+					</span>
+				</button>
+				<span {...stylex.props(styles.spacer)} />
+				{!checkpoint.reverted ? (
+					<button
+						type="button"
+						onClick={() => onRevert(checkpoint.id)}
+						disabled={disabled}
+						{...stylex.props(styles.undoButton)}
+					>
+						Undo
+					</button>
+				) : (
+					<span {...stylex.props(styles.revertedLabel)}>reverted</span>
+				)}
+			</div>
+			{expanded && (
+				<div {...stylex.props(styles.checkpointFiles)}>
+					{checkpoint.changedFiles.map((f) => (
+						<div key={f.path} {...stylex.props(styles.checkpointFile)}>
+							<span
+								style={{
+									color:
+										f.action === "created"
+											? "#22c55e"
+											: f.action === "deleted"
+												? "#ef4444"
+												: "#eab308",
+								}}
+							>
+								{f.action === "created"
+									? "+"
+									: f.action === "deleted"
+										? "-"
+										: "~"}
+							</span>
+							<span {...stylex.props(styles.toolMuted)}>
+								{f.path.split("/").pop()}
+							</span>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
 const Bubble = React.memo(function Bubble({
 	msg,
 	collapsed,
@@ -297,9 +246,6 @@ const Bubble = React.memo(function Bubble({
 	onSendMessage,
 	onMdFileClick,
 	slashCommandNames,
-	paneId,
-	cwd,
-	handoverTargets,
 }: {
 	msg: ChatMessage;
 	collapsed: boolean;
@@ -307,23 +253,8 @@ const Bubble = React.memo(function Bubble({
 	onSendMessage?: (text: string) => void;
 	onMdFileClick?: (path: string) => void;
 	slashCommandNames: readonly string[];
-	paneId: string;
-	cwd?: string | null;
-	handoverTargets: HandoverTarget[];
 }) {
 	const [copied, setCopied] = useState(false);
-	const [savedArtifactId, setSavedArtifactId] = useState(
-		() => findSavedArtifactForMessage(paneId, msg.id)?.id ?? null
-	);
-	const [artifactSaveFailed, setArtifactSaveFailed] = useState(false);
-	const savedArtifact = savedArtifactId !== null;
-	const messageActionIconProps = stylex.props(styles.messageActionIcon);
-	const handoverOptions = handoverTargets.map((target) => ({
-		id: target.id,
-		label: target.label,
-		detail: target.detail,
-		icon: <IconSend size={12} strokeWidth={1.45} {...messageActionIconProps} />,
-	}));
 	const handleCopyMessage = useCallback(() => {
 		if (!msg.content) return;
 		navigator.clipboard
@@ -334,66 +265,7 @@ const Bubble = React.memo(function Bubble({
 			})
 			.catch(() => setCopied(false));
 	}, [msg.content]);
-	useEffect(() => {
-		setSavedArtifactId(findSavedArtifactForMessage(paneId, msg.id)?.id ?? null);
-		setArtifactSaveFailed(false);
-	}, [msg.id, paneId]);
-	const handleHandoverMessage = useCallback(
-		(targetPaneId?: string) => {
-			if (!targetPaneId || !msg.content.trim()) return;
-			const prompt = buildHandoverPrompt({
-				sourcePaneId: paneId,
-				sourceRole: msg.role,
-				content: msg.content,
-			});
-			window.dispatchEvent(
-				new CustomEvent("inferay:agent-handover-request", {
-					detail: {
-						targetPaneId,
-						sourcePaneId: paneId,
-						sourceMessageId: msg.id,
-						prompt,
-						displayText: "Hand off",
-					},
-				})
-			);
-			dispatchPaneFocus(null);
-		},
-		[msg.content, msg.id, msg.role, paneId]
-	);
-	const handleSaveArtifact = useCallback(async () => {
-		if (!msg.content.trim()) return;
-		const existing = findSavedArtifactForMessage(paneId, msg.id);
-		if (existing) {
-			setSavedArtifactId(existing.id);
-			setArtifactSaveFailed(false);
-			return;
-		}
-		const firstLine =
-			msg.content
-				.split(/\r?\n/)
-				.map((line) => line.trim().replace(/^#+\s*/, ""))
-				.find(Boolean) ?? "Saved agent note";
-		const title =
-			firstLine.length > 64 ? `${firstLine.slice(0, 61).trim()}...` : firstLine;
-		try {
-			const artifact = await createDocumentArtifact({
-				title,
-				subtitle: `${msg.role} message`,
-				content: msg.content,
-				sourcePaneId: paneId,
-				sourceMessageId: msg.id,
-				sourceRole: msg.role,
-				projectPath: cwd ?? null,
-			});
-			setSavedArtifactId(artifact.id);
-			setArtifactSaveFailed(false);
-		} catch (error) {
-			console.error(error);
-			setSavedArtifactId(null);
-			setArtifactSaveFailed(true);
-		}
-	}, [cwd, msg.content, msg.id, msg.role, paneId]);
+
 	if (msg.role === "user") {
 		const commandMatch = msg.content.match(/^\/([a-zA-Z0-9_-]+)(\s|$)/);
 		if (
@@ -415,27 +287,9 @@ const Bubble = React.memo(function Bubble({
 			const pathLines = parts[1]?.split("\n").filter((p) => p.trim()) ?? [];
 			imagePaths = pathLines.filter((p) => p.includes("/.tmp/"));
 		}
-		const userBubbleProps = stylex.props(styles.userBubble);
 		return (
 			<div {...stylex.props(styles.userRow)}>
-				<div
-					{...userBubbleProps}
-					className={noDragClassName(userBubbleProps.className)}
-				>
-					{(msg.contextBlocks?.length ?? 0) > 0 && (
-						<div {...stylex.props(styles.userMetaRow)}>
-							{msg.contextBlocks?.slice(0, 3).map((block) => (
-								<span key={block.id} {...stylex.props(styles.contextPill)}>
-									{describeComposerContextBlock(block)}
-								</span>
-							))}
-							{(msg.contextBlocks?.length ?? 0) > 3 && (
-								<span {...stylex.props(styles.contextPill)}>
-									+{(msg.contextBlocks?.length ?? 0) - 3}
-								</span>
-							)}
-						</div>
-					)}
+				<div {...stylex.props(styles.userBubble)}>
 					{imagePaths.length > 0 && (
 						<div {...stylex.props(styles.userImages)}>
 							{imagePaths.map((imgPath) => (
@@ -462,63 +316,20 @@ const Bubble = React.memo(function Bubble({
 		const runningMatch = msg.content.match(/^Running \/(.+)\.\.\.$/);
 		if (runningMatch?.[1]) {
 			const commandName = runningMatch[1];
-			const systemRunPillProps = stylex.props(styles.systemRunPill);
 			return (
 				<div {...stylex.props(styles.systemRunRow)}>
-					<div
-						{...systemRunPillProps}
-						className={noDragClassName(systemRunPillProps.className)}
-					>
+					<div {...stylex.props(styles.systemRunPill)}>
 						<span {...stylex.props(styles.runningCommand)}>/{commandName}</span>
 					</div>
 				</div>
 			);
 		}
-		const notice = formatSystemMessageNotice(msg.content);
-		if (notice) {
-			const systemNoticeProps = stylex.props(styles.systemNotice);
-			return (
-				<div
-					{...systemNoticeProps}
-					className={noDragClassName(systemNoticeProps.className)}
-				>
-					<div {...stylex.props(styles.systemNoticeHeader)}>
-						<IconAlertTriangle
-							size={12}
-							{...stylex.props(styles.systemNoticeIcon)}
-						/>
-						<span {...stylex.props(styles.systemNoticeTitle)}>
-							{notice.title}
-						</span>
-					</div>
-					<p {...stylex.props(styles.systemNoticeDetail)}>{notice.detail}</p>
-					<details {...stylex.props(styles.systemNoticeDetails)}>
-						<summary {...stylex.props(styles.systemNoticeSummary)}>
-							Details
-						</summary>
-						<code {...stylex.props(styles.systemNoticeRaw)}>{notice.raw}</code>
-					</details>
-				</div>
-			);
-		}
-		const systemTextProps = stylex.props(styles.systemText);
-		return (
-			<p
-				{...systemTextProps}
-				className={noDragClassName(systemTextProps.className)}
-			>
-				{msg.content}
-			</p>
-		);
+		return <p {...stylex.props(styles.systemText)}>{msg.content}</p>;
 	}
 
 	if (msg.role === "btw") {
-		const btwCardProps = stylex.props(styles.btwCard);
 		return (
-			<div
-				{...btwCardProps}
-				className={noDragClassName(btwCardProps.className)}
-			>
+			<div {...stylex.props(styles.btwCard)}>
 				<div {...stylex.props(styles.btwHeader)}>
 					<span {...stylex.props(styles.btwLabel)}>btw</span>
 					{msg.btwQuestion && (
@@ -545,13 +356,11 @@ const Bubble = React.memo(function Bubble({
 	if (msg.role === "tool") {
 		if (msg.toolName === "AskUserQuestion") {
 			return (
-				<div className={APP_REGION_NO_DRAG_CLASS}>
-					<AskUserQuestionCard
-						content={msg.content}
-						isStreaming={msg.isStreaming}
-						onSendMessage={onSendMessage}
-					/>
-				</div>
+				<AskUserQuestionCard
+					content={msg.content}
+					isStreaming={msg.isStreaming}
+					onSendMessage={onSendMessage}
+				/>
 			);
 		}
 		if (msg.toolName === "Edit" && msg.content) {
@@ -563,20 +372,18 @@ const Bubble = React.memo(function Bubble({
 					parsed.new_string !== undefined
 				) {
 					return (
-						<div className={APP_REGION_NO_DRAG_CLASS}>
-							<MiniEditDiff
-								oldStr={parsed.old_string}
-								newStr={parsed.new_string}
-								filePath={parsed.file_path}
-								isStreaming={msg.isStreaming}
-							/>
-						</div>
+						<MiniEditDiff
+							oldStr={parsed.old_string}
+							newStr={parsed.new_string}
+							filePath={parsed.file_path}
+							isStreaming={msg.isStreaming}
+						/>
 					);
 				}
 			} catch {}
 		}
 		return (
-			<div className={APP_REGION_NO_DRAG_CLASS}>
+			<div>
 				<button
 					type="button"
 					onClick={() => onToggle(msg.id)}
@@ -597,147 +404,22 @@ const Bubble = React.memo(function Bubble({
 		);
 	}
 
-	const assistantMessageProps = stylex.props(styles.assistantMessage);
-	const artifactButtonProps = stylex.props(
-		styles.copyMessageButton,
-		savedArtifact && styles.artifactSavedButton
-	);
-	const copyButtonProps = stylex.props(
-		styles.copyMessageButton,
-		copied && styles.copyMessageButtonCopied
-	);
-	const messageActionDropdownProps = stylex.props(styles.messageActionDropdown);
 	return (
-		<div
-			{...assistantMessageProps}
-			className={dragClassName(assistantMessageProps.className)}
-		>
-			<div
-				className={APP_REGION_NO_DRAG_CLASS}
-				style={{ display: "inline-block", maxWidth: "100%" }}
-			>
-				<Markdown text={msg.content} onMdFileClick={onMdFileClick} />
-			</div>
+		<div {...stylex.props(styles.assistantMessage)}>
+			<Markdown text={msg.content} onMdFileClick={onMdFileClick} />
 			{!msg.isStreaming && msg.content.trim() ? (
 				<div {...stylex.props(styles.messageActionRow)}>
-					<button
-						type="button"
-						onClick={handleSaveArtifact}
-						title={
-							artifactSaveFailed
-								? "Could not save artifact"
-								: savedArtifact
-									? "Saved as artifact"
-									: "Save message as artifact"
-						}
-						aria-label={
-							artifactSaveFailed
-								? "Could not save artifact"
-								: savedArtifact
-									? "Saved as artifact"
-									: "Save message as artifact"
-						}
-						{...artifactButtonProps}
-						className={noDragClassName(artifactButtonProps.className)}
-					>
-						{artifactSaveFailed ? (
-							<IconAlertTriangle
-								size={12}
-								strokeWidth={1.6}
-								{...messageActionIconProps}
-							/>
-						) : savedArtifact ? (
-							<IconCheck
-								size={12}
-								strokeWidth={1.6}
-								{...messageActionIconProps}
-							/>
-						) : (
-							<IconFilePlus
-								size={12}
-								strokeWidth={1.6}
-								{...messageActionIconProps}
-							/>
-						)}
-						<span>
-							{artifactSaveFailed
-								? "Failed"
-								: savedArtifact
-									? "Saved"
-									: "Artifact"}
-						</span>
-					</button>
-					{handoverTargets.length > 0 && (
-						<div {...stylex.props(styles.handoverWrap)}>
-							<DropdownButton
-								value={null}
-								options={handoverOptions}
-								onChange={handleHandoverMessage}
-								placeholder="Handoff"
-								icon={
-									<IconSend
-										size={12}
-										strokeWidth={1.45}
-										{...messageActionIconProps}
-									/>
-								}
-								minWidth={210}
-								menuPlacement="top"
-								buttonClassName={noDragClassName(
-									messageActionDropdownProps.className
-								)}
-								labelClassName={
-									stylex.props(styles.messageActionLabel).className
-								}
-								renderOption={(option, isSelected) => (
-									<div
-										{...stylex.props(
-											styles.handoffOption,
-											isSelected && styles.handoffOptionSelected
-										)}
-										onFocus={() => dispatchPaneFocus(option.id)}
-										onMouseEnter={() => dispatchPaneFocus(option.id)}
-										onMouseLeave={() => dispatchPaneFocus(null)}
-									>
-										<span {...stylex.props(styles.handoffOptionIcon)}>
-											{option.icon}
-										</span>
-										<span {...stylex.props(styles.handoffOptionText)}>
-											<span {...stylex.props(styles.handoffOptionLabel)}>
-												{option.label}
-											</span>
-											{option.detail ? (
-												<span {...stylex.props(styles.handoffOptionDetail)}>
-													{option.detail}
-												</span>
-											) : null}
-										</span>
-									</div>
-								)}
-							/>
-						</div>
-					)}
 					<button
 						type="button"
 						onClick={handleCopyMessage}
 						title={copied ? "Copied" : "Copy message"}
 						aria-label={copied ? "Copied message" : "Copy message"}
-						{...copyButtonProps}
-						className={noDragClassName(copyButtonProps.className)}
-					>
-						{copied ? (
-							<IconCheck
-								size={12}
-								strokeWidth={1.6}
-								{...messageActionIconProps}
-							/>
-						) : (
-							<IconCopy
-								size={12}
-								strokeWidth={1.6}
-								{...messageActionIconProps}
-							/>
+						{...stylex.props(
+							styles.copyMessageButton,
+							copied && styles.copyMessageButtonCopied
 						)}
+					>
+						{copied ? <IconCheck size={11} /> : <IconCopy size={11} />}
 						<span>{copied ? "Copied" : "Copy"}</span>
 					</button>
 				</div>
@@ -746,44 +428,38 @@ const Bubble = React.memo(function Bubble({
 	);
 });
 
-export const ChatMessageList = React.memo(function ChatMessageList({
+export function ChatMessageList({
 	messages,
 	scrollElementRef,
 	onVirtualizerReady,
 	expandedTools,
 	toggleTool,
+	checkpoints,
+	revertCheckpoint,
 	isLoading,
 	startTime,
 	handleSendMessage,
 	onMdFileClick,
 	slashCommandNames,
-	paneId,
-	cwd,
 }: {
 	messages: ChatMessage[];
 	scrollElementRef: React.RefObject<HTMLDivElement | null>;
 	onVirtualizerReady?: (controls: ChatVirtualizerControls | null) => void;
 	expandedTools: Set<string>;
 	toggleTool: (id: string) => void;
+	checkpoints: CheckpointInfo[];
+	revertCheckpoint: (id: string) => void;
 	isLoading: boolean;
 	startTime?: number | null;
 	handleSendMessage?: (text: string) => void;
 	onMdFileClick?: (path: string) => void;
 	slashCommandNames: readonly string[];
-	paneId: string;
-	cwd?: string | null;
 }) {
-	const [terminalStateVersion, setTerminalStateVersion] = useState(0);
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
-	const handoverTargets = useMemo(
-		() => loadHandoverTargets(paneId),
-		[paneId, terminalStateVersion]
-	);
 	const renderRows = useMemo<ChatRenderRow[]>(() => {
-		const rows: ChatRenderRow[] = renderItems;
-		if (!isLoading || !startTime) return rows;
+		if (!isLoading || !startTime) return renderItems;
 		return [
-			...rows,
+			...renderItems,
 			{ type: "thinking", key: `thinking-${startTime}`, startTime },
 		];
 	}, [isLoading, renderItems, startTime]);
@@ -797,20 +473,11 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		scrollEndThreshold: 80,
 		overscan: 6,
 		gap: 8,
-		paddingStart: 20,
+		paddingStart: 8,
 		paddingEnd: 32,
 		useFlushSync: false,
 	});
-	const didInitialRestoreRef = useRef(false);
-	const saveScrollFrameRef = useRef<number | null>(null);
-
-	useEffect(() => {
-		const refreshTargets = () =>
-			setTerminalStateVersion((version) => version + 1);
-		window.addEventListener("terminal-shell-change", refreshTargets);
-		return () =>
-			window.removeEventListener("terminal-shell-change", refreshTargets);
-	}, []);
+	const didInitialScrollRef = useRef(false);
 
 	useEffect(() => {
 		onVirtualizerReady?.({
@@ -824,61 +491,18 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 	}, [onVirtualizerReady, virtualizer]);
 
 	useLayoutEffect(() => {
-		if (didInitialRestoreRef.current || renderRows.length === 0) return;
-		didInitialRestoreRef.current = true;
-		const savedDistance = loadScrollDistance(paneId);
-		let raf = 0;
-		let frame = 0;
-		const restore = () => {
-			const el = scrollElementRef.current;
-			if (el) {
-				if (savedDistance === null || savedDistance <= 80) {
-					virtualizer.scrollToEnd({ behavior: "auto" });
-				} else {
-					const offset = Math.max(
-						0,
-						virtualizer.getTotalSize() - el.clientHeight - savedDistance
-					);
-					virtualizer.scrollToOffset(offset, { behavior: "auto" });
-				}
-			}
-			frame += 1;
-			if (frame < 5) raf = requestAnimationFrame(restore);
-		};
-		raf = requestAnimationFrame(restore);
+		if (didInitialScrollRef.current || renderRows.length === 0) return;
+		didInitialScrollRef.current = true;
+		const raf = requestAnimationFrame(() => {
+			virtualizer.scrollToEnd({ behavior: "auto" });
+		});
 		return () => cancelAnimationFrame(raf);
-	}, [paneId, renderRows.length, scrollElementRef, virtualizer]);
-
-	useEffect(() => {
-		const el = scrollElementRef.current;
-		if (!el) return;
-		const persist = () => {
-			saveScrollFrameRef.current = null;
-			saveScrollDistance(paneId, virtualizer.getDistanceFromEnd());
-		};
-		const handleScroll = () => {
-			if (saveScrollFrameRef.current !== null) {
-				cancelAnimationFrame(saveScrollFrameRef.current);
-			}
-			saveScrollFrameRef.current = requestAnimationFrame(persist);
-		};
-		el.addEventListener("scroll", handleScroll, { passive: true });
-		return () => {
-			el.removeEventListener("scroll", handleScroll);
-			if (saveScrollFrameRef.current !== null) {
-				cancelAnimationFrame(saveScrollFrameRef.current);
-				persist();
-			}
-		};
-	}, [paneId, scrollElementRef, virtualizer]);
+	}, [renderRows.length, virtualizer]);
 
 	const virtualItems = virtualizer.getVirtualItems();
-	const messageListProps = stylex.props(styles.messageList);
-	const virtualRowProps = stylex.props(styles.virtualRow);
 	return (
 		<div
-			{...messageListProps}
-			className={dragClassName(messageListProps.className)}
+			{...stylex.props(styles.messageList)}
 			style={{ height: virtualizer.getTotalSize() }}
 		>
 			{virtualItems.map((virtualItem) => {
@@ -890,8 +514,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 							key={virtualItem.key}
 							ref={virtualizer.measureElement}
 							data-index={virtualItem.index}
-							{...virtualRowProps}
-							className={dragClassName(virtualRowProps.className)}
+							{...stylex.props(styles.virtualRow)}
 							style={{ transform: `translateY(${virtualItem.start}px)` }}
 						>
 							<ThinkingIndicator startTime={item.startTime} />
@@ -904,13 +527,10 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 							key={virtualItem.key}
 							ref={virtualizer.measureElement}
 							data-index={virtualItem.index}
-							{...virtualRowProps}
-							className={dragClassName(virtualRowProps.className)}
+							{...stylex.props(styles.virtualRow)}
 							style={{ transform: `translateY(${virtualItem.start}px)` }}
 						>
-							<div className={APP_REGION_NO_DRAG_CLASS}>
-								<GroupedEditDiff filePath={item.filePath} edits={item.edits} />
-							</div>
+							<GroupedEditDiff filePath={item.filePath} edits={item.edits} />
 						</div>
 					);
 				}
@@ -920,8 +540,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 						key={virtualItem.key}
 						ref={virtualizer.measureElement}
 						data-index={virtualItem.index}
-						{...virtualRowProps}
-						className={dragClassName(virtualRowProps.className)}
+						{...stylex.props(styles.virtualRow)}
 						style={{ transform: `translateY(${virtualItem.start}px)` }}
 					>
 						<Bubble
@@ -931,16 +550,26 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 							onSendMessage={handleSendMessage}
 							onMdFileClick={onMdFileClick}
 							slashCommandNames={slashCommandNames}
-							paneId={paneId}
-							cwd={cwd}
-							handoverTargets={handoverTargets}
 						/>
+						{msg.role === "assistant" &&
+							!msg.isStreaming &&
+							(() => {
+								const cp = checkpoints.find((c) => c.afterMessageId === msg.id);
+								if (!cp) return null;
+								return (
+									<CheckpointMarker
+										checkpoint={cp}
+										onRevert={revertCheckpoint}
+										disabled={isLoading}
+									/>
+								);
+							})()}
 					</div>
 				);
 			})}
 		</div>
 	);
-});
+}
 
 const styles = stylex.create({
 	toolMuted: {
@@ -957,8 +586,106 @@ const styles = stylex.create({
 		},
 		textDecorationLine: "underline",
 	},
+	checkpointCard: {
+		backgroundColor: color.backgroundRaised,
+		borderColor: color.border,
+		borderRadius: radius.sm,
+		borderStyle: "solid",
+		borderWidth: 1,
+		marginBlock: controlSize._1,
+		overflow: "hidden",
+	},
+	checkpointHeader: {
+		alignItems: "center",
+		display: "flex",
+		gap: controlSize._1,
+		minHeight: controlSize._5,
+		paddingBlock: controlSize._0_5,
+		paddingInline: controlSize._1_5,
+	},
+	checkpointToggle: {
+		alignItems: "center",
+		color: color.textSoft,
+		display: "flex",
+		flex: 1,
+		fontSize: font.size_1,
+		fontWeight: font.weight_5,
+		gap: controlSize._1,
+		minWidth: 0,
+		textAlign: "left",
+		transitionDuration: motion.durationBase,
+		transitionProperty: "opacity",
+		transitionTimingFunction: motion.ease,
+		":hover": {
+			opacity: 0.8,
+		},
+	},
+	undoButton: {
+		borderRadius: radius.sm,
+		color: color.textMuted,
+		fontSize: font.size_1,
+		fontWeight: font.weight_5,
+		paddingBlock: 0,
+		paddingInline: controlSize._1,
+		transitionDuration: motion.durationBase,
+		transitionProperty: "color, opacity",
+		transitionTimingFunction: motion.ease,
+		":hover": {
+			color: color.textSoft,
+		},
+		":disabled": {
+			opacity: 0.4,
+		},
+	},
+	revertedLabel: {
+		borderRadius: radius.md,
+		color: color.textMuted,
+		fontSize: font.size_2,
+		fontStyle: "italic",
+		paddingBlock: 1,
+		paddingInline: controlSize._1_5,
+	},
+	checkpointFiles: {
+		display: "flex",
+		flexDirection: "column",
+		gap: controlSize._0_5,
+		paddingBottom: controlSize._2,
+		paddingInline: controlSize._2,
+		paddingTop: controlSize._1,
+	},
+	checkpointFile: {
+		alignItems: "center",
+		display: "flex",
+		fontFamily: font.familyMono,
+		fontSize: font.size_1,
+		gap: controlSize._1_5,
+		paddingInline: controlSize._1,
+	},
+	checkpointChevron: {
+		flexShrink: 0,
+		opacity: 0.4,
+		transitionDuration: motion.durationBase,
+		transitionProperty: "transform",
+	},
 	rotateClosed: {
 		transform: "rotate(-90deg)",
+	},
+	checkpointIcon: {
+		flexShrink: 0,
+		opacity: 0.4,
+		color: color.textMuted,
+	},
+	revertedIcon: {
+		color: color.danger,
+	},
+	checkpointTitle: {
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+		opacity: 0.8,
+	},
+	spacer: {
+		flex: 1,
 	},
 	userRow: {
 		display: "flex",
@@ -985,31 +712,6 @@ const styles = stylex.create({
 		borderColor: color.borderControl,
 		borderRadius: radius.sm,
 		objectFit: "cover",
-	},
-	userMetaRow: {
-		display: "flex",
-		flexWrap: "wrap",
-		gap: controlSize._1,
-		justifyContent: "flex-end",
-		marginBottom: controlSize._1,
-		maxWidth: "100%",
-	},
-	contextPill: {
-		backgroundColor: color.surfaceSubtle,
-		borderColor: color.borderSubtle,
-		borderRadius: radius.pill,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textMuted,
-		display: "inline-block",
-		fontFamily: "var(--font-diff)",
-		fontSize: font.size_0_5,
-		maxWidth: "14rem",
-		overflow: "hidden",
-		paddingBlock: 1,
-		paddingInline: controlSize._1,
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
 	},
 	userText: {
 		whiteSpace: "pre-wrap",
@@ -1038,58 +740,6 @@ const styles = stylex.create({
 		fontFamily: font.familyMono,
 		fontSize: font.size_4,
 		fontWeight: font.weight_5,
-	},
-	systemNotice: {
-		borderColor: color.border,
-		borderRadius: radius.lg,
-		borderStyle: "solid",
-		borderWidth: 1,
-		backgroundColor: color.backgroundRaised,
-		color: color.textMuted,
-		marginInline: "auto",
-		maxWidth: "34rem",
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
-	},
-	systemNoticeHeader: {
-		alignItems: "center",
-		display: "flex",
-		gap: controlSize._1_5,
-	},
-	systemNoticeIcon: {
-		color: color.textMuted,
-		opacity: 0.7,
-	},
-	systemNoticeTitle: {
-		color: color.textSoft,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-	},
-	systemNoticeDetail: {
-		color: color.textMuted,
-		fontSize: font.size_1,
-		lineHeight: 1.45,
-		marginTop: controlSize._1,
-	},
-	systemNoticeDetails: {
-		marginTop: controlSize._1_5,
-	},
-	systemNoticeSummary: {
-		color: color.textMuted,
-		cursor: "pointer",
-		fontSize: font.size_0_5,
-		userSelect: "none",
-	},
-	systemNoticeRaw: {
-		color: color.textMuted,
-		display: "block",
-		fontFamily: font.familyMono,
-		fontSize: font.size_0_5,
-		lineHeight: 1.45,
-		marginTop: controlSize._1,
-		maxHeight: "7rem",
-		overflow: "auto",
-		whiteSpace: "pre-wrap",
 	},
 	dot2: {
 		animationDelay: "0.1s",
@@ -1193,121 +843,17 @@ const styles = stylex.create({
 		justifyContent: "flex-end",
 		marginTop: controlSize._1,
 	},
-	handoverWrap: {
-		position: "relative",
-	},
-	messageActionDropdown: {
-		"--dropdown-button-bg-color": color.transparent,
-		"--dropdown-button-bg-image": "none",
-		"--dropdown-button-border-color": color.transparent,
-		"--dropdown-button-border-width": "0",
-		"--dropdown-button-color": color.textMuted,
-		"--dropdown-button-hover-bg-color": color.transparent,
-		"--dropdown-button-hover-bg-image": "none",
-		"--dropdown-button-hover-shadow": "none",
-		"--dropdown-button-open-bg-color": color.transparent,
-		"--dropdown-button-open-bg-image": "none",
-		"--dropdown-button-open-border-color": color.transparent,
-		"--dropdown-button-open-color": color.textMuted,
-		"--dropdown-button-open-shadow": "none",
-		"--dropdown-button-shadow": "none",
-		backgroundImage: "none",
-		backgroundColor: color.transparent,
-		borderColor: color.transparent,
-		borderRadius: radius.sm,
-		borderWidth: 0,
-		boxShadow: "none",
-		color: color.textMuted,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-		gap: controlSize._1,
-		height: controlSize._6,
-		minHeight: controlSize._6,
-		paddingBlock: controlSize._0_5,
-		paddingInline: controlSize._1_5,
-		transitionDuration: motion.durationBase,
-		transitionProperty: "background-color, color",
-		transitionTimingFunction: motion.ease,
-	},
-	messageActionLabel: {
-		color: "currentColor",
-		fontSize: font.size_2,
-	},
-	messageActionIcon: {
-		color: "currentColor",
-		display: "block",
-		flexShrink: 0,
-		height: controlSize._3,
-		opacity: 1,
-		width: controlSize._3,
-	},
-	handoffOption: {
+	copyMessageButton: {
 		alignItems: "center",
 		backgroundColor: {
 			default: color.transparent,
-			":hover": color.controlHover,
-		},
-		backgroundImage: {
-			default: "none",
-			":hover": effect.controlDepth,
+			":hover": color.surfaceControl,
 		},
 		borderRadius: radius.sm,
-		boxShadow: {
-			default: "none",
-			":hover": shadow.controlDepth,
-		},
 		color: {
-			default: color.textSoft,
-			":hover": color.textMain,
+			default: color.textMuted,
+			":hover": color.textSoft,
 		},
-		display: "flex",
-		gap: controlSize._2,
-		minHeight: 30,
-		paddingBlock: controlSize._1,
-		paddingInline: controlSize._2,
-		textAlign: "left",
-		transitionDuration: motion.durationBase,
-		transitionProperty: "background-color, background-image, box-shadow, color",
-		transitionTimingFunction: motion.ease,
-		width: "100%",
-	},
-	handoffOptionSelected: {
-		backgroundColor: color.controlActive,
-		backgroundImage: effect.controlDepthHover,
-		boxShadow: shadow.selectedRing,
-		color: color.textMain,
-	},
-	handoffOptionIcon: {
-		color: color.textMuted,
-		flexShrink: 0,
-	},
-	handoffOptionText: {
-		display: "flex",
-		flexDirection: "column",
-		gap: 1,
-		minWidth: 0,
-	},
-	handoffOptionLabel: {
-		color: color.textMain,
-		fontSize: font.size_2,
-		fontWeight: font.weight_6,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	handoffOptionDetail: {
-		color: color.textMuted,
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	copyMessageButton: {
-		alignItems: "center",
-		backgroundColor: color.transparent,
-		borderRadius: radius.sm,
-		color: color.textMuted,
 		display: "inline-flex",
 		fontSize: font.size_2,
 		fontWeight: font.weight_5,
@@ -1316,42 +862,12 @@ const styles = stylex.create({
 		paddingBlock: controlSize._0_5,
 		paddingInline: controlSize._1_5,
 		transitionDuration: motion.durationBase,
-		transitionProperty: "color",
+		transitionProperty: "background-color, color",
 		transitionTimingFunction: motion.ease,
-	},
-	artifactSavedButton: {
-		animationDuration: "900ms",
-		animationIterationCount: 1,
-		animationName: stylex.keyframes({
-			"0%": {
-				backgroundPosition: "0% 50%",
-				boxShadow:
-					"inset 0 0 0 1px color-mix(in srgb, var(--color-inferay-accent) 16%, transparent)",
-			},
-			"45%": {
-				backgroundPosition: "100% 50%",
-				boxShadow:
-					"inset 0 0 0 1px color-mix(in srgb, var(--color-inferay-info) 34%, transparent)",
-			},
-			"100%": {
-				backgroundPosition: "0% 50%",
-				boxShadow:
-					"inset 0 0 0 1px color-mix(in srgb, var(--color-inferay-accent) 20%, transparent)",
-			},
-		}),
-		animationTimingFunction: motion.ease,
-		backgroundColor:
-			"color-mix(in srgb, var(--color-inferay-accent) 8%, transparent)",
-		backgroundImage:
-			"radial-gradient(circle at 0 0, color-mix(in srgb, var(--color-inferay-accent) 24%, transparent), transparent 55%), radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--color-inferay-info) 14%, transparent), transparent 50%)",
-		backgroundSize: "180% 180%",
-		boxShadow:
-			"inset 0 0 0 1px color-mix(in srgb, var(--color-inferay-accent) 20%, transparent)",
-		color: color.textMuted,
 	},
 	copyMessageButtonCopied: {
 		backgroundColor: color.successWash,
-		color: color.textMuted,
+		color: color.success,
 	},
 	messageList: {
 		minHeight: "100%",

@@ -1,11 +1,8 @@
 import * as stylex from "@stylexjs/stylex";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import type { ChatMessage } from "../../features/chat/agent-chat-shared.ts";
+import React, { useEffect, useMemo, useState } from "react";
 import {
 	color,
 	controlSize,
-	effect,
 	font,
 	motion,
 	radius,
@@ -21,14 +18,13 @@ import {
 	IconTerminal,
 	IconWrench,
 } from "../ui/Icons.tsx";
+import type { ChatMessage } from "../../features/chat/agent-chat-shared.ts";
 import {
 	extractToolActivities,
 	getStatusToolName,
 	normalizeToolName,
 	type ToolActivity,
 } from "./chat-agent-utils.ts";
-
-const APP_REGION_NO_DRAG_CLASS = "electrobun-webkit-app-region-no-drag";
 
 interface AgentChatStatusBarProps {
 	messages: ChatMessage[];
@@ -70,16 +66,6 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 	onStop,
 }: AgentChatStatusBarProps) {
 	const [isHovered, setIsHovered] = useState(false);
-	const [isPopoverHovered, setIsPopoverHovered] = useState(false);
-	const activityButtonRef = useRef<HTMLButtonElement>(null);
-	const [popoverPosition, setPopoverPosition] = useState({
-		bottom: 0,
-		left: 0,
-		maxHeight: 260,
-		placement: "top" as "top" | "bottom",
-		top: 0,
-		width: 260,
-	});
 	const [statusActivities, setStatusActivities] = useState<
 		Array<{
 			id: string;
@@ -114,6 +100,7 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 		});
 	}, [isLoading, statusToolName]);
 
+	if (!isLoading) return null;
 	const activityItems =
 		liveActivities.length > 0
 			? liveActivities
@@ -128,144 +115,80 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 		statusToolName ??
 		(status === "responding" ? "Responding" : "Working...");
 	const activityCount = activityItems.length;
-	const showActivityPopover =
-		isLoading && (isHovered || isPopoverHovered) && activityCount > 0;
-
-	useEffect(() => {
-		if (!showActivityPopover) return;
-		const updatePosition = () => {
-			const rect = activityButtonRef.current?.getBoundingClientRect();
-			if (!rect) return;
-			const width = 260;
-			const gap = 6;
-			const spaceAbove = rect.top - gap;
-			const spaceBelow = window.innerHeight - rect.bottom - gap;
-			const placeAbove = spaceAbove >= 160 || spaceAbove >= spaceBelow;
-			const maxHeight = Math.max(
-				120,
-				Math.min(260, (placeAbove ? spaceAbove : spaceBelow) - 8)
-			);
-			setPopoverPosition({
-				bottom: placeAbove ? window.innerHeight - rect.top + gap : 0,
-				left: Math.min(
-					Math.max(8, rect.left),
-					Math.max(8, window.innerWidth - width - 8)
-				),
-				maxHeight,
-				placement: placeAbove ? "top" : "bottom",
-				top: placeAbove ? 0 : rect.bottom + gap,
-				width,
-			});
-		};
-		updatePosition();
-		window.addEventListener("resize", updatePosition);
-		window.addEventListener("scroll", updatePosition, true);
-		return () => {
-			window.removeEventListener("resize", updatePosition);
-			window.removeEventListener("scroll", updatePosition, true);
-		};
-	}, [showActivityPopover]);
-	const activityButtonProps = stylex.props(styles.activityButton);
-	const stopButtonProps = stylex.props(styles.stopButton);
-	const activityPopoverProps = stylex.props(styles.activityPopover);
-
-	if (!isLoading) return null;
 
 	return (
 		<div {...stylex.props(styles.root)}>
-			<div
-				{...stylex.props(styles.activityWrap)}
-				onMouseEnter={() => setIsHovered(true)}
-				onMouseLeave={() => setIsHovered(false)}
-			>
-				<button
-					ref={activityButtonRef}
-					type="button"
-					aria-expanded={showActivityPopover}
-					aria-label="Show agent activity"
-					onClick={() => setIsHovered(true)}
-					onFocus={() => setIsHovered(true)}
-					onBlur={() => setIsHovered(false)}
-					{...activityButtonProps}
-					className={`${APP_REGION_NO_DRAG_CLASS} ${activityButtonProps.className ?? ""}`}
+			{hasActivity ? (
+				<div
+					{...stylex.props(styles.activityWrap)}
+					onMouseEnter={() => setIsHovered(true)}
+					onMouseLeave={() => setIsHovered(false)}
 				>
-					{displayToolName ? (
-						<span {...stylex.props(styles.activityIcon)}>
-							<ToolStatusIcon toolName={displayToolName} />
+					<div {...stylex.props(styles.activityPill)}>
+						{displayToolName && (
+							<span {...stylex.props(styles.activityIcon)}>
+								<ToolStatusIcon toolName={displayToolName} />
+							</span>
+						)}
+						<span {...stylex.props(styles.activitySummary)}>
+							{displaySummary || "Working..."}
 						</span>
-					) : (
-						<span {...stylex.props(styles.liveDot)} />
+						{activityCount > 1 && (
+							<span {...stylex.props(styles.activityCount)}>
+								+{activityCount - 1}
+							</span>
+						)}
+					</div>
+
+					{isHovered && activityCount > 0 && (
+						<div {...stylex.props(styles.activityPopover)}>
+							<div {...stylex.props(styles.popoverHeader)}>
+								<span>Activity</span>
+								<span {...stylex.props(styles.tabularText)}>
+									{activityCount}
+								</span>
+							</div>
+							<div {...stylex.props(styles.popoverList)}>
+								{activityItems.map((activity, idx) => (
+									<div
+										key={activity.id}
+										{...stylex.props(
+											styles.popoverRow,
+											idx < activityItems.length - 1
+												? styles.popoverRowBorder
+												: null
+										)}
+									>
+										<span {...stylex.props(styles.activityIcon)}>
+											<ToolStatusIcon toolName={activity.toolName} />
+										</span>
+										<span {...stylex.props(styles.popoverSummary)}>
+											{activity.summary}
+										</span>
+										{activity.isStreaming && (
+											<span {...stylex.props(styles.liveDot)} />
+										)}
+									</div>
+								))}
+							</div>
+						</div>
 					)}
-					<span {...stylex.props(styles.activitySummary)}>
-						{hasActivity ? displaySummary || "Working..." : "Working..."}
-					</span>
-					{activityCount > 1 && (
-						<span {...stylex.props(styles.activityCount)}>
-							+{activityCount - 1}
-						</span>
-					)}
-				</button>
-			</div>
+				</div>
+			) : (
+				<div {...stylex.props(styles.idleStatus)}>
+					<span {...stylex.props(styles.liveDot)} />
+					<span {...stylex.props(styles.idleText)}>Working...</span>
+				</div>
+			)}
+
 			<button
 				type="button"
 				onClick={onStop}
-				{...stopButtonProps}
-				className={`${APP_REGION_NO_DRAG_CLASS} ${stopButtonProps.className ?? ""}`}
+				{...stylex.props(styles.stopButton)}
 			>
 				<IconStop size={12} {...stylex.props(styles.toolIcon)} />
-				<span {...stylex.props(styles.stopLabel)}>Stop</span>
+				Stop
 			</button>
-			{showActivityPopover &&
-				createPortal(
-					<div
-						{...activityPopoverProps}
-						className={`${APP_REGION_NO_DRAG_CLASS} ${activityPopoverProps.className ?? ""}`}
-						onMouseEnter={() => setIsPopoverHovered(true)}
-						onMouseLeave={() => setIsPopoverHovered(false)}
-						style={{
-							bottom:
-								popoverPosition.placement === "top"
-									? popoverPosition.bottom
-									: undefined,
-							left: popoverPosition.left,
-							maxHeight: popoverPosition.maxHeight,
-							top:
-								popoverPosition.placement === "bottom"
-									? popoverPosition.top
-									: undefined,
-							width: popoverPosition.width,
-						}}
-					>
-						<div {...stylex.props(styles.popoverHeader)}>
-							<span>Activity</span>
-							<span {...stylex.props(styles.tabularText)}>{activityCount}</span>
-						</div>
-						<div {...stylex.props(styles.popoverList)}>
-							{activityItems.map((activity, idx) => (
-								<div
-									key={activity.id}
-									{...stylex.props(
-										styles.popoverRow,
-										idx < activityItems.length - 1
-											? styles.popoverRowBorder
-											: null
-									)}
-								>
-									<span {...stylex.props(styles.activityIcon)}>
-										<ToolStatusIcon toolName={activity.toolName} />
-									</span>
-									<span {...stylex.props(styles.popoverSummary)}>
-										{activity.summary}
-									</span>
-									{activity.isStreaming && (
-										<span {...stylex.props(styles.liveDot)} />
-									)}
-								</div>
-							))}
-						</div>
-					</div>,
-					document.body
-				)}
 		</div>
 	);
 });
@@ -278,87 +201,36 @@ const styles = stylex.create({
 		gap: controlSize._2,
 		justifyContent: "space-between",
 		paddingBlock: controlSize._1,
+		paddingInline: controlSize._3,
 		userSelect: "none",
-		width: "100%",
 	},
 	toolIcon: {
 		flexShrink: 0,
 	},
 	activityWrap: {
-		flex: 1,
-		minWidth: 0,
 		position: "relative",
 	},
-	activityButton: {
+	activityPill: {
 		alignItems: "center",
 		backgroundColor: {
 			default: color.backgroundRaised,
-			":hover": color.surfaceControl,
+			":hover": color.controlActive,
 		},
-		backgroundImage: {
-			default: effect.controlDepth,
-			":hover": effect.controlDepthHover,
-		},
-		borderColor: color.borderSubtle,
+		borderColor: color.border,
 		borderRadius: radius.md,
 		borderStyle: "solid",
-		borderWidth: 0.5,
+		borderWidth: 1,
 		color: color.textSoft,
-		cursor: "pointer",
+		cursor: "default",
 		display: "flex",
-		fontSize: font.size_2,
+		fontSize: font.size_3,
 		fontWeight: font.weight_5,
 		gap: controlSize._1_5,
 		height: controlSize._6,
-		maxWidth: "100%",
-		minWidth: 0,
 		paddingInline: controlSize._2_5,
-		boxShadow: shadow.controlDepth,
 		transitionDuration: motion.durationBase,
-		transitionProperty:
-			"background-color, background-image, border-color, box-shadow, color, transform",
+		transitionProperty: "background-color, border-color, color",
 		transitionTimingFunction: motion.ease,
-		":active": {
-			transform: "scale(0.98)",
-		},
-	},
-	stopButton: {
-		alignItems: "center",
-		backgroundColor: {
-			default: color.backgroundRaised,
-			":hover": color.danger,
-		},
-		backgroundImage: {
-			default: effect.controlDepth,
-			":hover": "none",
-		},
-		borderColor: {
-			default: color.borderSubtle,
-			":hover": color.danger,
-		},
-		borderRadius: radius.md,
-		borderStyle: "solid",
-		borderWidth: 0.5,
-		color: {
-			default: color.textSoft,
-			":hover": color.textMain,
-		},
-		cursor: "pointer",
-		display: "flex",
-		flexShrink: 0,
-		fontSize: font.size_2,
-		fontWeight: font.weight_6,
-		gap: controlSize._1_5,
-		height: controlSize._6,
-		paddingInline: controlSize._2_5,
-		boxShadow: shadow.controlDepth,
-		transitionDuration: motion.durationBase,
-		transitionProperty:
-			"background-color, background-image, border-color, box-shadow, color, transform",
-		transitionTimingFunction: motion.ease,
-		":active": {
-			transform: "scale(0.98)",
-		},
 	},
 	activityIcon: {
 		color: color.textMuted,
@@ -375,29 +247,23 @@ const styles = stylex.create({
 		fontSize: font.size_1,
 		fontVariantNumeric: "tabular-nums",
 	},
-	stopLabel: {
-		flexShrink: 0,
-	},
 	tabularText: {
 		fontVariantNumeric: "tabular-nums",
 	},
 	activityPopover: {
-		backdropFilter: "blur(24px)",
 		backgroundColor: color.backgroundRaised,
-		backgroundImage: effect.popoverDepth,
 		borderColor: color.border,
 		borderRadius: radius.lg,
 		borderStyle: "solid",
 		borderWidth: 1,
-		boxShadow:
-			"inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 28px 58px -14px rgba(0, 0, 0, 0.82)",
-		display: "flex",
-		flexDirection: "column",
+		bottom: "100%",
+		boxShadow: shadow.popover,
+		left: 0,
+		marginBottom: controlSize._1,
 		maxWidth: 320,
 		minWidth: 240,
 		overflow: "hidden",
-		position: "fixed",
-		zIndex: 240,
+		position: "absolute",
 	},
 	popoverHeader: {
 		alignItems: "center",
@@ -414,28 +280,16 @@ const styles = stylex.create({
 		textTransform: "uppercase",
 	},
 	popoverList: {
+		maxHeight: 200,
 		overflowY: "auto",
-		scrollbarWidth: "none",
-		"::-webkit-scrollbar": {
-			display: "none",
-		},
 	},
 	popoverRow: {
 		alignItems: "center",
-		backgroundColor: {
-			default: "transparent",
-			":hover": color.surfaceControl,
-		},
-		backgroundImage: {
-			default: "none",
-			":hover": effect.controlDepth,
-		},
 		display: "flex",
 		fontSize: font.size_2,
 		gap: controlSize._2,
-		minHeight: 30,
-		paddingBlock: controlSize._1,
-		paddingInline: controlSize._2,
+		paddingBlock: controlSize._1_5,
+		paddingInline: controlSize._2_5,
 	},
 	popoverRowBorder: {
 		borderBottomColor: color.borderSubtle,
@@ -464,5 +318,34 @@ const styles = stylex.create({
 	idleText: {
 		color: color.textMuted,
 		fontSize: font.size_2,
+	},
+	stopButton: {
+		alignItems: "center",
+		backgroundColor: {
+			default: color.backgroundRaised,
+			":hover": color.controlActive,
+		},
+		borderColor: color.border,
+		borderRadius: radius.md,
+		borderStyle: "solid",
+		borderWidth: 1,
+		color: {
+			default: color.textSoft,
+			":hover": color.textMain,
+		},
+		display: "inline-flex",
+		flexShrink: 0,
+		fontSize: font.size_3,
+		fontWeight: font.weight_5,
+		gap: controlSize._1_5,
+		height: controlSize._6,
+		justifyContent: "center",
+		paddingInline: controlSize._2_5,
+		transitionDuration: motion.durationBase,
+		transitionProperty: "background-color, border-color, color, transform",
+		transitionTimingFunction: motion.ease,
+		":active": {
+			transform: "scale(0.97)",
+		},
 	},
 });

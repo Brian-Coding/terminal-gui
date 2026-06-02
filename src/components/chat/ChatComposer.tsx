@@ -7,16 +7,9 @@ import {
 	CODEX_REASONING_LEVELS,
 	getAgentDefinition,
 } from "../../features/agents/agents.ts";
-import type {
-	AttachedImageInfo,
-	ComposerContextBlock,
-	QueuedMessageInfo,
-	SlashCommand,
-} from "../../features/chat/agent-chat-shared.ts";
-import { describeComposerContextBlock } from "../../features/chat/composer-context.ts";
 import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
 import { hasId } from "../../lib/data.ts";
-import { stopPropagation } from "../../lib/react-events.ts";
+import { setInputValue, stopPropagation } from "../../lib/react-events.ts";
 import {
 	color,
 	colorValues,
@@ -30,19 +23,22 @@ import {
 import { IconButton } from "../ui/IconButton.tsx";
 import {
 	IconAlertTriangle,
+	IconCheck,
 	IconChevronDown,
 	IconMic,
+	IconPencil,
 	IconPlus,
 	IconStop,
+	IconTrash,
 	IconX,
 } from "../ui/Icons.tsx";
-import { ChatQueueList } from "./ChatQueueList.tsx";
+import type {
+	AttachedImageInfo,
+	QueuedMessageInfo,
+	SlashCommand,
+} from "../../features/chat/agent-chat-shared.ts";
 import { Markdown } from "./ChatRichContent.tsx";
 import { renderInputHighlights } from "./chat-token-decorators.tsx";
-import {
-	type ComposerKeyboardActions,
-	useChatComposerKeyboard,
-} from "./useChatComposerKeyboard.ts";
 
 type AgentOption = {
 	id: AgentKind;
@@ -50,60 +46,7 @@ type AgentOption = {
 	icon: React.ReactNode;
 };
 
-interface ComposerQueueState {
-	queuedMessages: QueuedMessageInfo[];
-	editingQueueId: string | null;
-	setEditingQueueId: (id: string | null) => void;
-	editingQueueText: string;
-	setEditingQueueText: (text: string) => void;
-	queueRef: React.RefObject<QueuedMessageInfo[]>;
-	setQueuedMessages: (messages: QueuedMessageInfo[]) => void;
-}
-
-interface ComposerFilePickerState {
-	menu: {
-		show: boolean;
-		selectedIdx: number;
-		query: string;
-	};
-	setMenu: React.Dispatch<
-		React.SetStateAction<{
-			show: boolean;
-			selectedIdx: number;
-			query: string;
-			atIndex: number;
-			position: {
-				top: number;
-				left: number;
-				width: number;
-				maxHeight: number;
-			} | null;
-		}>
-	>;
-	results: { name: string; path: string; isDir: boolean }[];
-	select: (idx: number) => void;
-	onInput: (value: string, cursorPos: number) => void;
-}
-
-interface ComposerCommandMenuState {
-	menu: { selectedIdx: number };
-	setMenu: React.Dispatch<
-		React.SetStateAction<{
-			show: boolean;
-			selectedIdx: number;
-			query: string;
-			slashIndex: number;
-		}>
-	>;
-	show: boolean;
-	commands: SlashCommand[];
-	names: readonly string[];
-	select: (idx: number) => void;
-	onInput: (value: string, cursorPos: number) => void;
-}
-
 const HIGHLIGHT_CHAR_LIMIT = 6000;
-const APP_REGION_NO_DRAG_CLASS = "electrobun-webkit-app-region-no-drag";
 const CLOSED_MD_PREVIEW = {
 	show: false,
 	path: "",
@@ -111,20 +54,6 @@ const CLOSED_MD_PREVIEW = {
 	loading: false,
 	error: null,
 };
-
-function noDragClassName(className?: string) {
-	return className
-		? `${APP_REGION_NO_DRAG_CLASS} ${className}`
-		: APP_REGION_NO_DRAG_CLASS;
-}
-
-function imageContextUrl(block: ComposerContextBlock): string | null {
-	if (block.source !== "artifact" || !block.path) return null;
-	if (!/\.(png|jpe?g|gif|webp|bmp|ico)(?:[?#].*)?$/i.test(block.path)) {
-		return null;
-	}
-	return `/api/file?path=${encodeURIComponent(block.path)}`;
-}
 
 export function ChatComposer({
 	showInput,
@@ -141,21 +70,35 @@ export function ChatComposer({
 	attachedImages,
 	removeAttachedImage,
 	attachImage,
-	queue,
-	filePicker,
-	commandMenu,
+	queuedMessages,
+	editingQueueId,
+	setEditingQueueId,
+	editingQueueText,
+	setEditingQueueText,
+	queueRef,
+	setQueuedMessages,
+	fileMenu,
+	setFileMenu,
+	fileResults,
+	selectFile,
+	slashMenu,
+	setSlashMenu,
+	showCommands,
+	filteredCommands,
+	slashCommandNames,
+	selectCommand,
+	handleInputForFileMenu,
+	handleInputForSlashMenu,
+	handleKeyDown,
 	handlePaste,
-	keyboard,
 	textareaRef,
 	highlightOverlayRef,
 	inputContainerRef,
 	mdPreview,
 	setMdPreview,
 	onMdFileClick,
+	statusBar,
 	voiceInput,
-	contextBlocks,
-	onRemoveContextBlock,
-	onClearContextBlocks,
 }: {
 	showInput: boolean;
 	agentKind: AgentKind;
@@ -171,11 +114,47 @@ export function ChatComposer({
 	attachedImages: AttachedImageInfo[];
 	removeAttachedImage: (path: string) => void;
 	attachImage: (file: File) => Promise<void>;
-	queue: ComposerQueueState;
-	filePicker: ComposerFilePickerState;
-	commandMenu: ComposerCommandMenuState;
+	queuedMessages: QueuedMessageInfo[];
+	editingQueueId: string | null;
+	setEditingQueueId: (id: string | null) => void;
+	editingQueueText: string;
+	setEditingQueueText: (text: string) => void;
+	queueRef: React.RefObject<QueuedMessageInfo[]>;
+	setQueuedMessages: (messages: QueuedMessageInfo[]) => void;
+	fileMenu: { show: boolean; selectedIdx: number; query: string };
+	setFileMenu: React.Dispatch<
+		React.SetStateAction<{
+			show: boolean;
+			selectedIdx: number;
+			query: string;
+			atIndex: number;
+			position: {
+				top: number;
+				left: number;
+				width: number;
+				maxHeight: number;
+			} | null;
+		}>
+	>;
+	fileResults: { name: string; path: string; isDir: boolean }[];
+	selectFile: (idx: number) => void;
+	slashMenu: { selectedIdx: number };
+	setSlashMenu: React.Dispatch<
+		React.SetStateAction<{
+			show: boolean;
+			selectedIdx: number;
+			query: string;
+			slashIndex: number;
+		}>
+	>;
+	showCommands: boolean;
+	filteredCommands: SlashCommand[];
+	slashCommandNames: readonly string[];
+	selectCommand: (idx: number) => void;
+	handleInputForFileMenu: (value: string, cursorPos: number) => void;
+	handleInputForSlashMenu: (value: string, cursorPos: number) => void;
+	handleKeyDown: (e: React.KeyboardEvent) => void;
 	handlePaste: (e: React.ClipboardEvent) => void;
-	keyboard: ComposerKeyboardActions;
 	textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 	highlightOverlayRef: React.RefObject<HTMLDivElement | null>;
 	inputContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -196,35 +175,17 @@ export function ChatComposer({
 		}>
 	>;
 	onMdFileClick: (path: string) => void;
+	statusBar?: React.ReactNode;
 	voiceInput?: {
 		error: string | null;
 		isListening: boolean;
 		isSupported: boolean;
 		onToggleListening: () => void;
 	};
-	contextBlocks: ComposerContextBlock[];
-	onRemoveContextBlock: (id: string) => void;
-	onClearContextBlocks: () => void;
 }) {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const agentConfigButtonRef = useRef<HTMLButtonElement>(null);
 	const agentConfigMenuRef = useRef<HTMLDivElement>(null);
-	const {
-		menu: fileMenu,
-		setMenu: setFileMenu,
-		results: fileResults,
-		select: selectFile,
-		onInput: handleInputForFileMenu,
-	} = filePicker;
-	const {
-		menu: slashMenu,
-		setMenu: setSlashMenu,
-		show: showCommands,
-		commands: filteredCommands,
-		names: slashCommandNames,
-		select: selectCommand,
-		onInput: handleInputForSlashMenu,
-	} = commandMenu;
 	const [agentConfigOpen, setAgentConfigOpen] = useState(false);
 	const [agentConfigPosition, setAgentConfigPosition] = useState({
 		bottom: 0,
@@ -242,8 +203,7 @@ export function ChatComposer({
 	const modelOptions = useMemo(
 		() =>
 			agentDefinition.models.map((option) => ({
-				id: option.id,
-				label: option.label,
+				...option,
 				icon: getAgentIcon(agentKind, 12),
 			})),
 		[agentDefinition.models, agentKind]
@@ -253,19 +213,6 @@ export function ChatComposer({
 	const selectedReasoningLabel =
 		CODEX_REASONING_LEVELS.find(hasId.bind(null, reasoningLevel))?.label ||
 		reasoningLevel;
-	const handleKeyDown = useChatComposerKeyboard({
-		input,
-		keyboard,
-		fileMenu,
-		fileResultCount: fileResults.length,
-		setFileMenu,
-		selectFile,
-		showCommands,
-		commandMenu: slashMenu,
-		commandCount: filteredCommands.length,
-		setCommandMenu: setSlashMenu,
-		selectCommand,
-	});
 	useEffect(() => {
 		if (!agentConfigOpen) return;
 		const handlePointerDown = (event: MouseEvent) => {
@@ -299,11 +246,24 @@ export function ChatComposer({
 					Math.max(8, window.innerWidth - width - 8)
 				),
 				width,
-				maxHeight: Math.max(220, Math.min(380, rect.top - 12)),
+				maxHeight: Math.min(360, Math.max(220, rect.top - 12)),
 			});
 		}
 		setAgentConfigOpen((open) => !open);
 	};
+	const saveQueuedEdit = (id: string) => {
+		const trimmed = editingQueueText.trim();
+		if (trimmed) {
+			const item = queueRef.current?.find(hasId.bind(null, id));
+			if (item) {
+				item.text = trimmed;
+				item.displayText = trimmed;
+			}
+			setQueuedMessages([...(queueRef.current ?? [])]);
+		}
+		setEditingQueueId(null);
+	};
+
 	return (
 		<>
 			<input
@@ -324,9 +284,6 @@ export function ChatComposer({
 				<div
 					role="group"
 					{...stylex.props(styles.attachments)}
-					className={noDragClassName(
-						stylex.props(styles.attachments).className
-					)}
 					aria-label="Attached images"
 				>
 					{attachedImages.map((img) => (
@@ -352,11 +309,10 @@ export function ChatComposer({
 				</div>
 			)}
 
+			{statusBar}
+
 			{showInput && (
-				<div
-					{...stylex.props(styles.inputDock)}
-					className={noDragClassName(stylex.props(styles.inputDock).className)}
-				>
+				<div {...stylex.props(styles.inputDock)}>
 					<div {...stylex.props(styles.inputFrame)} ref={inputContainerRef}>
 						{fileMenu.show && fileResults.length > 0 && (
 							<div {...stylex.props(styles.fileMenu)}>
@@ -436,54 +392,98 @@ export function ChatComposer({
 								</div>
 							</div>
 						)}
-						<ChatQueueList {...queue} />
-
-						{contextBlocks.length > 0 && (
-							<div {...stylex.props(styles.contextRail)}>
-								<div {...stylex.props(styles.contextHeader)}>
-									<span {...stylex.props(styles.contextTitle)}>Reference</span>
-									<button
-										type="button"
-										onClick={onClearContextBlocks}
-										{...stylex.props(styles.contextClear)}
-									>
-										Clear
-									</button>
-								</div>
-								<div {...stylex.props(styles.contextList)}>
-									{contextBlocks.map((block) => {
-										const imageUrl = imageContextUrl(block);
-										return (
-											<div
-												key={block.id}
-												{...stylex.props(styles.contextBlock)}
-											>
-												{imageUrl ? (
-													<img
-														src={imageUrl}
-														alt=""
-														{...stylex.props(styles.contextThumb)}
-													/>
-												) : null}
-												<span {...stylex.props(styles.contextSource)}>
-													{block.source}
-												</span>
-												<span {...stylex.props(styles.contextText)}>
-													{describeComposerContextBlock(block)}
-												</span>
+						{queuedMessages.length > 0 && (
+							<div {...stylex.props(styles.queueList)}>
+								{queuedMessages.map((qm, idx) => (
+									<div key={qm.id} {...stylex.props(styles.queueRow)}>
+										<span {...stylex.props(styles.queueIndex)}>{idx + 1}</span>
+										{editingQueueId === qm.id ? (
+											<div {...stylex.props(styles.queueEditRow)}>
+												<input
+													type="text"
+													ref={(el) => el?.focus()}
+													value={editingQueueText}
+													onChange={setInputValue.bind(
+														null,
+														setEditingQueueText
+													)}
+													onKeyDown={(e) => {
+														if (e.key === "Enter") {
+															saveQueuedEdit(qm.id);
+														} else if (e.key === "Escape") {
+															setEditingQueueId(null);
+														}
+													}}
+													{...stylex.props(styles.queueEditInput)}
+												/>
 												<IconButton
 													type="button"
-													onClick={() => onRemoveContextBlock(block.id)}
+													onClick={() => saveQueuedEdit(qm.id)}
 													variant="ghost"
 													size="xs"
-													title="Remove context"
+													className={stylex.props(styles.saveButton).className}
+													title="Save"
 												>
-													<IconX size={10} />
+													<IconCheck size={11} />
+												</IconButton>
+												<IconButton
+													type="button"
+													onClick={() => setEditingQueueId(null)}
+													variant="ghost"
+													size="xs"
+													title="Cancel"
+												>
+													<IconX size={11} />
 												</IconButton>
 											</div>
-										);
-									})}
-								</div>
+										) : (
+											<>
+												{qm.images && qm.images.length > 0 && (
+													<img
+														src={`/api/file?path=${encodeURIComponent(qm.images[0]!)}`}
+														alt=""
+														{...stylex.props(styles.queueImage)}
+													/>
+												)}
+												<span {...stylex.props(styles.queueText)}>
+													{qm.displayText}
+												</span>
+												<div {...stylex.props(styles.queueActions)}>
+													<IconButton
+														type="button"
+														onClick={() => {
+															setEditingQueueId(qm.id);
+															setEditingQueueText(qm.text);
+														}}
+														variant="ghost"
+														size="xs"
+														title="Edit"
+													>
+														<IconPencil size={11} />
+													</IconButton>
+													<IconButton
+														type="button"
+														onClick={() => {
+															const next = (queueRef.current ?? []).filter(
+																(q) => q.id !== qm.id
+															);
+															if (queueRef.current) queueRef.current = next;
+															setQueuedMessages([...next]);
+															if (editingQueueId === qm.id) {
+																setEditingQueueId(null);
+															}
+														}}
+														variant="danger"
+														size="xs"
+														title="Remove from queue"
+													>
+														<IconTrash size={11} />
+													</IconButton>
+												</div>
+											</>
+										)}
+									</div>
+								))}
 							</div>
 						)}
 
@@ -508,9 +508,9 @@ export function ChatComposer({
 										className={`shrink-0 ${
 											stylex.props(
 												voiceInput.isListening && styles.voiceButtonListening,
-												!voiceInput.isListening && voiceInput.error
-													? styles.voiceButtonError
-													: null
+												!voiceInput.isListening &&
+													voiceInput.error &&
+													styles.voiceButtonError
 											).className ?? ""
 										}`}
 										title={
@@ -606,6 +606,17 @@ export function ChatComposer({
 										overflowWrap: "break-word",
 									}}
 								/>
+								{isLoading && (
+									<div {...stylex.props(styles.loadingDots)}>
+										<span {...stylex.props(styles.loadingDot)} />
+										<span
+											{...stylex.props(styles.loadingDot, styles.loadingDot2)}
+										/>
+										<span
+											{...stylex.props(styles.loadingDot, styles.loadingDot3)}
+										/>
+									</div>
+								)}
 							</div>
 						</div>
 						<div {...stylex.props(styles.pickerRow)}>
@@ -773,8 +784,6 @@ const styles = stylex.create({
 		flexShrink: 0,
 		alignItems: "center",
 		gap: controlSize._2,
-		maxWidth: "100%",
-		minWidth: 0,
 		overflowX: "auto",
 		overflowY: "hidden",
 		paddingBlock: "0.375rem",
@@ -806,105 +815,84 @@ const styles = stylex.create({
 		backgroundColor: "rgba(0, 0, 0, 0.7)",
 		color: "#ffffff",
 	},
-	contextRail: {
+	queueList: {
 		borderBottomColor: color.borderSubtle,
 		borderBottomStyle: "solid",
 		borderBottomWidth: 1,
-		boxSizing: "border-box",
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
-		maxWidth: "100%",
-		minWidth: 0,
-		overflow: "hidden",
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._2,
-		width: "100%",
+		flexShrink: 0,
+		maxHeight: "112px",
+		overflowY: "auto",
+		paddingBlock: controlSize._1,
+		paddingInline: controlSize._1,
 	},
-	contextHeader: {
-		alignItems: "center",
+	queueRow: {
+		alignItems: "flex-start",
+		borderRadius: 8,
 		display: "flex",
 		gap: controlSize._2,
-		justifyContent: "space-between",
-		minWidth: 0,
-	},
-	contextTitle: {
-		color: color.textMuted,
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		textTransform: "uppercase",
-	},
-	contextClear: {
-		backgroundColor: "transparent",
-		borderWidth: 0,
-		color: color.textMuted,
-		cursor: "pointer",
-		fontSize: font.size_1,
-		padding: 0,
+		paddingBlock: controlSize._1,
+		paddingInline: controlSize._2,
+		transitionProperty: "background-color",
+		transitionDuration: "120ms",
 		":hover": {
-			color: color.textMain,
+			backgroundColor: color.backgroundRaised,
 		},
 	},
-	contextList: {
-		boxSizing: "border-box",
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
-		maxWidth: "100%",
-		minWidth: 0,
-		overflow: "hidden",
-		width: "100%",
-	},
-	contextBlock: {
+	queueIndex: {
 		alignItems: "center",
 		backgroundColor: color.surfaceSubtle,
-		borderColor: color.borderSubtle,
-		borderRadius: 8,
-		borderStyle: "solid",
-		borderWidth: 1,
-		boxSizing: "border-box",
-		display: "flex",
-		flex: "0 1 auto",
-		gap: controlSize._1,
-		maxWidth: "100%",
-		minWidth: 0,
-		overflow: "hidden",
-		paddingBlock: "0.1875rem",
-		paddingInline: controlSize._1,
-		width: "100%",
-	},
-	contextSource: {
-		backgroundColor: color.accentWash,
-		borderRadius: 6,
-		color: color.accent,
+		borderRadius: 999,
+		color: color.textMuted,
+		display: "inline-flex",
 		flexShrink: 0,
-		fontSize: font.size_0_5,
-		fontWeight: font.weight_5,
-		paddingBlock: 1,
-		paddingInline: controlSize._1,
-		textTransform: "uppercase",
-	},
-	contextThumb: {
-		borderColor: color.borderSubtle,
-		borderRadius: 5,
-		borderStyle: "solid",
-		borderWidth: 1,
-		flexShrink: 0,
-		height: "1.375rem",
-		objectFit: "cover",
-		width: "1.375rem",
-	},
-	contextText: {
-		color: color.textSoft,
-		flex: "1 1 0",
 		fontFamily: "var(--font-diff)",
 		fontSize: font.size_1,
-		maxWidth: "100%",
+		fontVariantNumeric: "tabular-nums",
+		height: controlSize._5,
+		justifyContent: "center",
+		minWidth: controlSize._5,
+	},
+	queueEditRow: {
+		display: "flex",
+		flex: 1,
+		alignItems: "center",
+		gap: controlSize._1,
+	},
+	queueEditInput: {
+		flex: 1,
+		borderWidth: 0,
+		borderRadius: "0.25rem",
+		backgroundColor: "rgba(255, 255, 255, 0.06)",
+		color: color.textMain,
+		fontSize: "0.6875rem",
+		outline: "none",
+		paddingBlock: "0.125rem",
+		paddingInline: controlSize._1,
+	},
+	saveButton: {
+		color: color.accent,
+	},
+	queueImage: {
+		width: controlSize._5,
+		height: controlSize._5,
+		flexShrink: 0,
+		borderRadius: "0.25rem",
+		objectFit: "cover",
+	},
+	queueText: {
 		minWidth: 0,
+		flex: 1,
 		overflow: "hidden",
-		overflowWrap: "anywhere",
 		textOverflow: "ellipsis",
 		whiteSpace: "nowrap",
+		color: color.textMain,
+		fontSize: "0.6875rem",
+	},
+	queueActions: {
+		display: "flex",
+		flexShrink: 0,
+		alignItems: "center",
+		gap: "0.125rem",
 	},
 	fileMenu: {
 		position: "absolute",
@@ -920,8 +908,7 @@ const styles = stylex.create({
 		borderColor: color.border,
 		borderRadius: controlSize._2,
 		backgroundColor: color.backgroundRaised,
-		backgroundImage: effect.popoverDepth,
-		boxShadow: shadow.popover,
+		boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.6)",
 	},
 	menuHeader: {
 		borderBottomWidth: 1,
@@ -948,14 +935,9 @@ const styles = stylex.create({
 			default: "transparent",
 			":hover": color.controlHover,
 		},
-		backgroundImage: {
-			default: "none",
-			":hover": effect.controlDepth,
-		},
 	},
 	fileMenuRowActive: {
-		backgroundColor: color.controlActive,
-		backgroundImage: effect.controlDepthHover,
+		backgroundColor: color.accentWash,
 	},
 	fileMenuIcon: {
 		flexShrink: 0,
@@ -995,8 +977,7 @@ const styles = stylex.create({
 		borderColor: color.border,
 		borderRadius: radius.lg,
 		backgroundColor: color.backgroundRaised,
-		backgroundImage: effect.popoverDepth,
-		boxShadow: shadow.popover,
+		boxShadow: shadow.modal,
 	},
 	commandHeader: {
 		color: color.textMuted,
@@ -1026,14 +1007,9 @@ const styles = stylex.create({
 			default: "transparent",
 			":hover": color.controlHover,
 		},
-		backgroundImage: {
-			default: "none",
-			":hover": effect.controlDepth,
-		},
 	},
 	commandRowActive: {
-		backgroundColor: color.controlActive,
-		backgroundImage: effect.controlDepthHover,
+		backgroundColor: color.accentWash,
 	},
 	commandName: {
 		color: color.textMain,
@@ -1067,110 +1043,39 @@ const styles = stylex.create({
 		color: color.textMuted,
 		fontSize: "0.6875rem",
 	},
-	shrink: {
-		flexShrink: 0,
-	},
-	modalBackdrop: {
+	loadingDots: {
 		position: "absolute",
-		inset: 0,
-		zIndex: 50,
+		right: 0,
+		top: "50%",
 		display: "flex",
 		alignItems: "center",
-		justifyContent: "center",
-		backgroundColor: "rgba(0, 0, 0, 0.6)",
-		backdropFilter: "blur(4px)",
+		gap: "0.125rem",
+		transform: "translateY(-50%)",
 	},
-	modal: {
-		position: "relative",
-		display: "flex",
-		width: "90%",
-		maxWidth: "42rem",
-		maxHeight: "80%",
-		flexDirection: "column",
-		overflow: "hidden",
-		borderWidth: 1,
-		borderStyle: "solid",
-		borderColor: color.border,
-		borderRadius: controlSize._2,
-		backgroundColor: color.backgroundRaised,
-		backgroundImage: effect.popoverDepth,
-		boxShadow: shadow.modal,
+	loadingDot: {
+		width: controlSize._1,
+		height: controlSize._1,
+		borderRadius: "999px",
+		backgroundColor: color.accent,
+		animationName: stylex.keyframes({
+			"50%": {
+				opacity: 0.35,
+			},
+		}),
+		animationDuration: "1s",
+		animationIterationCount: "infinite",
 	},
-	modalHeader: {
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "space-between",
-		borderBottomWidth: 1,
-		borderBottomStyle: "solid",
-		borderBottomColor: color.border,
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
+	loadingDot2: {
+		animationDelay: "150ms",
 	},
-	modalTitle: {
-		minWidth: 0,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-		color: color.textMain,
-		fontSize: "0.6875rem",
-		fontWeight: font.weight_5,
-	},
-	modalBody: {
-		flex: 1,
-		overflowY: "auto",
-		color: color.textMain,
-		fontSize: font.size_3,
-		padding: controlSize._4,
-	},
-	modalState: {
-		display: "flex",
-		alignItems: "center",
-		justifyContent: "center",
-		paddingBlock: controlSize._8,
-	},
-	modalStateText: {
-		color: color.textMuted,
-		fontSize: font.size_2,
-	},
-	modalError: {
-		color: color.danger,
-		fontSize: font.size_2,
-	},
-	inputDock: {
-		boxSizing: "border-box",
-		contain: "inline-size",
-		flexShrink: 0,
-		maxWidth: "100%",
-		minWidth: 0,
-		overflow: "visible",
-		paddingBottom: controlSize._2,
-		paddingInline: controlSize._3,
-		paddingTop: controlSize._1,
-		width: "100%",
-	},
-	inputFrame: {
-		backgroundColor: color.backgroundRaised,
-		backgroundImage: effect.controlDepth,
-		borderColor: color.border,
-		borderRadius: 12,
-		borderStyle: "solid",
-		borderWidth: 1,
-		boxSizing: "border-box",
-		contain: "inline-size",
-		display: "flex",
-		flexDirection: "column",
-		isolation: "isolate",
-		maxWidth: "100%",
-		minWidth: 0,
-		overflow: "visible",
-		position: "relative",
-		width: "100%",
-		boxShadow: shadow.composerFrame,
-		transitionProperty: "border-color, box-shadow, background-color",
-		transitionDuration: "150ms",
+	loadingDot3: {
+		animationDelay: "300ms",
 	},
 	accentText: {
 		color: "currentColor",
+	},
+	shrink: {
+		flexShrink: 0,
 	},
 	providerConfigButton: {
 		alignItems: "center",
@@ -1282,22 +1187,180 @@ const styles = stylex.create({
 		boxShadow: shadow.selectedRing,
 		color: color.textMain,
 	},
-	providerConfigError: {
+	modalBackdrop: {
+		position: "absolute",
+		inset: 0,
+		zIndex: 50,
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "center",
+		backgroundColor: "rgba(0, 0, 0, 0.6)",
+		backdropFilter: "blur(4px)",
+	},
+	modal: {
+		position: "relative",
+		display: "flex",
+		width: "90%",
+		maxWidth: "42rem",
+		maxHeight: "80%",
+		flexDirection: "column",
+		overflow: "hidden",
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.border,
+		borderRadius: controlSize._2,
+		backgroundColor: color.background,
+	},
+	modalHeader: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "space-between",
+		borderBottomWidth: 1,
+		borderBottomStyle: "solid",
+		borderBottomColor: color.border,
+		paddingBlock: controlSize._2,
+		paddingInline: controlSize._3,
+	},
+	modalTitle: {
+		minWidth: 0,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+		color: color.textMain,
+		fontSize: "0.6875rem",
+		fontWeight: font.weight_5,
+	},
+	modalBody: {
+		flex: 1,
+		overflowY: "auto",
+		color: color.textMain,
+		fontSize: font.size_3,
+		padding: controlSize._4,
+	},
+	modalState: {
+		display: "flex",
+		alignItems: "center",
+		justifyContent: "center",
+		paddingBlock: controlSize._8,
+	},
+	modalStateText: {
+		color: color.textMuted,
+		fontSize: font.size_2,
+	},
+	modalError: {
 		color: color.danger,
-		fontSize: font.size_1,
-		lineHeight: 1.35,
+		fontSize: font.size_2,
+	},
+	inputDock: {
+		flexShrink: 0,
+		paddingBottom: controlSize._2,
+		paddingInline: controlSize._3,
+		paddingTop: controlSize._1,
+	},
+	inputFrame: {
+		backgroundColor: color.backgroundRaised,
+		borderColor: {
+			default: color.border,
+			":focus-within": color.border,
+		},
+		borderRadius: 12,
+		borderStyle: "solid",
+		borderWidth: 1,
+		display: "flex",
+		flexDirection: "column",
+		overflow: "visible",
+		position: "relative",
+		boxShadow: {
+			default: "none",
+			":focus-within": "none",
+		},
+		transitionProperty: "border-color, box-shadow, background-color",
+		transitionDuration: "150ms",
+	},
+	pickerButtonAccent: {
+		"--dropdown-button-bg-color": "transparent",
+		"--dropdown-button-bg-image": "none",
+		"--dropdown-button-border-color": "transparent",
+		"--dropdown-button-border-width": 0,
+		"--dropdown-button-hover-bg-color": "transparent",
+		"--dropdown-button-hover-bg-image": "none",
+		"--dropdown-button-hover-shadow": "none",
+		"--dropdown-button-open-bg-color": "transparent",
+		"--dropdown-button-open-bg-image": "none",
+		"--dropdown-button-open-border-color": "transparent",
+		"--dropdown-button-open-shadow": "none",
+		"--dropdown-button-shadow": "none",
+		height: controlSize._5,
+		borderRadius: 6,
+		borderColor: "transparent",
+		borderWidth: 0,
+		color: color.accent,
+		fontSize: font.size_2,
+		fontWeight: font.weight_5,
+		gap: controlSize._1,
+		paddingInline: controlSize._1,
+		userSelect: "none",
+		boxShadow: "none",
+		backgroundColor: {
+			default: "transparent",
+			":hover": "transparent",
+		},
+		backgroundImage: "none",
+	},
+	pickerButtonMuted: {
+		"--dropdown-button-bg-color": "transparent",
+		"--dropdown-button-bg-image": "none",
+		"--dropdown-button-border-color": "transparent",
+		"--dropdown-button-border-width": 0,
+		"--dropdown-button-hover-bg-color": "transparent",
+		"--dropdown-button-hover-bg-image": "none",
+		"--dropdown-button-hover-shadow": "none",
+		"--dropdown-button-open-bg-color": "transparent",
+		"--dropdown-button-open-bg-image": "none",
+		"--dropdown-button-open-border-color": "transparent",
+		"--dropdown-button-open-shadow": "none",
+		"--dropdown-button-shadow": "none",
+		height: controlSize._5,
+		borderRadius: 6,
+		borderColor: "transparent",
+		borderWidth: 0,
+		color: color.textMuted,
+		fontSize: font.size_2,
+		fontWeight: font.weight_5,
+		gap: controlSize._1,
+		paddingInline: controlSize._1,
+		userSelect: "none",
+		boxShadow: "none",
+		backgroundColor: {
+			default: "transparent",
+			":hover": "transparent",
+		},
+		backgroundImage: "none",
+	},
+	pickerLabel: {
+		fontSize: font.size_2,
+	},
+	modelLabel: {
+		maxWidth: "96px",
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+		fontSize: font.size_2,
+	},
+	reasoningLabel: {
+		maxWidth: "76px",
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+		fontSize: font.size_2,
 	},
 	inputRow: {
 		alignItems: "flex-end",
-		boxSizing: "border-box",
 		display: "flex",
 		gap: controlSize._1,
-		maxWidth: "100%",
-		minWidth: 0,
 		paddingBlock: "0.375rem",
 		paddingLeft: controlSize._1,
 		paddingRight: controlSize._3,
-		width: "100%",
 	},
 	inputActions: {
 		alignItems: "center",
@@ -1348,16 +1411,12 @@ const styles = stylex.create({
 	},
 	pickerRow: {
 		alignItems: "center",
-		boxSizing: "border-box",
 		display: "flex",
-		flexShrink: 0,
 		gap: "0.375rem",
-		maxWidth: "100%",
 		minWidth: 0,
 		overflowX: "auto",
 		paddingBottom: "0.375rem",
 		paddingInline: controlSize._2,
 		userSelect: "none",
-		width: "100%",
 	},
 });

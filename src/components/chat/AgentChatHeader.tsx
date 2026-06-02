@@ -2,10 +2,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { getAgentDefinition } from "../../features/agents/agents.ts";
-import type {
-	AgentChatSession,
-	WorktreeLaunchInfo,
-} from "../../features/chat/agent-chat-shared.ts";
 import { fetchJsonOr, postJson } from "../../lib/fetch-json.ts";
 import {
 	color,
@@ -16,6 +12,7 @@ import {
 } from "../../tokens.stylex.ts";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
 import { IconGitBranch, IconX } from "../ui/Icons.tsx";
+import type { AgentChatSession } from "../../features/chat/agent-chat-shared.ts";
 
 const APP_REGION_DRAG_CLASS = "electrobun-webkit-app-region-drag";
 const APP_REGION_NO_DRAG_CLASS = "electrobun-webkit-app-region-no-drag";
@@ -24,7 +21,6 @@ interface AgentChatHeaderProps {
 	paneId: string;
 	cwd?: string;
 	gitBranch: string | null;
-	worktreeInfo?: WorktreeLaunchInfo | null;
 	draggable?: boolean;
 	onDragStart?: (e: React.DragEvent) => void;
 	onDragEnd?: () => void;
@@ -121,7 +117,6 @@ export function AgentChatHeader({
 	paneId,
 	cwd,
 	gitBranch,
-	worktreeInfo,
 	draggable,
 	onDragStart,
 	onDragEnd,
@@ -133,8 +128,6 @@ export function AgentChatHeader({
 	const dirName = cwd ? cwd.split("/").pop() || cwd : null;
 	const hasMultipleSessions =
 		sessions && sessions.length > 1 && onSelectSession;
-	const isWorktree =
-		!!cwd && !!worktreeInfo && cwd === worktreeInfo.worktreePath;
 	const sessionOptions = hasMultipleSessions
 		? sessions.map((session) => ({
 				id: session.paneId,
@@ -188,14 +181,6 @@ export function AgentChatHeader({
 						</span>
 					)}
 				</>
-			)}
-			{isWorktree && (
-				<span
-					{...stylex.props(styles.worktreeBadge)}
-					title={worktreeInfo.branchName}
-				>
-					worktree
-				</span>
 			)}
 			<span {...stylex.props(styles.spacer)} />
 			{onClose && (
@@ -315,18 +300,6 @@ const styles = stylex.create({
 		overflow: "hidden",
 		textOverflow: "ellipsis",
 		whiteSpace: "nowrap",
-	},
-	worktreeBadge: {
-		backgroundColor: color.controlActive,
-		borderColor: color.accentBorder,
-		borderRadius: radius.sm,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textSoft,
-		fontSize: font.size_1,
-		fontWeight: font.weight_6,
-		paddingBlock: 1,
-		paddingInline: controlSize._1,
 	},
 	closeButton: {
 		alignItems: "center",

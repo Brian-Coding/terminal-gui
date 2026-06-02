@@ -713,7 +713,7 @@ export const ChatService = {
 		cwd?: string,
 		referencePaths?: string[],
 		clientSessionId?: string | null,
-		agentKind: ChatAgentKind = "codex",
+		agentKind: ChatAgentKind = "claude",
 		model?: string,
 		reasoningLevel?: string,
 		systemPrefix?: string
@@ -972,15 +972,7 @@ export const ChatService = {
 
 	reassignWs(paneId: string, ws: ServerWebSocket<any>) {
 		const session = sessions.get(paneId);
-		if (!session) {
-			sendTo(ws, {
-				type: "chat:status",
-				paneId,
-				status: "idle",
-				isLoading: false,
-			});
-			return;
-		}
+		if (!session) return;
 		clearCleanupTimer(session);
 		session.clients.add(ws);
 		if (session.sessionId)
@@ -1003,13 +995,6 @@ export const ChatService = {
 				paneId,
 				status: session.messageBuffer.streaming ? "responding" : "thinking",
 				isLoading: true,
-			});
-		else
-			sendTo(ws, {
-				type: "chat:status",
-				paneId,
-				status: "idle",
-				isLoading: false,
 			});
 	},
 
@@ -1049,16 +1034,6 @@ export const ChatService = {
 					...view,
 				};
 			});
-	},
-
-	clearGoal(paneId: string): boolean {
-		const session = sessions.get(paneId);
-		if (!session?.goal) return false;
-		session.goal = null;
-		const message = "Goal cleared";
-		session.messageBuffer.pushSystem(message);
-		broadcast(session, { type: "chat:system", paneId, message });
-		return true;
 	},
 
 	destroyAll() {

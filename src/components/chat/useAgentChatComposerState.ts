@@ -5,9 +5,9 @@ import {
 	loadStoredQueue,
 	saveStoredQueue,
 } from "../../features/chat/chat-session-store.ts";
-import { CLIENT_STORAGE_CHANGED_EVENT } from "../../lib/client-storage-sync.ts";
 import { CHAT_QUEUE_KEY_PREFIX } from "../../lib/client-storage-keys.ts";
-import { lacksId, lacksPath } from "../../lib/data.ts";
+import { CLIENT_STORAGE_CHANGED_EVENT } from "../../lib/client-storage-sync.ts";
+import { hasPath, lacksId, lacksPath } from "../../lib/data.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 
@@ -22,7 +22,6 @@ interface AttachedImageState {
 	name: string;
 	path: string;
 	previewUrl: string;
-	thumbnailPath?: string;
 }
 
 interface MarkdownPreviewState {
@@ -53,6 +52,8 @@ export function useAgentChatComposerState(paneId: string) {
 	const [attachedImages, setAttachedImages] = useState<AttachedImageState[]>(
 		[]
 	);
+	const attachedImagesRef = useRef(attachedImages);
+	attachedImagesRef.current = attachedImages;
 	const queueRef = useRef<QueuedMessage[]>(
 		loadStoredQueue<QueuedMessage>(paneId)
 	);
@@ -193,22 +194,10 @@ export function useAgentChatComposerState(paneId: string) {
 			});
 			const data = await res.json();
 			if (data.path) {
-				const previewPath =
-					typeof data.thumbnailPath === "string"
-						? data.thumbnailPath
-						: data.path;
-				const previewUrl = `/api/file?path=${encodeURIComponent(previewPath)}`;
+				const previewUrl = URL.createObjectURL(file);
 				setAttachedImages((prev) => [
 					...prev,
-					{
-						name: file.name,
-						path: data.path,
-						previewUrl,
-						thumbnailPath:
-							typeof data.thumbnailPath === "string"
-								? data.thumbnailPath
-								: undefined,
-					},
+					{ name: file.name, path: data.path, previewUrl },
 				]);
 			}
 		} catch {}
@@ -216,12 +205,17 @@ export function useAgentChatComposerState(paneId: string) {
 
 	const removeAttachedImage = useCallback((path: string) => {
 		setAttachedImages((prev) => {
+			const target = prev.find(hasPath.bind(null, path));
+			if (target) URL.revokeObjectURL(target.previewUrl);
 			return prev.filter(lacksPath.bind(null, path));
 		});
 	}, []);
 
 	const clearAttachedImages = useCallback(() => {
-		setAttachedImages([]);
+		setAttachedImages((prev) => {
+			for (const img of prev) URL.revokeObjectURL(img.previewUrl);
+			return [];
+		});
 	}, []);
 
 	const handleDrop = useCallback(
@@ -247,6 +241,15 @@ export function useAgentChatComposerState(paneId: string) {
 			}
 		},
 		[attachImage]
+	);
+
+	useEffect(
+		() => () => {
+			for (const img of attachedImagesRef.current) {
+				URL.revokeObjectURL(img.previewUrl);
+			}
+		},
+		[]
 	);
 
 	return {
