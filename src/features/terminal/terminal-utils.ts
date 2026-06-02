@@ -1,26 +1,20 @@
-import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
-import { TERMINAL_LAYOUT_MODE_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
-import { hasId, noop } from "../../lib/data.ts";
+import {
+	type AgentKind,
+	type ChatAgentKind,
+	getAgentDefinition,
+	loadDefaultChatSettings,
+} from "../agents/agents.ts";
+
 import { sendJson } from "../../lib/fetch-json.ts";
+import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
+import { hasId, noop } from "../../lib/data.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
+
 import {
 	readStoredJson,
 	readStoredValue,
 	writeStoredJson,
 } from "../../lib/stored-json.ts";
-import {
-	dispatchTerminalShellChange,
-	TERMINAL_SHELL_CHANGE_EVENT,
-} from "../../lib/terminal-shell-events.ts";
-import { wsClient } from "../../lib/websocket.ts";
-import {
-	type AgentKind,
-	type ChatAgentKind,
-	getAgentDefinition,
-	isChatAgentKind,
-	loadDefaultChatSettings,
-} from "../agents/agents.ts";
-import { clearAgentChatMessages } from "../chat/chat-session-store.ts";
 
 export type { AgentKind } from "../agents/agents.ts";
 
@@ -57,9 +51,7 @@ export type ThemeId = (typeof THEME_IDS)[keyof typeof THEME_IDS];
 export type TerminalLayoutMode = "grid" | "rows";
 
 export function loadTerminalLayoutMode(): TerminalLayoutMode {
-	const stored = readStoredValue(TERMINAL_LAYOUT_MODE_STORAGE_KEY);
-	if (stored === "grid" || stored === "rows") return stored;
-	return "rows";
+	return readStoredValue("terminal-layout-mode") === "grid" ? "grid" : "rows";
 }
 
 export function syncTerminalLayoutMode(
@@ -72,7 +64,7 @@ export function listenTerminalLayoutMode(
 	setLayoutMode: (mode: TerminalLayoutMode) => void
 ): () => void {
 	return listenWindowEvent(
-		TERMINAL_SHELL_CHANGE_EVENT,
+		"terminal-shell-change",
 		syncTerminalLayoutMode.bind(null, setLayoutMode)
 	);
 }
@@ -89,15 +81,6 @@ export function appendPaneToGroup(
 				selectedPaneId: pane.id,
 			}
 		: group;
-}
-
-export function resolveTerminalGroupId(
-	groups: readonly TerminalGroupModel[],
-	selectedGroupId: GroupId | string | null | undefined
-): GroupId | null {
-	return (
-		groups.find(hasId.bind(null, selectedGroupId))?.id ?? groups[0]?.id ?? null
-	);
 }
 
 // Compact: [id, name, bg, fg, cursor, separator]
@@ -170,15 +153,12 @@ export function createGroupId(): GroupId {
 
 export type PaneType = AgentKind;
 
-export type UtilityPaneKind = "simulator";
-
 export interface TerminalPaneModel {
 	readonly id: PaneId;
 	title: string;
 	readonly agentKind: AgentKind;
 	readonly isClaude: boolean;
 	readonly paneType?: PaneType;
-	utilityPane?: UtilityPaneKind;
 	cwd?: string;
 	pendingCwd?: boolean;
 	referencePaths?: string[];
@@ -234,44 +214,20 @@ function isValidTerminalState(value: unknown): value is TerminalSavedState {
 	);
 }
 let _cachedTerminalState: TerminalSavedState | null = null;
-let _cachedTerminalStateRaw: string | null | undefined;
-
-function readTerminalStateRaw(): string | null | undefined {
-	try {
-		return localStorage.getItem(TERMINAL_STORAGE_KEY);
-	} catch {
-		return undefined;
-	}
-}
-
-function parseTerminalStateRaw(raw: string | null): TerminalSavedState | null {
-	if (!raw) return null;
-	try {
-		const parsed = JSON.parse(raw) as unknown;
-		return isValidTerminalState(parsed) ? parsed : null;
-	} catch {
-		return null;
-	}
-}
-
 export function cacheTerminalState(state: TerminalSavedState): void {
 	_cachedTerminalState = state;
-	_cachedTerminalStateRaw = JSON.stringify(state);
 }
 
 export function loadTerminalState(): TerminalSavedState | null {
-	const raw = readTerminalStateRaw();
-	if (raw === undefined) return _cachedTerminalState;
-	if (_cachedTerminalStateRaw === raw) return _cachedTerminalState;
-	const state = parseTerminalStateRaw(raw);
+	if (_cachedTerminalState) return _cachedTerminalState;
+	const parsed = readStoredJson<unknown>(TERMINAL_STORAGE_KEY, null);
+	const state = parsed && isValidTerminalState(parsed) ? parsed : null;
 	_cachedTerminalState = state;
-	_cachedTerminalStateRaw = raw;
 	return state;
 }
 
 export function saveTerminalState(state: TerminalSavedState): void {
 	_cachedTerminalState = state;
-	_cachedTerminalStateRaw = JSON.stringify(state);
 	writeStoredJson(TERMINAL_STORAGE_KEY, state);
 	sendJson("/api/terminal/state", state).catch(noop);
 }
@@ -282,13 +238,11 @@ export function saveSyncedTerminalState(
 ): void {
 	saveTerminalState(state);
 	flushPendingClientStorageSync();
-	dispatchTerminalShellChange({ source: "local", reason });
-}
-
-export function destroySyncedPane(paneId: string): void {
-	wsClient.send({ type: "terminal:destroy", paneId });
-	clearAgentChatMessages(paneId);
-	flushPendingClientStorageSync();
+	window.dispatchEvent(
+		new CustomEvent("terminal-shell-change", {
+			detail: { source: "local", reason },
+		})
+	);
 }
 
 /**
@@ -301,26 +255,18 @@ export function changePaneAgentKind(
 ): void {
 	const state = loadTerminalState();
 	if (!state) return;
-	saveSyncedTerminalState(
-		{
-			...state,
-			groups: state.groups.map((g) => ({
-				...g,
-				panes: g.panes.map((p) =>
-					p.id !== paneId
-						? p
-						: {
-								...p,
-								agentKind,
-								isClaude: agentKind === "claude",
-								paneType: agentKind,
-								title: getPaneTitle(agentKind, p.cwd),
-							}
-				),
-			})),
-		},
-		"pane-agent-kind"
-	);
+	saveTerminalState({
+		...state,
+		groups: state.groups.map((g) => ({
+			...g,
+			panes: g.panes.map((p) =>
+				p.id !== paneId
+					? p
+					: { ...p, agentKind, isClaude: agentKind === "claude" }
+			),
+		})),
+	});
+	window.dispatchEvent(new Event("terminal-shell-change"));
 }
 
 export function getPaneTitle(pane: TerminalPaneModel): string;
@@ -363,17 +309,6 @@ export function createPendingAgentChatPane(
 	return createTerminalPane(agentKind, undefined, true);
 }
 
-export function createSimulatorPane(): TerminalPaneModel {
-	return {
-		id: createPaneId(),
-		title: "Simulator",
-		agentKind: "terminal",
-		isClaude: false,
-		paneType: "terminal",
-		utilityPane: "simulator",
-	};
-}
-
 export function createDefaultAgentChatGroup(): TerminalGroupModel {
 	const panes = Array.from({ length: DEFAULT_COLUMNS * DEFAULT_ROWS }, () =>
 		createPendingAgentChatPane()
@@ -388,42 +323,45 @@ export function createDefaultAgentChatGroup(): TerminalGroupModel {
 	};
 }
 
-export function createDefaultTerminalState(): TerminalSavedState {
-	const group = createDefaultAgentChatGroup();
+export function migrateGroup(
+	group: Partial<TerminalGroupModel> & {
+		id: GroupId;
+		name: string;
+		panes: TerminalPaneModel[];
+		selectedPaneId: PaneId | null;
+	}
+): TerminalGroupModel {
+	const panes =
+		group.panes.length > 0 ? group.panes : [createPendingAgentChatPane()];
+	const selectedPaneId = panes.some(hasId.bind(null, group.selectedPaneId))
+		? group.selectedPaneId
+		: (panes[0]?.id ?? null);
 	return {
-		groups: [group],
-		selectedGroupId: group.id,
-		themeId: DEFAULT_THEME_ID,
-		fontSize: DEFAULT_FONT_SIZE,
-		fontFamily: DEFAULT_FONT_FAMILY,
-		opacity: DEFAULT_OPACITY,
+		...group,
+		panes: panes.map((pane) => ({
+			...pane,
+			agentKind:
+				pane.agentKind ??
+				(pane.paneType === "codex"
+					? "codex"
+					: pane.isClaude
+						? "claude"
+						: "terminal"),
+			isClaude: pane.agentKind ? pane.agentKind === "claude" : pane.isClaude,
+			paneType: pane.paneType ?? (pane.isClaude ? "claude" : "terminal"),
+		})),
+		selectedPaneId,
+		columns: group.columns ?? DEFAULT_COLUMNS,
+		rows: group.rows ?? DEFAULT_ROWS,
 	};
 }
 
-export function getPreferredEditorPane(
-	group: TerminalGroupModel | null | undefined
-): TerminalPaneModel | null {
-	if (!group) return null;
-	const selectedPane =
-		group.panes.find(hasId.bind(null, group.selectedPaneId)) ?? null;
-	const chatPanes = group.panes.filter((pane) =>
-		isChatAgentKind(pane.agentKind)
-	);
-	if (selectedPane?.cwd && isChatAgentKind(selectedPane.agentKind)) {
-		return selectedPane;
-	}
-	return (
-		chatPanes.find((pane) => !!pane.cwd) ??
-		(selectedPane && isChatAgentKind(selectedPane.agentKind)
-			? selectedPane
-			: null) ??
-		chatPanes[0] ??
-		null
-	);
-}
-
 export function getInitialGroups(): TerminalGroupModel[] {
-	return loadTerminalState()?.groups ?? createDefaultTerminalState().groups;
+	return (
+		loadTerminalState()?.groups.map(migrateGroup) ?? [
+			createDefaultAgentChatGroup(),
+		]
+	);
 }
 
 const BASE_STATUSES = {
@@ -551,6 +489,6 @@ export function getThemeById(themeId: string): TerminalTheme {
 	return (
 		TERMINAL_THEMES.find(hasId.bind(null, themeId)) ??
 		TERMINAL_THEMES.find(hasId.bind(null, DEFAULT_THEME_ID)) ??
-		TERMINAL_THEMES[0]!
+		TERMINAL_THEMES[0]
 	);
 }

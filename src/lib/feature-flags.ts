@@ -1,21 +1,3 @@
-export const FEATURE_FLAG_NAMES = [
-	"terminal",
-	"git",
-	"prompts",
-	"automations",
-	"goals",
-	"images",
-	"simulators",
-	"profile",
-	"chat",
-	"editor",
-	"changes",
-	"graph",
-] as const;
-
-export type FeatureFlagName = (typeof FEATURE_FLAG_NAMES)[number];
-export type FeatureFlags = Record<FeatureFlagName, boolean>;
-
 declare const __INFERAY_FEATURE_FLAGS__: FeatureFlags | undefined;
 
 export const ENABLED_FEATURE_FLAGS = {
@@ -29,27 +11,20 @@ export const ENABLED_FEATURE_FLAGS = {
 	profile: true,
 	chat: true,
 	editor: true,
-	changes: true,
 	graph: true,
 } as const satisfies FeatureFlags;
+
+export type FeatureFlagName = keyof typeof ENABLED_FEATURE_FLAGS;
+export type FeatureFlags = Record<FeatureFlagName, boolean>;
 
 export const DEV_FEATURE_FLAGS: FeatureFlags = {
 	...ENABLED_FEATURE_FLAGS,
 };
 
 export const PUBLISHED_FEATURE_FLAGS: FeatureFlags = {
-	terminal: true,
-	git: false,
-	prompts: true,
+	...ENABLED_FEATURE_FLAGS,
 	automations: false,
-	goals: false,
-	images: true,
 	simulators: false,
-	profile: false,
-	chat: true,
-	editor: true,
-	changes: false,
-	graph: false,
 };
 
 const buildFeatureFlags =

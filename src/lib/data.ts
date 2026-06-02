@@ -39,6 +39,13 @@ export function runIfMounted(
 	if (mountedRef.current) void action();
 }
 
+export function withRecordEntry<T>(
+	key: string,
+	value: T
+): (current: Record<string, T>) => Record<string, T> {
+	return (current) => ({ ...current, [key]: value });
+}
+
 export function isFirstPath<T extends { path: string }>(
 	seen: Set<string>,
 	item: T
@@ -46,6 +53,20 @@ export function isFirstPath<T extends { path: string }>(
 	if (seen.has(item.path)) return false;
 	seen.add(item.path);
 	return true;
+}
+
+export function setRecordEntry<T>(
+	setRecord: (
+		updater: (current: Record<string, T>) => Record<string, T>
+	) => void,
+	key: string,
+	value: T
+): void {
+	setRecord(withRecordEntry(key, value));
+}
+
+export function comparePort(a: { port: number }, b: { port: number }): number {
+	return a.port - b.port;
 }
 
 export function compareName(a: { name: string }, b: { name: string }): number {
@@ -76,8 +97,16 @@ export function hasUdid(udid: unknown, item: { udid: string }): boolean {
 	return item.udid === udid;
 }
 
+export function hasPath(path: unknown, item: { path: string }): boolean {
+	return item.path === path;
+}
+
 export function lacksPath(path: unknown, item: { path: string }): boolean {
 	return item.path !== path;
+}
+
+export function hasCwd(cwd: unknown, item: { cwd: string }): boolean {
+	return item.cwd === cwd;
 }
 
 export function hasCommand(
@@ -105,6 +134,10 @@ export function ppidNotIn(seen: Set<number>, item: { ppid: number }): boolean {
 
 export function hasRole(role: unknown, item: { role: string }): boolean {
 	return item.role === role;
+}
+
+export function hasPaneId(paneId: unknown, item: { paneId: string }): boolean {
+	return item.paneId === paneId;
 }
 
 export function removePidFromList<T extends { pid: number }>(

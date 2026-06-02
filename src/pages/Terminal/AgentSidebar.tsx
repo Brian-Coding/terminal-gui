@@ -3,7 +3,6 @@ import { memo } from "react";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
 	IconPanelLeft,
-	IconSimulator,
 	IconTerminal,
 	IconX,
 } from "../../components/ui/Icons.tsx";
@@ -34,9 +33,6 @@ function PaneIcon({
 	status: string;
 	size: number;
 }) {
-	if (pane.utilityPane === "simulator") {
-		return <IconSimulator size={size} className="text-inferay-soft-white" />;
-	}
 	if (pane.agentKind === "terminal") {
 		return <IconTerminal size={size} className="text-inferay-soft-white" />;
 	}

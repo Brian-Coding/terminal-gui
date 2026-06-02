@@ -40,6 +40,12 @@ interface TerminalSettingsContentProps {
 	showVersion?: boolean;
 }
 
+interface TerminalSettingsPanelProps {
+	themeId: ThemeId;
+	onThemeChange: (id: ThemeId) => void;
+	onClose: () => void;
+}
+
 const HIDDEN_APP_THEME_IDS = new Set<AppThemeId>([
 	"githubLight",
 	"solarizedLight",
@@ -431,7 +437,48 @@ export const TerminalSettingsContent = memo(function TerminalSettingsContent({
 	);
 });
 
+export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
+	themeId,
+	onThemeChange,
+	onClose,
+}: TerminalSettingsPanelProps) {
+	return (
+		<div {...stylex.props(styles.overlay)} onClick={onClose}>
+			<div
+				{...stylex.props(styles.panel)}
+				onClick={(event) => event.stopPropagation()}
+			>
+				<TerminalSettingsContent
+					themeId={themeId}
+					onThemeChange={onThemeChange}
+				/>
+			</div>
+		</div>
+	);
+});
+
 const styles = stylex.create({
+	overlay: {
+		position: "fixed",
+		inset: 0,
+		zIndex: 80,
+		display: "flex",
+		alignItems: "flex-start",
+		justifyContent: "flex-end",
+		backgroundColor: color.backgroundOverlay,
+		padding: controlSize._4,
+	},
+	panel: {
+		width: "min(22rem, 100%)",
+		maxHeight: "calc(100vh - 2rem)",
+		overflowY: "auto",
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.border,
+		borderRadius: controlSize._3,
+		backgroundColor: color.backgroundRaised,
+		boxShadow: "0 24px 54px rgba(0, 0, 0, 0.64)",
+	},
 	panelBody: {
 		display: "flex",
 		flexDirection: "column",

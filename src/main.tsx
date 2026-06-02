@@ -3,6 +3,7 @@ import { lazy, type ReactElement, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Sidebar } from "./components/layout/Sidebar.tsx";
+import { TerminalShellHeader } from "./components/layout/TerminalShellHeader.tsx";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary.tsx";
 import { preloadPrompts } from "./features/prompts/usePrompts.ts";
 import {
@@ -11,24 +12,16 @@ import {
 	DEFAULT_APP_ROUTE,
 } from "./lib/app-navigation.tsx";
 import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
-import {
-	CLIENT_STORAGE_CHANGED_EVENT,
-	hydrateStoredValues,
-} from "./lib/client-storage-sync.ts";
-import {
-	APP_CUSTOM_THEME_STORAGE_KEY,
-	APP_THEME_STORAGE_KEY,
-	ONBOARDING_DONE_STORAGE_KEY,
-} from "./lib/client-storage-keys.ts";
+import { hydrateStoredValues } from "./lib/client-storage-sync.ts";
 import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
 import { readStoredBoolean } from "./lib/stored-json.ts";
 import { AutomationsPage } from "./pages/AutomationsPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { ImagesPage } from "./pages/ImagesPage";
-import { OnboardingPage } from "./pages/OnboardingPage";
+import { ONBOARDING_DONE_KEY, OnboardingPage } from "./pages/OnboardingPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PromptsPage } from "./pages/PromptsPage";
-import { SessionsPage } from "./pages/SessionsPage";
+import { SimulatorsPage } from "./pages/SimulatorsPage";
 import {
 	colorTheme,
 	controlSizeTheme,
@@ -45,7 +38,7 @@ const TerminalPage = lazy(() =>
 
 if (window.location.origin !== getServerOrigin()) {
 	const originalFetch = window.fetch.bind(window);
-	const routedFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+	window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
 		if (typeof input === "string" && input.startsWith("/")) {
 			return originalFetch(resolveServerUrl(input), init);
 		}
@@ -65,23 +58,15 @@ if (window.location.origin !== getServerOrigin()) {
 			}
 		}
 		return originalFetch(input, init);
-	}) as typeof window.fetch;
-	Object.assign(routedFetch, window.fetch);
-	window.fetch = routedFetch;
+	};
 }
 
 await hydrateStoredValues();
 
-const onboardingDone = readStoredBoolean(ONBOARDING_DONE_STORAGE_KEY);
+const onboardingDone = readStoredBoolean(ONBOARDING_DONE_KEY);
 const defaultRoute = onboardingDone ? DEFAULT_APP_ROUTE : "/onboarding";
 
 applyAppTheme(loadAppThemeId());
-window.addEventListener(CLIENT_STORAGE_CHANGED_EVENT, (event) => {
-	const key = (event as CustomEvent<{ key?: string }>).detail?.key;
-	if (key === APP_THEME_STORAGE_KEY || key === APP_CUSTOM_THEME_STORAGE_KEY) {
-		applyAppTheme(loadAppThemeId());
-	}
-});
 
 if (typeof window !== "undefined") {
 	const idle =
@@ -102,11 +87,11 @@ const root = createRoot(rootElement);
 function AppShell() {
 	const routeElements = {
 		terminal: <TerminalPage />,
-		sessions: <SessionsPage />,
 		prompts: <PromptsPage />,
 		goals: <GoalsPage />,
 		automations: <AutomationsPage />,
 		images: <ImagesPage />,
+		simulators: <SimulatorsPage />,
 		profile: <ProfilePage />,
 	} satisfies Record<AppRouteId, ReactElement>;
 
@@ -123,26 +108,32 @@ function AppShell() {
 	return (
 		<div
 			{...themeProps}
-			className={`flex h-screen bg-inferay-black ${themeProps.className ?? ""}`}
+			className={`flex h-screen flex-col bg-inferay-black ${themeProps.className ?? ""}`}
 		>
-			<Sidebar />
-			<main className="min-w-0 flex-1 overflow-hidden">
-				<Suspense fallback={null}>
-					<Routes>
-						{APP_PAGE_ROUTES.map((route) => (
-							<Route
-								key={route.id}
-								path={route.path}
-								element={routeElements[route.id]}
-							/>
-						))}
-						<Route
-							path="*"
-							element={<Navigate to={DEFAULT_APP_ROUTE} replace />}
-						/>
-					</Routes>
-				</Suspense>
-			</main>
+			<div className="inferay-window-spacer electrobun-webkit-app-region-drag h-6 shrink-0 bg-inferay-black" />
+			<div className="flex min-h-0 flex-1">
+				<Sidebar />
+				<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+					<TerminalShellHeader />
+					<main className="min-w-0 flex-1 overflow-hidden">
+						<Suspense fallback={null}>
+							<Routes>
+								{APP_PAGE_ROUTES.map((route) => (
+									<Route
+										key={route.id}
+										path={route.path}
+										element={routeElements[route.id]}
+									/>
+								))}
+								<Route
+									path="*"
+									element={<Navigate to={DEFAULT_APP_ROUTE} replace />}
+								/>
+							</Routes>
+						</Suspense>
+					</main>
+				</div>
+			</div>
 		</div>
 	);
 }

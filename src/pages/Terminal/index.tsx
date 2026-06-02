@@ -8,20 +8,18 @@ import {
 	useState,
 } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
+import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
+import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
-import { IconX } from "../../components/ui/Icons.tsx";
+import { IconGitBranch, IconX } from "../../components/ui/Icons.tsx";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
-import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
-import {
-	dispatchTerminalShellChange,
-	isClientStorageTerminalShellChange,
-	TERMINAL_SHELL_CHANGE_EVENT,
-} from "../../lib/terminal-shell-events.ts";
+import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { EditorPage } from "../EditorPage/index.tsx";
 import { InlineDirectoryPicker } from "./InlineDirectoryPicker.tsx";
 import { NewSessionButtons } from "./NewSessionButtons.tsx";
 import { TerminalGrid } from "./TerminalGrid.tsx";
+import { TerminalSettingsPanel } from "./TerminalSettingsPanel.tsx";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -29,23 +27,21 @@ import {
 	type AgentKind,
 	cacheTerminalState,
 	createPendingAgentChatPane,
-	createSimulatorPane,
 	createTerminalPane,
 	DEFAULT_CHAT_AGENT_KIND,
 	DEFAULT_FONT_FAMILY,
 	DEFAULT_FONT_SIZE,
 	DEFAULT_OPACITY,
 	DEFAULT_ROWS,
-	destroySyncedPane,
-	type GroupId,
 	getInitialGroups,
 	getPaneTitle,
 	getThemeById,
 	loadTerminalLayoutMode,
 	loadTerminalState,
-	resolveTerminalGroupId,
+	migrateGroup,
 	saveTerminalState,
 	syncTerminalLayoutMode,
+	type GroupId,
 	type TerminalGroupModel,
 	type TerminalPaneModel,
 	type ThemeId,
@@ -56,17 +52,29 @@ import {
 	type TerminalMainView,
 } from "../../lib/app-navigation.tsx";
 import {
-	TERMINAL_LAYOUT_MODE_STORAGE_KEY,
-	TERMINAL_MAIN_VIEW_STORAGE_KEY,
-} from "../../lib/client-storage-keys.ts";
-import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
 } from "../../lib/app-theme.ts";
-import { hasId, lacksId } from "../../lib/data.ts";
-import { listenWindowEvent } from "../../lib/react-events.ts";
+import { hasId, isNonEmptyString, lacksId } from "../../lib/data.ts";
+import {
+	listenWindowEvent,
+	setupTerminalThemePanelShortcut,
+} from "../../lib/react-events.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
+
+function GraphEmptyState({ message }: { message: string }) {
+	return (
+		<div {...stylex.props(styles.centerState, styles.centerPad)}>
+			<div {...stylex.props(styles.centerTextBox)}>
+				<div {...stylex.props(styles.iconBox)}>
+					<IconGitBranch size={18} />
+				</div>
+				<p {...stylex.props(styles.centerMessage)}>{message}</p>
+			</div>
+		</div>
+	);
+}
 
 function paneShellKey(pane: TerminalPaneModel) {
 	return {
@@ -74,7 +82,6 @@ function paneShellKey(pane: TerminalPaneModel) {
 		agentKind: pane.agentKind,
 		cwd: pane.cwd ?? null,
 		pendingCwd: pane.pendingCwd ?? false,
-		utilityPane: pane.utilityPane ?? null,
 		title: pane.title,
 	};
 }
@@ -138,8 +145,6 @@ const styles = stylex.create({
 		display: "flex",
 		flex: 1,
 		flexDirection: "column",
-		minHeight: 0,
-		minWidth: 0,
 	},
 	mainPaneHidden: {
 		overflow: "hidden",
@@ -213,20 +218,6 @@ const styles = stylex.create({
 		marginBottom: controlSize._1,
 		paddingInline: controlSize._1,
 	},
-	chatWorkspace: {
-		display: "flex",
-		flex: 1,
-		flexDirection: "column",
-		height: "100%",
-		minHeight: 0,
-		overflow: "hidden",
-	},
-	chatGridSlot: {
-		display: "flex",
-		flex: 1,
-		minHeight: 0,
-		overflow: "hidden",
-	},
 });
 
 function AgentStartPane({
@@ -296,7 +287,6 @@ type GroupAction =
 			pendingCwd?: boolean;
 			referencePaths?: string[];
 	  }
-	| { type: "addSimulatorPane"; groupId: string }
 	| { type: "removePane"; groupId: string; paneId: string; force?: boolean }
 	| { type: "selectPane"; groupId: string; paneId: string }
 	| {
@@ -335,13 +325,6 @@ function groupsReducer(
 			if (action.referencePaths) {
 				pane.referencePaths = action.referencePaths;
 			}
-			return state.map((g) => {
-				if (g.id !== action.groupId) return g;
-				return { ...g, panes: [...g.panes, pane], selectedPaneId: pane.id };
-			});
-		}
-		case "addSimulatorPane": {
-			const pane = createSimulatorPane();
 			return state.map((g) => {
 				if (g.id !== action.groupId) return g;
 				return { ...g, panes: [...g.panes, pane], selectedPaneId: pane.id };
@@ -435,21 +418,22 @@ export function TerminalPage() {
 	useEffect(wsClient.connect.bind(wsClient), []);
 	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
 	const [mainView, setMainView] = useState<TerminalMainView>(() => {
-		const stored = readStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY);
+		const stored = readStoredValue("terminal-main-view");
 		return isTerminalMainView(stored) ? stored : DEFAULT_TERMINAL_MAIN_VIEW;
 	});
 	useEffect(() => {
-		writeStoredValue(TERMINAL_LAYOUT_MODE_STORAGE_KEY, layoutMode);
+		writeStoredValue("terminal-layout-mode", layoutMode);
 	}, [layoutMode]);
 	useEffect(() => {
-		writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, mainView);
+		writeStoredValue("terminal-main-view", mainView);
 	}, [mainView]);
 	const initialState = useMemo(loadTerminalState, []);
 	const initGroups = useMemo(() => getInitialGroups(), []);
 	const [groups, groupsDispatch] = useReducer(groupsReducer, initGroups);
-	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(() =>
-		resolveTerminalGroupId(initGroups, initialState?.selectedGroupId)
+	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
+		() => initialState?.selectedGroupId ?? initGroups[0]?.id ?? null
 	);
+	const [showSettings, setShowSettings] = useState(false);
 	const [appearance, setAppearance] = useState(() => ({
 		themeId: (initialState?.themeId ??
 			mapAppThemeToTerminalTheme(loadAppThemeId())) as ThemeId,
@@ -461,28 +445,45 @@ export function TerminalPage() {
 	const chatRefs = useRef<Map<string, AgentChatHandle>>(new Map());
 	useAgentSessions();
 	const theme = useMemo(() => getThemeById(themeId), [themeId]);
-	const effectiveSelectedGroupId = useMemo(
-		() => resolveTerminalGroupId(groups, selectedGroupId),
+	const currentGroup = useMemo(
+		() => groups.find(hasId.bind(null, selectedGroupId)),
 		[groups, selectedGroupId]
 	);
-	const currentGroup = useMemo(
-		() => groups.find(hasId.bind(null, effectiveSelectedGroupId)),
-		[effectiveSelectedGroupId, groups]
+	const graphCwds = useMemo(
+		() =>
+			Array.from(
+				new Set(
+					(currentGroup?.panes ?? [])
+						.map((pane) => pane.cwd)
+						.filter(isNonEmptyString)
+				)
+			),
+		[currentGroup]
 	);
+	const [activeGraphCwd, setActiveGraphCwd] = useState<string | null>(null);
 	useEffect(() => {
-		if (
-			effectiveSelectedGroupId &&
-			selectedGroupId !== effectiveSelectedGroupId
-		) {
-			setSelectedGroupId(effectiveSelectedGroupId);
+		const selectedPaneCwd =
+			currentGroup?.panes.find(
+				(pane) => pane.id === currentGroup.selectedPaneId
+			)?.cwd ?? null;
+		if (selectedPaneCwd && graphCwds.includes(selectedPaneCwd)) {
+			setActiveGraphCwd(selectedPaneCwd);
+			return;
 		}
-	}, [effectiveSelectedGroupId, selectedGroupId]);
+		setActiveGraphCwd((current) =>
+			current && graphCwds.includes(current) ? current : (graphCwds[0] ?? null)
+		);
+	}, [currentGroup, graphCwds]);
+	const { projectMap } = useGitStatus(graphCwds);
+	const activeGraphProject = activeGraphCwd
+		? (projectMap.get(activeGraphCwd) ?? null)
+		: null;
 	const restoreSavedState = useCallback(
 		(s: ReturnType<typeof loadTerminalState>) => {
 			if (!s) return;
 			groupsDispatch({
 				type: "replaceAll",
-				groups: s.groups,
+				groups: s.groups.map(migrateGroup),
 			});
 			setSelectedGroupId(s.selectedGroupId);
 			setAppearance({
@@ -495,14 +496,15 @@ export function TerminalPage() {
 		[]
 	);
 	const cleanupPane = useCallback((paneId: string) => {
+		wsClient.send({ type: "terminal:destroy", paneId });
 		chatRefs.current.delete(paneId);
-		destroySyncedPane(paneId);
+		clearAgentChatMessages(paneId);
 	}, []);
 	const withSelectedGroup = useCallback(
 		(fn: (groupId: string) => void) => {
-			if (effectiveSelectedGroupId) fn(effectiveSelectedGroupId);
+			if (selectedGroupId) fn(selectedGroupId);
 		},
-		[effectiveSelectedGroupId]
+		[selectedGroupId]
 	);
 	const latestStateRef = useRef({
 		groups,
@@ -513,9 +515,6 @@ export function TerminalPage() {
 		opacity,
 	});
 	const pendingSaveRef = useRef(false);
-	const pendingSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-		null
-	);
 	useEffect(() => {
 		latestStateRef.current = {
 			groups,
@@ -531,43 +530,19 @@ export function TerminalPage() {
 		pendingSaveRef.current = true;
 		const id = setTimeout(() => {
 			saveTerminalState(latestStateRef.current);
-			flushPendingClientStorageSync();
 			pendingSaveRef.current = false;
-			pendingSaveTimerRef.current = null;
-			dispatchTerminalShellChange({ source: "local", reason: "terminal-save" });
+			window.dispatchEvent(new Event("terminal-shell-change"));
 		}, 100);
-		pendingSaveTimerRef.current = id;
-		return () => {
-			clearTimeout(id);
-			if (pendingSaveTimerRef.current === id) {
-				pendingSaveTimerRef.current = null;
-			}
-		};
+		return () => clearTimeout(id);
 	});
 	useEffect(
 		() => () => {
 			saveTerminalState(latestStateRef.current);
-			flushPendingClientStorageSync(true);
 		},
 		[]
 	);
 	useEffect(() => {
-		const handleShellChange = (event: Event) => {
-			const detail = event instanceof CustomEvent ? event.detail : null;
-			const isSharedStorageEvent = isClientStorageTerminalShellChange(event);
-			const isLocalStateMutation =
-				typeof detail === "object" &&
-				detail !== null &&
-				(detail as { source?: string; reason?: string }).source === "local" &&
-				(detail as { reason?: string }).reason !== "terminal-save";
-			if (
-				(isSharedStorageEvent || isLocalStateMutation) &&
-				pendingSaveTimerRef.current
-			) {
-				clearTimeout(pendingSaveTimerRef.current);
-				pendingSaveTimerRef.current = null;
-				pendingSaveRef.current = false;
-			}
+		const handleShellChange = () => {
 			const saved = loadTerminalState();
 			if (saved?.themeId && saved.themeId !== themeId) {
 				setAppearance((prev) => ({ ...prev, themeId: saved.themeId }));
@@ -585,41 +560,8 @@ export function TerminalPage() {
 					selectedGroupId: savedState.selectedGroupId,
 				};
 			}
-			const savedSelectedGroup = savedState?.groups.find(
-				hasId.bind(null, savedState.selectedGroupId)
-			);
-			if (savedSelectedGroup?.selectedPaneId) {
-				const currentSavedGroup = latestStateRef.current.groups.find(
-					hasId.bind(null, savedSelectedGroup.id)
-				);
-				if (
-					currentSavedGroup &&
-					currentSavedGroup.selectedPaneId !== savedSelectedGroup.selectedPaneId
-				) {
-					groupsDispatch({
-						type: "selectPane",
-						groupId: savedSelectedGroup.id,
-						paneId: savedSelectedGroup.selectedPaneId,
-					});
-					latestStateRef.current = {
-						...latestStateRef.current,
-						groups: latestStateRef.current.groups.map((group) =>
-							group.id === savedSelectedGroup.id
-								? {
-										...group,
-										selectedPaneId: savedSelectedGroup.selectedPaneId,
-									}
-								: group
-						),
-					};
-				}
-			}
 			// Skip full restore check if we have a pending save - this prevents undoing local changes
-			if (
-				pendingSaveRef.current &&
-				!isSharedStorageEvent &&
-				!isLocalStateMutation
-			) {
+			if (pendingSaveRef.current) {
 				return;
 			}
 			if (savedState) {
@@ -635,7 +577,7 @@ export function TerminalPage() {
 					restoreSavedState(savedState);
 				}
 			}
-			const storedView = readStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY);
+			const storedView = readStoredValue("terminal-main-view");
 			const nextMainView = isTerminalMainView(storedView)
 				? storedView
 				: DEFAULT_TERMINAL_MAIN_VIEW;
@@ -644,8 +586,9 @@ export function TerminalPage() {
 			}
 			syncTerminalLayoutMode(setLayoutMode);
 		};
-		return listenWindowEvent(TERMINAL_SHELL_CHANGE_EVENT, handleShellChange);
+		return listenWindowEvent("terminal-shell-change", handleShellChange);
 	}, [groups, mainView, restoreSavedState, selectedGroupId, themeId]);
+	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
 	const handleAddPane = useCallback(
 		(agentKind: AgentKind) =>
 			withSelectedGroup((groupId) =>
@@ -672,17 +615,6 @@ export function TerminalPage() {
 			),
 		[withSelectedGroup]
 	);
-	useEffect(() => {
-		const handleCreateSimulatorPane = () => {
-			withSelectedGroup((groupId) =>
-				groupsDispatch({ type: "addSimulatorPane", groupId })
-			);
-		};
-		return listenWindowEvent(
-			"inferay:create-simulator-pane",
-			handleCreateSimulatorPane
-		);
-	}, [withSelectedGroup]);
 	const removePane = useCallback(
 		(paneId: string, force?: boolean) => {
 			if (!selectedGroupId) return;
@@ -771,25 +703,6 @@ export function TerminalPage() {
 		},
 		[]
 	);
-	useEffect(
-		() =>
-			listenWindowEvent("inferay:agent-handover-request", (event) => {
-				const detail = (
-					event as CustomEvent<{
-						targetPaneId?: string;
-						sourcePaneId?: string;
-						sourceMessageId?: string;
-						prompt?: string;
-						displayText?: string;
-					}>
-				).detail;
-				if (!detail?.targetPaneId || !detail.prompt) return;
-				chatRefs.current
-					.get(detail.targetPaneId)
-					?.sendMessage(detail.prompt, detail.displayText ?? "Hand off");
-			}),
-		[]
-	);
 	const editorViewKey = useMemo(() => {
 		if (!currentGroup) return "none";
 		return `${currentGroup.id}:${currentGroup.panes
@@ -824,11 +737,6 @@ export function TerminalPage() {
 			onSetPaneAgentKind={handleSetPaneAgentKind}
 		/>
 	) : null;
-	const chatWorkspace = currentGroup ? (
-		<div {...stylex.props(styles.chatWorkspace)}>
-			<div {...stylex.props(styles.chatGridSlot)}>{terminalGrid}</div>
-		</div>
-	) : null;
 	return (
 		<div {...stylex.props(styles.appRoot, styles.fullHeight)}>
 			<div {...stylex.props(styles.appFrame)}>
@@ -849,13 +757,34 @@ export function TerminalPage() {
 									key={editorViewKey}
 									groups={groups}
 									selectedGroupId={selectedGroupId}
+									themeId={themeId}
 									onSelectPane={selectPane}
 									onDirectoryChange={handleDirectorySelected}
 								/>
 							) : mainView === "chat" ? (
-								chatWorkspace
+								terminalGrid
+							) : mainView === "graph" ? (
+								graphCwds.length === 0 ? (
+									<GraphEmptyState message="Open a project directory in one of this group's panes to populate the file graph." />
+								) : (
+									<ProjectFileGraphView
+										cwds={graphCwds}
+										activeCwd={activeGraphCwd}
+										onSelectCwd={setActiveGraphCwd}
+										project={activeGraphProject}
+									/>
+								)
 							) : (
 								terminalGrid
+							)}
+							{showSettings && (
+								<TerminalSettingsPanel
+									themeId={themeId}
+									onThemeChange={(v: ThemeId) =>
+										setAppearance((prev) => ({ ...prev, themeId: v }))
+									}
+									onClose={setShowSettings.bind(null, false)}
+								/>
 							)}
 						</div>
 					</div>

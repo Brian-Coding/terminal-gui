@@ -2,40 +2,24 @@ import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
 	IconChevronDown,
-	IconCopy,
 	IconPlus,
-	IconSlash,
+	IconSearch,
 } from "../../components/ui/Icons.tsx";
-import {
-	WorkspaceButton,
-	WorkspaceContent,
-	WorkspaceEmptyState,
-	WorkspacePage,
-	WorkspaceSearch,
-	WorkspaceToolbar,
-	WorkspaceToolbarSpacer,
-} from "../../components/ui/WorkspacePage.tsx";
-import { filterPrompts } from "../../features/prompts/prompt-utils.ts";
-import {
-	PROMPT_CATEGORIES,
-	type Prompt,
-} from "../../features/prompts/types.ts";
 import { usePrompts } from "../../features/prompts/usePrompts.ts";
-import {
-	deletePromptQuickAction,
-	loadQuickActions,
-	savePromptAsQuickAction,
-} from "../../features/quick-actions/quick-actions-store.ts";
-import { listenDocumentEvent, setInputValue } from "../../lib/react-events.ts";
 import {
 	color,
 	controlSize,
-	effect,
 	font,
 	motion,
 	radius,
 	shadow,
 } from "../../tokens.stylex.ts";
+import { filterPrompts } from "../../features/prompts/prompt-utils.ts";
+import {
+	PROMPT_CATEGORIES,
+	type Prompt,
+} from "../../features/prompts/types.ts";
+import { listenDocumentEvent, setInputValue } from "../../lib/react-events.ts";
 import { PromptDetailPanel } from "./PromptDetailPanel.tsx";
 
 interface FormState {
@@ -75,15 +59,6 @@ const INITIAL_FORM: FormState = {
 	isEditing: false,
 	isCreating: false,
 };
-
-function derivePromptActionCommands(): Set<string> {
-	return new Set(
-		loadQuickActions()
-			.flatMap((action) => action.tags)
-			.filter((tag) => tag.startsWith("prompt:"))
-			.map((tag) => tag.slice("prompt:".length))
-	);
-}
 
 function formReducer(state: FormState, action: FormAction): FormState {
 	switch (action.type) {
@@ -125,10 +100,6 @@ export function PromptsPage() {
 	const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
 	const [filter, setFilter] = useState("all");
 	const [search, setSearch] = useState("");
-	const [actionStatus, setActionStatus] = useState<string | null>(null);
-	const [promptActionCommands, setPromptActionCommands] = useState<Set<string>>(
-		() => derivePromptActionCommands()
-	);
 	const [form, formDispatch] = useReducer(formReducer, INITIAL_FORM);
 
 	const handleFormChange = useCallback((field: string, value: string) => {
@@ -140,19 +111,16 @@ export function PromptsPage() {
 	}, []);
 
 	const startEdit = useCallback((p: Prompt) => {
-		setActionStatus(null);
 		formDispatch({ type: "startEdit", prompt: p });
 	}, []);
 
 	const startCreate = useCallback(() => {
 		setSelectedPrompt(null);
-		setActionStatus(null);
 		formDispatch({ type: "startCreate" });
 	}, []);
 
 	const selectPrompt = (p: Prompt) => {
 		if (form.isEditing || form.isCreating) cancelEdit();
-		setActionStatus(null);
 		setSelectedPrompt(p);
 	};
 
@@ -192,7 +160,7 @@ export function PromptsPage() {
 			if (isInlineEdit && selectedPrompt) {
 				await updatePrompt(selectedPrompt._id, data);
 				formDispatch({ type: "finishEdit" });
-			} else if (form.isCreating || !selectedPrompt) {
+			} else if (form.isCreating) {
 				await createPrompt(data);
 				formDispatch({ type: "finishCreate" });
 			}
@@ -207,102 +175,111 @@ export function PromptsPage() {
 	};
 
 	const handleDelete = async (p: Prompt) => {
-		if (p.isBuiltIn || !confirm(`Delete /${p.command}?`)) return false;
+		if (p.isBuiltIn || !confirm(`Delete /${p.command}?`)) return;
 		try {
 			await removePrompt(p._id);
-			return true;
-		} catch {
-			return false;
-		}
+		} catch {}
 	};
 
 	const filtered = filterPrompts(prompts, filter, search);
-	const createActionFromPrompt = (prompt: Prompt) => {
-		const action = savePromptAsQuickAction(prompt);
-		setPromptActionCommands(derivePromptActionCommands());
-		setActionStatus(`Saved "${action.name}" as a runnable Action.`);
-	};
-	const removeActionFromPrompt = (prompt: Prompt) => {
-		const removedCount = deletePromptQuickAction(prompt.command);
-		setPromptActionCommands(derivePromptActionCommands());
-		setActionStatus(
-			removedCount > 0
-				? `Removed /${prompt.command} from runnable Actions.`
-				: `/${prompt.command} is not saved as an Action.`
-		);
-	};
-
-	const isCreatingInSidebar =
-		form.isCreating || (!selectedPrompt && !form.isEditing);
 
 	return (
-		<WorkspacePage>
-			<WorkspaceToolbar>
+		<div {...stylex.props(styles.root)}>
+			<div {...stylex.props(styles.toolbar)}>
 				<FilterDropdown filter={filter} onFilterChange={setFilter} />
 
-				<WorkspaceToolbarSpacer />
-				<WorkspaceSearch
-					width="md"
-					value={search}
-					onChange={setInputValue.bind(null, setSearch)}
-					placeholder="Search prompts"
-				/>
-				<WorkspaceButton
+				<div {...stylex.props(styles.searchWrap)}>
+					<IconSearch size={12} {...stylex.props(styles.searchIcon)} />
+					<input
+						type="text"
+						value={search}
+						onChange={setInputValue.bind(null, setSearch)}
+						placeholder="Search..."
+						{...stylex.props(styles.searchInput)}
+					/>
+				</div>
+
+				<span {...stylex.props(styles.countText)}>{filtered.length}</span>
+
+				<span {...stylex.props(styles.spacer)} />
+
+				<button
 					type="button"
 					onClick={startCreate}
-					variant="secondary"
+					{...stylex.props(styles.newButton)}
 				>
 					<IconPlus size={10} />
 					New
-				</WorkspaceButton>
-			</WorkspaceToolbar>
+				</button>
+			</div>
 
-			<WorkspaceContent padding="none">
-				<div {...stylex.props(styles.promptShell)}>
-					<div {...stylex.props(styles.listPane)}>
-						{filtered.length === 0 ? (
-							<div {...stylex.props(styles.listEmpty)}>
-								<WorkspaceEmptyState
-									icon={<IconCopy size={16} />}
-									title={search ? "No prompts found" : "No prompts yet"}
-									description={
-										search
-											? "No local prompt matches this search or filter."
-											: "Create a reusable prompt to add it here."
-									}
-									action={
-										search ? null : (
-											<WorkspaceButton
-												type="button"
-												onClick={startCreate}
-												variant="primary"
-											>
-												<IconPlus size={10} />
-												New Prompt
-											</WorkspaceButton>
-										)
-									}
-								/>
+			<div {...stylex.props(styles.content)}>
+				<div {...stylex.props(styles.listPane)}>
+					{filtered.length === 0 ? (
+						<div {...stylex.props(styles.emptyState)}>
+							<div {...stylex.props(styles.emptyCopy)}>
+								<p {...stylex.props(styles.emptyTitle)}>
+									{search ? "No prompts found" : "No prompts yet"}
+								</p>
+								<p {...stylex.props(styles.emptyText)}>
+									{search
+										? "Try a different search"
+										: "Create your first prompt"}
+								</p>
 							</div>
-						) : (
-							<div {...stylex.props(styles.promptList)}>
-								{filtered.map((prompt) => (
-									<PromptItemRow
+						</div>
+					) : (
+						<div
+							{...stylex.props(
+								styles.promptGrid,
+								selectedPrompt || form.isCreating
+									? styles.promptGridCompact
+									: styles.promptGridWide
+							)}
+						>
+							{filtered.map((prompt) => {
+								const isActive = selectedPrompt?._id === prompt._id;
+								return (
+									<button
+										type="button"
 										key={prompt._id}
-										prompt={prompt}
-										selected={selectedPrompt?._id === prompt._id}
-										isActionCreated={promptActionCommands.has(prompt.command)}
-										onSelect={() => selectPrompt(prompt)}
-									/>
-								))}
-							</div>
-						)}
-					</div>
+										onClick={() => selectPrompt(prompt)}
+										{...stylex.props(
+											styles.promptCard,
+											isActive ? styles.promptCardActive : styles.promptCardIdle
+										)}
+									>
+										<div {...stylex.props(styles.cardHeader)}>
+											<span {...stylex.props(styles.commandText)}>
+												/{prompt.command}
+											</span>
+											{prompt.isBuiltIn && (
+												<span {...stylex.props(styles.cardBadge)}>
+													built-in
+												</span>
+											)}
+										</div>
+										<p {...stylex.props(styles.promptName)}>{prompt.name}</p>
+										<p {...stylex.props(styles.promptDescription)}>
+											{prompt.description}
+										</p>
+										{prompt.executionCount > 0 && (
+											<p {...stylex.props(styles.usageText)}>
+												{prompt.executionCount} uses
+											</p>
+										)}
+									</button>
+								);
+							})}
+						</div>
+					)}
+				</div>
 
+				{(selectedPrompt || form.isCreating) && (
 					<div {...stylex.props(styles.detailPane)}>
 						<PromptDetailPanel
-							selectedPrompt={isCreatingInSidebar ? null : selectedPrompt}
-							isCreatingNew={isCreatingInSidebar}
+							selectedPrompt={selectedPrompt}
+							isCreatingNew={form.isCreating}
 							isEditing={form.isEditing}
 							isSaving={form.isSaving}
 							formCommand={form.command}
@@ -312,28 +289,15 @@ export function PromptsPage() {
 							formCategory={form.category}
 							formTags={form.tags}
 							formError={form.error}
-							isActionCreated={
-								selectedPrompt
-									? promptActionCommands.has(selectedPrompt.command)
-									: false
-							}
 							onFormChange={handleFormChange}
 							onStartEditing={() => selectedPrompt && startEdit(selectedPrompt)}
-							onCreateAction={() =>
-								selectedPrompt && createActionFromPrompt(selectedPrompt)
-							}
-							onRemoveAction={() =>
-								selectedPrompt && removeActionFromPrompt(selectedPrompt)
-							}
 							onCancelEditing={cancelEdit}
 							onSave={handleSave}
 							onDelete={() => {
 								if (selectedPrompt) {
-									handleDelete(selectedPrompt).then((deleted) => {
-										if (!deleted) return;
-										setSelectedPrompt(null);
-										formDispatch({ type: "cancelEdit" });
-									});
+									handleDelete(selectedPrompt);
+									setSelectedPrompt(null);
+									formDispatch({ type: "cancelEdit" });
 								}
 							}}
 							onClose={() => {
@@ -341,77 +305,10 @@ export function PromptsPage() {
 								setSelectedPrompt(null);
 							}}
 						/>
-						{actionStatus ? (
-							<div {...stylex.props(styles.detailStatus)}>{actionStatus}</div>
-						) : null}
 					</div>
-				</div>
-			</WorkspaceContent>
-		</WorkspacePage>
-	);
-}
-
-function PromptItemRow({
-	prompt,
-	selected,
-	isActionCreated,
-	onSelect,
-}: {
-	prompt: Prompt;
-	selected: boolean;
-	isActionCreated: boolean;
-	onSelect: () => void;
-}) {
-	const status = isActionCreated
-		? "action"
-		: prompt.isBuiltIn
-			? "built-in"
-			: "custom";
-
-	return (
-		<button
-			type="button"
-			onClick={onSelect}
-			{...stylex.props(styles.promptRow, selected && styles.promptRowSelected)}
-		>
-			<span {...stylex.props(styles.promptIcon)}>
-				<IconSlash size={13} />
-			</span>
-			<span {...stylex.props(styles.promptMain)}>
-				<span {...stylex.props(styles.promptTitleRow)}>
-					<span {...stylex.props(styles.promptName)}>{prompt.name}</span>
-					<span {...stylex.props(styles.commandText)}>/{prompt.command}</span>
-				</span>
-				<span {...stylex.props(styles.promptDescription)}>
-					{prompt.description}
-				</span>
-				<span {...stylex.props(styles.promptMeta)}>
-					{prompt.category || "custom"}
-					<span {...stylex.props(styles.metaDivider)} />
-					{prompt.executionCount > 0
-						? `${prompt.executionCount} uses`
-						: "No runs"}
-					{prompt.tags.slice(0, 2).map((tag) => (
-						<span key={tag} {...stylex.props(styles.promptTag)}>
-							{tag}
-						</span>
-					))}
-				</span>
-			</span>
-			<span
-				{...stylex.props(
-					styles.statusPill,
-					isActionCreated
-						? styles.statusAction
-						: prompt.isBuiltIn
-							? styles.statusBuiltIn
-							: styles.statusCustom
 				)}
-			>
-				<span {...stylex.props(styles.statusDot)} />
-				{status}
-			</span>
-		</button>
+			</div>
+		</div>
 	);
 }
 
@@ -484,195 +381,195 @@ function FilterDropdown({
 }
 
 const styles = stylex.create({
-	promptShell: {
-		display: "grid",
-		gridTemplateColumns: "minmax(280px, 0.9fr) minmax(320px, 1.1fr)",
+	root: {
+		display: "flex",
 		height: "100%",
+		flexDirection: "column",
+		backgroundColor: color.background,
+	},
+	toolbar: {
+		display: "flex",
+		height: "3rem",
+		flexShrink: 0,
+		alignItems: "center",
+		gap: controlSize._2,
+		borderBottomWidth: 1,
+		borderBottomStyle: "solid",
+		borderBottomColor: color.border,
+		backgroundColor: color.background,
+		paddingInline: controlSize._3,
+	},
+	searchWrap: {
+		position: "relative",
+	},
+	searchIcon: {
+		position: "absolute",
+		left: controlSize._2,
+		top: "50%",
+		transform: "translateY(-50%)",
+		color: color.textMuted,
+		pointerEvents: "none",
+	},
+	searchInput: {
+		width: "11rem",
+		height: controlSize._7,
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.border,
+		borderRadius: 8,
+		backgroundColor: color.backgroundRaised,
+		color: color.textMain,
+		fontSize: font.size_2,
+		outline: "none",
+		paddingLeft: "1.75rem",
+		paddingRight: controlSize._2,
+		"::placeholder": {
+			color: color.textMuted,
+		},
+	},
+	countText: {
+		color: color.textMuted,
+		fontSize: font.size_1,
+		fontVariantNumeric: "tabular-nums",
+	},
+	spacer: {
+		flex: 1,
+	},
+	newButton: {
+		display: "flex",
+		height: controlSize._7,
+		alignItems: "center",
+		gap: controlSize._1,
+		borderWidth: 1,
+		borderStyle: "solid",
+		borderColor: color.border,
+		borderRadius: radius.lg,
+		backgroundColor: {
+			default: color.backgroundRaised,
+			":hover": color.controlHover,
+		},
+		color: color.textSoft,
+		fontSize: font.size_2,
+		paddingInline: controlSize._2_5,
+		transitionProperty: "background-color, border-color, color",
+		transitionDuration: motion.durationFast,
+	},
+	content: {
+		display: "flex",
+		flex: 1,
 		minHeight: 0,
-		minWidth: 0,
 		overflow: "hidden",
 	},
 	listPane: {
-		minWidth: 0,
+		flex: 1,
 		overflowY: "auto",
 	},
-	listEmpty: {
+	emptyState: {
+		display: "flex",
 		height: "100%",
-		minHeight: "22rem",
+		alignItems: "center",
+		justifyContent: "center",
+	},
+	emptyCopy: {
+		textAlign: "center",
+	},
+	emptyTitle: {
+		marginBottom: controlSize._1,
+		color: color.textMuted,
+		fontSize: font.size_2,
+	},
+	emptyText: {
+		color: color.textMuted,
+		fontSize: font.size_1,
+		opacity: 0.5,
+	},
+	promptGrid: {
+		display: "grid",
+		gap: controlSize._2,
 		padding: controlSize._3,
 	},
-	promptList: {
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
+	promptGridWide: {
+		gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
 	},
-	promptRow: {
-		alignItems: "center",
-		backgroundColor: {
-			default: color.surfaceTranslucent,
-			":hover": color.surfaceControl,
-		},
-		borderColor: color.border,
-		borderRadius: radius.md,
-		borderStyle: "solid",
-		borderWidth: 1,
-		boxShadow: {
-			default: shadow.none,
-			":hover": shadow.selectedRing,
-		},
-		color: color.textMain,
-		cursor: "pointer",
-		display: "flex",
-		gap: controlSize._2,
-		minHeight: controlSize._12,
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
+	promptGridCompact: {
+		gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+	},
+	promptCard: {
 		textAlign: "left",
-		transitionDuration: motion.durationBase,
-		transitionProperty: "background-color, border-color, box-shadow",
-		transitionTimingFunction: motion.ease,
-		width: "100%",
-	},
-	promptRowSelected: {
-		backgroundColor: color.controlActive,
-		borderColor: color.borderStrong,
-	},
-	promptIcon: {
-		alignItems: "center",
-		backgroundColor: color.surfaceControl,
-		borderColor: color.borderSubtle,
-		borderRadius: radius.sm,
-		borderStyle: "solid",
 		borderWidth: 1,
-		color: color.textSoft,
-		display: "flex",
-		flexShrink: 0,
-		height: controlSize._6,
-		justifyContent: "center",
-		width: controlSize._6,
+		borderStyle: "solid",
+		borderRadius: radius.lg,
+		padding: controlSize._3,
+		transitionProperty: "background-color, border-color",
+		transitionDuration: motion.durationFast,
 	},
-	promptMain: {
-		display: "flex",
-		flex: 1,
-		flexDirection: "column",
-		gap: controlSize._0_5,
-		minWidth: 0,
+	promptCardIdle: {
+		borderColor: {
+			default: color.border,
+			":hover": color.borderStrong,
+		},
+		backgroundColor: {
+			default: "transparent",
+			":hover": color.surfaceSubtle,
+		},
 	},
-	promptTitleRow: {
-		alignItems: "baseline",
+	promptCardActive: {
+		borderColor: color.accentBorder,
+		backgroundColor: color.surfaceSubtle,
+	},
+	cardHeader: {
 		display: "flex",
+		alignItems: "center",
 		gap: controlSize._2,
-		minWidth: 0,
+		marginBottom: controlSize._1_5,
 	},
 	commandText: {
-		color: color.textMuted,
+		color: color.textMain,
 		fontFamily: font.familyMono,
 		fontSize: font.size_2,
 		fontWeight: font.weight_5,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
 	},
-	promptName: {
-		color: color.textMain,
-		fontSize: font.size_3,
-		fontWeight: font.weight_5,
-		lineHeight: 1.25,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	promptDescription: {
-		color: color.textMuted,
-		fontSize: font.size_1,
-		lineHeight: 1.35,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	promptMeta: {
-		alignItems: "center",
-		color: color.textMuted,
-		display: "flex",
-		fontSize: font.size_1,
-		gap: controlSize._1,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	metaDivider: {
-		backgroundColor: color.borderStrong,
-		borderRadius: radius.pill,
-		display: "inline-flex",
-		flexShrink: 0,
-		height: controlSize._0_5,
-		width: controlSize._0_5,
-	},
-	promptTag: {
-		backgroundColor: color.surfaceSubtle,
+	cardBadge: {
 		borderRadius: radius.sm,
+		backgroundColor: color.surfaceSubtle,
 		color: color.textMuted,
-		flexShrink: 0,
 		fontSize: font.size_0,
 		paddingBlock: controlSize._0_5,
 		paddingInline: controlSize._1,
+		opacity: 0.55,
 	},
-	statusPill: {
-		alignItems: "center",
-		borderRadius: radius.pill,
-		borderStyle: "solid",
-		borderWidth: 1,
-		display: "inline-flex",
-		flexShrink: 0,
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		gap: controlSize._1,
-		paddingBlock: controlSize._0_5,
-		paddingInline: controlSize._2,
-		textTransform: "capitalize",
-	},
-	statusDot: {
-		backgroundColor: "currentColor",
-		borderRadius: radius.pill,
-		height: controlSize._1,
-		width: controlSize._1,
-	},
-	statusAction: {
-		backgroundColor: color.accentWash,
-		borderColor: color.accentBorder,
-		color: color.accent,
-	},
-	statusBuiltIn: {
-		backgroundColor: color.surfaceControl,
-		borderColor: color.border,
+	promptName: {
+		marginBottom: controlSize._1,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
 		color: color.textSoft,
+		fontSize: font.size_2,
 	},
-	statusCustom: {
-		backgroundColor: color.surfaceControl,
-		borderColor: color.border,
+	promptDescription: {
+		display: "-webkit-box",
+		overflow: "hidden",
+		WebkitBoxOrient: "vertical",
+		WebkitLineClamp: 2,
 		color: color.textMuted,
+		fontSize: font.size_1,
+		lineHeight: 1.55,
+	},
+	usageText: {
+		marginTop: controlSize._2,
+		color: color.textMuted,
+		fontSize: font.size_0_5,
+		fontVariantNumeric: "tabular-nums",
+		opacity: 0.45,
 	},
 	detailPane: {
+		width: "420px",
+		flexShrink: 0,
+		overflowY: "auto",
 		borderLeftWidth: 1,
 		borderLeftStyle: "solid",
 		borderLeftColor: color.border,
-		display: "flex",
-		flexDirection: "column",
-		minHeight: 0,
-		minWidth: 0,
-		overflow: "hidden",
-	},
-	detailStatus: {
-		borderTopColor: color.border,
-		borderTopStyle: "solid",
-		borderTopWidth: 1,
-		color: color.textMuted,
-		flexShrink: 0,
-		fontSize: font.size_1,
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._4,
+		backgroundColor: color.background,
 	},
 	filterRoot: {
 		position: "relative",
@@ -686,17 +583,14 @@ const styles = stylex.create({
 		borderStyle: "solid",
 		borderColor: color.border,
 		borderRadius: radius.lg,
-		backgroundImage: effect.controlDepth,
-		boxShadow: shadow.controlDepth,
 		backgroundColor: {
 			default: color.backgroundRaised,
-			":hover": color.surfaceControl,
+			":hover": color.controlHover,
 		},
 		color: color.textSoft,
 		fontSize: font.size_2,
 		paddingInline: controlSize._2_5,
-		transitionProperty:
-			"background-color, background-image, border-color, color, box-shadow",
+		transitionProperty: "background-color, border-color, color",
 		transitionDuration: motion.durationFast,
 	},
 	chevron: {
@@ -718,7 +612,6 @@ const styles = stylex.create({
 		borderColor: color.border,
 		borderRadius: radius.lg,
 		backgroundColor: color.backgroundRaised,
-		backgroundImage: effect.popoverDepth,
 		boxShadow: shadow.modal,
 		padding: controlSize._1,
 	},
@@ -727,20 +620,16 @@ const styles = stylex.create({
 		textAlign: "left",
 		borderWidth: 0,
 		borderRadius: radius.md,
-		fontSize: font.size_1,
-		paddingBlock: controlSize._1,
-		paddingInline: controlSize._2,
-		transitionProperty: "background-color, background-image, color",
+		fontSize: font.size_2,
+		paddingBlock: controlSize._1_5,
+		paddingInline: controlSize._2_5,
+		transitionProperty: "background-color, color",
 		transitionDuration: motion.durationFast,
 	},
 	filterOptionIdle: {
 		backgroundColor: {
 			default: "transparent",
-			":hover": color.surfaceControl,
-		},
-		backgroundImage: {
-			default: "none",
-			":hover": effect.controlDepth,
+			":hover": color.surfaceSubtle,
 		},
 		color: {
 			default: color.textMuted,
@@ -748,8 +637,7 @@ const styles = stylex.create({
 		},
 	},
 	filterOptionActive: {
-		backgroundColor: color.surfaceControl,
-		backgroundImage: effect.controlDepthHover,
+		backgroundColor: "rgba(255, 255, 255, 0.06)",
 		color: color.textMain,
 	},
 });
