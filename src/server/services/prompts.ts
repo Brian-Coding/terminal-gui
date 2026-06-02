@@ -1,5 +1,4 @@
 import { resolve } from "node:path";
-import type { Prompt } from "../../features/prompts/types.ts";
 import { atomicWriteJson } from "../../lib/atomic-write.ts";
 import {
 	hasCommand,
@@ -11,9 +10,11 @@ import {
 } from "../../lib/data.ts";
 import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import { userDataPath } from "../../lib/user-data.ts";
+import type { Prompt } from "../../features/prompts/types.ts";
 
 const PROMPTS_FILE = userDataPath("prompts.json");
 const REPO_PROMPTS_FILE = resolve(PROJECT_ROOT, "data/prompts.json");
+const LEGACY_PROMPTS_FILE = resolve(PROJECT_ROOT, "src/data/prompts.json");
 
 export type PromptServiceResult<T> =
 	| { ok: true; value: T }
@@ -21,11 +22,17 @@ export type PromptServiceResult<T> =
 
 async function loadBundledPrompts(): Promise<Prompt[]> {
 	const repoFile = Bun.file(REPO_PROMPTS_FILE);
-	if (!(await repoFile.exists())) return [];
-	return JSON.parse(await repoFile.text()) as Prompt[];
+	if (await repoFile.exists()) {
+		return JSON.parse(await repoFile.text()) as Prompt[];
+	}
+
+	const legacyFile = Bun.file(LEGACY_PROMPTS_FILE);
+	if (!(await legacyFile.exists())) return [];
+
+	return JSON.parse(await legacyFile.text()) as Prompt[];
 }
 
-export async function loadLocalPrompts(): Promise<Prompt[]> {
+async function loadLocalPrompts(): Promise<Prompt[]> {
 	const file = Bun.file(PROMPTS_FILE);
 	if (!(await file.exists())) return [];
 	return JSON.parse(await file.text()) as Prompt[];
@@ -71,8 +78,9 @@ export function mergePrompts(bundled: Prompt[], local: Prompt[]): Prompt[] {
 			customById.set(prompt._id, prompt);
 		}
 	}
+	const custom = Array.from(customById.values());
 
-	return [...builtIns, ...Array.from(customById.values())];
+	return [...builtIns, ...custom];
 }
 
 export async function loadPrompts(): Promise<Prompt[]> {
@@ -88,7 +96,7 @@ export async function listPromptsByUsage(): Promise<Prompt[]> {
 	return prompts.toSorted((a, b) => b.executionCount - a.executionCount);
 }
 
-export async function savePrompts(prompts: Prompt[]): Promise<void> {
+async function savePrompts(prompts: Prompt[]): Promise<void> {
 	await atomicWriteJson(PROMPTS_FILE, prompts, 2);
 }
 
@@ -150,13 +158,12 @@ export async function updatePrompt(
 		if (idx === -1) return promptError(404, "Not found");
 
 		const current = prompts[idx]!;
-		if (current.isBuiltIn) {
+		if (current.isBuiltIn)
 			return promptError(400, "Cannot edit built-in prompts");
-		}
 
 		if (body.command && body.command !== current.command) {
 			const conflict = prompts.find(
-				(prompt) => prompt.command === body.command && lacksObjectId(id, prompt)
+				(p) => p.command === body.command && lacksObjectId(id, p)
 			);
 			if (conflict) {
 				return promptError(400, `Command /${body.command} already exists`);
@@ -195,9 +202,8 @@ export async function deletePrompt(
 		const prompts = await loadPrompts();
 		const prompt = prompts.find(hasObjectId.bind(null, id));
 		if (!prompt) return promptError(404, "Not found");
-		if (prompt.isBuiltIn) {
+		if (prompt.isBuiltIn)
 			return promptError(400, "Cannot delete built-in prompts");
-		}
 
 		await savePrompts(prompts.filter(lacksObjectId.bind(null, id)));
 		return { ok: true, value: { ok: true } };

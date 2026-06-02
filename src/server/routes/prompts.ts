@@ -37,8 +37,9 @@ export function handlePromptRequest(
 	if (!match) return null;
 
 	const id = match[1]!;
+	const isUsage = !!match[2];
 
-	if (match[2] === "/usage" && req.method === "POST") {
+	if (isUsage && req.method === "POST") {
 		return incrementPromptUsage(id).then(resultResponse);
 	}
 	if (req.method === "PUT") {
