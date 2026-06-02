@@ -50,8 +50,15 @@ export function nativeRoutes() {
 		},
 		"/api/native/update": {
 			POST: tryRoute(async () => {
-				const ok = runInferayUpdate();
-				return Response.json({ ok });
+				const result = runInferayUpdate();
+				if (!result.ok) {
+					return Response.json(result, { status: 503 });
+				}
+				setTimeout(() => process.exit(0), 500);
+				return Response.json({
+					...result,
+					message: "Updating Inferay. The app will close and relaunch.",
+				});
 			}),
 		},
 	};
