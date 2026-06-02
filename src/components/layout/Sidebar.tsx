@@ -533,14 +533,8 @@ export function Sidebar() {
 	const updateInfo = appInfo.update;
 	const updateAvailable = updateInfo.available && !!updateInfo.url;
 	const openUpdate = useCallback(() => {
-		if (!updateInfo.url) return;
-		const url = updateInfo.url;
-		postJson<{ ok?: boolean }>("/api/native/open-url", { url })
-			.then((response) => {
-				if (!response.ok) window.open(url, "_blank", "noopener,noreferrer");
-			})
-			.catch(() => window.open(url, "_blank", "noopener,noreferrer"));
-	}, [updateInfo.url]);
+		void postJson<{ ok?: boolean }>("/api/native/update").catch(() => {});
+	}, []);
 	const shellProps = stylex.props(
 		styles.shell,
 		collapsed ? styles.shellCollapsed : styles.shellOpen,
