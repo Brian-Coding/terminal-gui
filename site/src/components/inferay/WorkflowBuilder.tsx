@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useCallback, useReducer, useRef, useState } from "react";
 import { Icons } from "./Icons";
 
 type NodeType =
@@ -37,6 +37,40 @@ type SavedWorkflow = {
 	lastEdited: string;
 	status: "draft" | "active" | "completed";
 };
+
+type WorkflowBuilderState = {
+	selectedNode: WorkflowNode | null;
+	isRunning: boolean;
+	activeWorkflowId: string;
+};
+
+type WorkflowBuilderAction =
+	| { type: "selectedNodeChanged"; node: WorkflowNode | null }
+	| { type: "runStarted" }
+	| { type: "runFinished" }
+	| { type: "activeWorkflowChanged"; id: string };
+
+const initialWorkflowBuilderState: WorkflowBuilderState = {
+	selectedNode: null,
+	isRunning: false,
+	activeWorkflowId: "wf1",
+};
+
+function workflowBuilderReducer(
+	state: WorkflowBuilderState,
+	action: WorkflowBuilderAction
+): WorkflowBuilderState {
+	switch (action.type) {
+		case "selectedNodeChanged":
+			return { ...state, selectedNode: action.node };
+		case "runStarted":
+			return { ...state, isRunning: true };
+		case "runFinished":
+			return { ...state, isRunning: false };
+		case "activeWorkflowChanged":
+			return { ...state, activeWorkflowId: action.id };
+	}
+}
 
 const savedWorkflows: SavedWorkflow[] = [
 	{
@@ -628,11 +662,13 @@ function NodeDetail({
 
 export function WorkflowBuilder() {
 	const [nodes, setNodes] = useState<WorkflowNode[]>(initialNodes);
-	const [connections] = useState<Connection[]>(initialConnections);
-	const [selectedNode, setSelectedNode] = useState<WorkflowNode | null>(null);
-	const [isRunning, setIsRunning] = useState(false);
-	const [activeWorkflowId, setActiveWorkflowId] = useState("wf1");
-	const [workflows] = useState<SavedWorkflow[]>(savedWorkflows);
+	const connections = initialConnections;
+	const workflows = savedWorkflows;
+	const [builderState, dispatchBuilder] = useReducer(
+		workflowBuilderReducer,
+		initialWorkflowBuilderState
+	);
+	const { selectedNode, isRunning, activeWorkflowId } = builderState;
 	const canvasRef = useRef<HTMLDivElement>(null);
 
 	const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
@@ -659,13 +695,13 @@ export function WorkflowBuilder() {
 			inputs: type === "output" ? ["content"] : type === "input" ? [] : ["in"],
 			outputs: type === "input" ? ["out"] : type === "output" ? [] : ["out"],
 		};
-		setNodes([...nodes, newNode]);
-		setSelectedNode(newNode);
+		setNodes((prev) => [...prev, newNode]);
+		dispatchBuilder({ type: "selectedNodeChanged", node: newNode });
 	};
 
 	const handleRun = () => {
-		setIsRunning(true);
-		setTimeout(() => setIsRunning(false), 3000);
+		dispatchBuilder({ type: "runStarted" });
+		setTimeout(() => dispatchBuilder({ type: "runFinished" }), 3000);
 	};
 
 	return (
@@ -674,7 +710,9 @@ export function WorkflowBuilder() {
 			<WorkflowList
 				workflows={workflows}
 				activeId={activeWorkflowId}
-				onSelect={setActiveWorkflowId}
+				onSelect={(id) =>
+					dispatchBuilder({ type: "activeWorkflowChanged", id })
+				}
 			/>
 
 			{/* Main content */}
@@ -728,7 +766,9 @@ export function WorkflowBuilder() {
 								"radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)",
 							backgroundSize: "20px 20px",
 						}}
-						onClick={() => setSelectedNode(null)}
+						onClick={() =>
+							dispatchBuilder({ type: "selectedNodeChanged", node: null })
+						}
 					>
 						{/* Node palette */}
 						<NodePalette onAddNode={handleAddNode} />
@@ -763,7 +803,9 @@ export function WorkflowBuilder() {
 								key={node.id}
 								node={node}
 								isSelected={selectedNode?.id === node.id}
-								onSelect={() => setSelectedNode(node)}
+								onSelect={() =>
+									dispatchBuilder({ type: "selectedNodeChanged", node })
+								}
 								onDrag={handleDrag}
 								connections={connections}
 							/>
@@ -788,7 +830,12 @@ export function WorkflowBuilder() {
 						<div className="w-[220px] shrink-0 border-l border-inferay-border">
 							<NodeDetail
 								node={selectedNode}
-								onClose={() => setSelectedNode(null)}
+								onClose={() =>
+									dispatchBuilder({
+										type: "selectedNodeChanged",
+										node: null,
+									})
+								}
 								onUpdate={(config) => {
 									setNodes((prev) =>
 										prev.map((n) =>

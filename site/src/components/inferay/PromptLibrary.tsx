@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useReducer, useState } from "react";
 import { Icons } from "./Icons";
 
 type Prompt = {
@@ -150,6 +150,110 @@ const FILTER_OPTIONS = [
 	{ value: "docs", label: "Docs" },
 ];
 
+type PromptFormState = {
+	command: string;
+	name: string;
+	description: string;
+	template: string;
+	category: string;
+	tags: string;
+};
+
+type PromptFormAction =
+	| { type: "commandChanged"; value: string }
+	| { type: "nameChanged"; value: string }
+	| { type: "descriptionChanged"; value: string }
+	| { type: "templateChanged"; value: string }
+	| { type: "categoryChanged"; value: string }
+	| { type: "tagsChanged"; value: string };
+
+function getPromptFormState(prompt: Prompt | null): PromptFormState {
+	return {
+		command: prompt?.command || "",
+		name: prompt?.name || "",
+		description: prompt?.description || "",
+		template: prompt?.promptTemplate || "",
+		category: prompt?.category || "custom",
+		tags: prompt?.tags.join(", ") || "",
+	};
+}
+
+function promptFormReducer(
+	state: PromptFormState,
+	action: PromptFormAction
+): PromptFormState {
+	switch (action.type) {
+		case "commandChanged":
+			return { ...state, command: action.value };
+		case "nameChanged":
+			return { ...state, name: action.value };
+		case "descriptionChanged":
+			return { ...state, description: action.value };
+		case "templateChanged":
+			return { ...state, template: action.value };
+		case "categoryChanged":
+			return { ...state, category: action.value };
+		case "tagsChanged":
+			return { ...state, tags: action.value };
+	}
+}
+
+type PromptLibraryState = {
+	selectedPrompt: Prompt | null;
+	filter: string;
+	search: string;
+	isEditing: boolean;
+	isCreating: boolean;
+};
+
+type PromptLibraryAction =
+	| { type: "promptSelected"; prompt: Prompt }
+	| { type: "createStarted" }
+	| { type: "detailClosed" }
+	| { type: "editStarted" }
+	| { type: "editCanceled" };
+
+const initialPromptLibraryState: PromptLibraryState = {
+	selectedPrompt: null,
+	filter: "all",
+	search: "",
+	isEditing: false,
+	isCreating: false,
+};
+
+function promptLibraryReducer(
+	state: PromptLibraryState,
+	action: PromptLibraryAction
+): PromptLibraryState {
+	switch (action.type) {
+		case "promptSelected":
+			return {
+				...state,
+				selectedPrompt: action.prompt,
+				isEditing: false,
+				isCreating: false,
+			};
+		case "createStarted":
+			return {
+				...state,
+				selectedPrompt: null,
+				isEditing: false,
+				isCreating: true,
+			};
+		case "detailClosed":
+		case "editCanceled":
+			return {
+				...state,
+				selectedPrompt:
+					action.type === "detailClosed" ? null : state.selectedPrompt,
+				isEditing: false,
+				isCreating: false,
+			};
+		case "editStarted":
+			return { ...state, isEditing: true };
+	}
+}
+
 const CATEGORIES = [
 	{ value: "code", label: "Code" },
 	{ value: "debug", label: "Debug" },
@@ -255,18 +359,19 @@ function PromptDetailPanel({
 	onStartEdit: () => void;
 	onCancelEdit: () => void;
 }) {
-	const [formCommand, setFormCommand] = useState(prompt?.command || "");
-	const [formName, setFormName] = useState(prompt?.name || "");
-	const [formDescription, setFormDescription] = useState(
-		prompt?.description || ""
+	const [formState, dispatchForm] = useReducer(
+		promptFormReducer,
+		prompt,
+		getPromptFormState
 	);
-	const [formTemplate, setFormTemplate] = useState(
-		prompt?.promptTemplate || ""
-	);
-	const [formCategory, setFormCategory] = useState(
-		prompt?.category || "custom"
-	);
-	const [formTags, setFormTags] = useState(prompt?.tags.join(", ") || "");
+	const {
+		command: formCommand,
+		name: formName,
+		description: formDescription,
+		template: formTemplate,
+		category: formCategory,
+		tags: formTags,
+	} = formState;
 
 	const isEditMode = isEditing || isCreating;
 
@@ -289,9 +394,12 @@ function PromptDetailPanel({
 								type="text"
 								value={formCommand}
 								onChange={(e) =>
-									setFormCommand(
-										e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "")
-									)
+									dispatchForm({
+										type: "commandChanged",
+										value: e.target.value
+											.toLowerCase()
+											.replace(/[^a-z0-9-]/g, ""),
+									})
 								}
 								placeholder="command"
 								className="w-20 rounded bg-inferay-surface py-0.5 px-1 text-[10px] font-mono text-inferay-text outline-none placeholder:text-inferay-text-3"
@@ -384,7 +492,12 @@ function PromptDetailPanel({
 							<input
 								type="text"
 								value={formName}
-								onChange={(e) => setFormName(e.target.value)}
+								onChange={(e) =>
+									dispatchForm({
+										type: "nameChanged",
+										value: e.target.value,
+									})
+								}
 								placeholder="Prompt name"
 								className={inputCls}
 							/>
@@ -399,7 +512,12 @@ function PromptDetailPanel({
 						{isEditMode ? (
 							<select
 								value={formCategory}
-								onChange={(e) => setFormCategory(e.target.value)}
+								onChange={(e) =>
+									dispatchForm({
+										type: "categoryChanged",
+										value: e.target.value,
+									})
+								}
 								className={inputCls}
 							>
 								{CATEGORIES.map((c) => (
@@ -421,7 +539,12 @@ function PromptDetailPanel({
 					{isEditMode ? (
 						<textarea
 							value={formDescription}
-							onChange={(e) => setFormDescription(e.target.value)}
+							onChange={(e) =>
+								dispatchForm({
+									type: "descriptionChanged",
+									value: e.target.value,
+								})
+							}
 							rows={2}
 							placeholder="What this prompt does"
 							className={`${inputCls} resize-none`}
@@ -445,7 +568,12 @@ function PromptDetailPanel({
 					{isEditMode ? (
 						<textarea
 							value={formTemplate}
-							onChange={(e) => setFormTemplate(e.target.value)}
+							onChange={(e) =>
+								dispatchForm({
+									type: "templateChanged",
+									value: e.target.value,
+								})
+							}
 							placeholder="Enter prompt template..."
 							rows={4}
 							className="mt-1 w-full rounded-md bg-inferay-surface border border-inferay-border p-2 font-mono text-[9px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-text-3 resize-none leading-relaxed"
@@ -463,7 +591,12 @@ function PromptDetailPanel({
 						<input
 							type="text"
 							value={formTags}
-							onChange={(e) => setFormTags(e.target.value)}
+							onChange={(e) =>
+								dispatchForm({
+									type: "tagsChanged",
+									value: e.target.value,
+								})
+							}
 							placeholder="code, review, quality"
 							className={inputCls}
 						/>
@@ -494,32 +627,24 @@ function PromptDetailPanel({
 }
 
 export function PromptLibrary() {
-	const [selectedPrompt, setSelectedPrompt] = useState<Prompt | null>(null);
-	const [filter, setFilter] = useState("all");
-	const [search, setSearch] = useState("");
-	const [isEditing, setIsEditing] = useState(false);
-	const [isCreating, setIsCreating] = useState(false);
+	const [state, dispatch] = useReducer(
+		promptLibraryReducer,
+		initialPromptLibraryState
+	);
+	const { selectedPrompt, filter, search, isEditing, isCreating } = state;
 
 	const filtered = filterPrompts(prompts, filter, search);
 
 	const handleSelect = (p: Prompt) => {
-		if (isEditing || isCreating) {
-			setIsEditing(false);
-			setIsCreating(false);
-		}
-		setSelectedPrompt(p);
+		dispatch({ type: "promptSelected", prompt: p });
 	};
 
 	const handleCreate = () => {
-		setSelectedPrompt(null);
-		setIsEditing(false);
-		setIsCreating(true);
+		dispatch({ type: "createStarted" });
 	};
 
 	const handleClose = () => {
-		setSelectedPrompt(null);
-		setIsEditing(false);
-		setIsCreating(false);
+		dispatch({ type: "detailClosed" });
 	};
 
 	return (
@@ -601,11 +726,8 @@ export function PromptLibrary() {
 							isEditing={isEditing}
 							isCreating={isCreating}
 							onClose={handleClose}
-							onStartEdit={() => setIsEditing(true)}
-							onCancelEdit={() => {
-								setIsEditing(false);
-								setIsCreating(false);
-							}}
+							onStartEdit={() => dispatch({ type: "editStarted" })}
+							onCancelEdit={() => dispatch({ type: "editCanceled" })}
 						/>
 					</div>
 				)}

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useReducer, useState } from "react";
 import { Icons } from "./Icons";
 
 type Workspace = {
@@ -103,6 +103,52 @@ const models: Record<string, { name: string; speed: string }> = {
 	"gpt-4": { name: "GPT-4", speed: "Thorough" },
 	"gpt-4-turbo": { name: "GPT-4 Turbo", speed: "Fast" },
 };
+
+type WorkspaceFormState = {
+	name: string;
+	description: string;
+	model: string;
+	sidebar: boolean;
+	terminal: boolean;
+	split: boolean;
+};
+
+type WorkspaceFormAction =
+	| { type: "nameChanged"; value: string }
+	| { type: "descriptionChanged"; value: string }
+	| { type: "modelChanged"; value: string }
+	| { type: "sidebarChanged"; value: boolean }
+	| { type: "terminalChanged"; value: boolean }
+	| { type: "splitChanged"; value: boolean };
+
+const initialWorkspaceFormState: WorkspaceFormState = {
+	name: "",
+	description: "",
+	model: "claude-sonnet",
+	sidebar: true,
+	terminal: false,
+	split: false,
+};
+
+function workspaceFormReducer(
+	state: WorkspaceFormState,
+	action: WorkspaceFormAction
+): WorkspaceFormState {
+	switch (action.type) {
+		case "nameChanged":
+			return { ...state, name: action.value };
+		case "descriptionChanged":
+			return { ...state, description: action.value };
+		case "modelChanged":
+			return { ...state, model: action.value };
+		case "sidebarChanged":
+			return { ...state, sidebar: action.value };
+		case "terminalChanged":
+			return { ...state, terminal: action.value };
+		case "splitChanged":
+			return { ...state, split: action.value };
+	}
+}
 
 function WorkspaceRow({
 	workspace,
@@ -297,12 +343,11 @@ function WorkspaceDetail({
 }
 
 function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
-	const [name, setName] = useState("");
-	const [description, setDescription] = useState("");
-	const [model, setModel] = useState("claude-sonnet");
-	const [sidebar, setSidebar] = useState(true);
-	const [terminal, setTerminal] = useState(false);
-	const [split, setSplit] = useState(false);
+	const [formState, dispatchForm] = useReducer(
+		workspaceFormReducer,
+		initialWorkspaceFormState
+	);
+	const { name, description, model, sidebar, terminal, split } = formState;
 
 	const inputCls =
 		"w-full rounded-md bg-inferay-surface border border-inferay-border px-2 py-1.5 text-[10px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-accent/50";
@@ -332,7 +377,9 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 					<input
 						type="text"
 						value={name}
-						onChange={(e) => setName(e.target.value)}
+						onChange={(e) =>
+							dispatchForm({ type: "nameChanged", value: e.target.value })
+						}
 						placeholder="Workspace name"
 						className={`mt-1 ${inputCls}`}
 					/>
@@ -345,7 +392,12 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 					<input
 						type="text"
 						value={description}
-						onChange={(e) => setDescription(e.target.value)}
+						onChange={(e) =>
+							dispatchForm({
+								type: "descriptionChanged",
+								value: e.target.value,
+							})
+						}
 						placeholder="What this workspace is for"
 						className={`mt-1 ${inputCls}`}
 					/>
@@ -357,7 +409,9 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 					</label>
 					<select
 						value={model}
-						onChange={(e) => setModel(e.target.value)}
+						onChange={(e) =>
+							dispatchForm({ type: "modelChanged", value: e.target.value })
+						}
 						className={`mt-1 ${inputCls}`}
 					>
 						{Object.entries(models).map(([id, m]) => (
@@ -377,7 +431,12 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 							<input
 								type="checkbox"
 								checked={sidebar}
-								onChange={(e) => setSidebar(e.target.checked)}
+								onChange={(e) =>
+									dispatchForm({
+										type: "sidebarChanged",
+										value: e.target.checked,
+									})
+								}
 								className="rounded border-inferay-border"
 							/>
 							Show sidebar
@@ -386,7 +445,12 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 							<input
 								type="checkbox"
 								checked={terminal}
-								onChange={(e) => setTerminal(e.target.checked)}
+								onChange={(e) =>
+									dispatchForm({
+										type: "terminalChanged",
+										value: e.target.checked,
+									})
+								}
 								className="rounded border-inferay-border"
 							/>
 							Show terminal
@@ -396,7 +460,12 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 								<input
 									type="checkbox"
 									checked={split}
-									onChange={(e) => setSplit(e.target.checked)}
+									onChange={(e) =>
+										dispatchForm({
+											type: "splitChanged",
+											value: e.target.checked,
+										})
+									}
 									className="rounded border-inferay-border"
 								/>
 								Split terminal

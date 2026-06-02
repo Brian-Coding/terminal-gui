@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useReducer } from "react";
 import { Icons } from "./Icons";
 
 type GeneratedImage = {
@@ -57,6 +57,57 @@ const aspectRatios = [
 	{ id: "9:16", label: "9:16", width: 576, height: 1024 },
 	{ id: "4:3", label: "4:3", width: 1024, height: 768 },
 ];
+
+type ImageStudioState = {
+	images: GeneratedImage[];
+	selectedImage: GeneratedImage | null;
+	prompt: string;
+	model: string;
+	aspectRatio: string;
+	isGenerating: boolean;
+};
+
+type ImageStudioAction =
+	| { type: "promptChanged"; value: string }
+	| { type: "modelChanged"; value: string }
+	| { type: "aspectRatioChanged"; value: string }
+	| { type: "selectedImageChanged"; value: GeneratedImage | null }
+	| { type: "generationStarted" }
+	| { type: "imageGenerated"; image: GeneratedImage };
+
+const initialImageStudioState: ImageStudioState = {
+	images: sampleImages,
+	selectedImage: null,
+	prompt: "",
+	model: "fal-flux",
+	aspectRatio: "1:1",
+	isGenerating: false,
+};
+
+function imageStudioReducer(
+	state: ImageStudioState,
+	action: ImageStudioAction
+): ImageStudioState {
+	switch (action.type) {
+		case "promptChanged":
+			return { ...state, prompt: action.value };
+		case "modelChanged":
+			return { ...state, model: action.value };
+		case "aspectRatioChanged":
+			return { ...state, aspectRatio: action.value };
+		case "selectedImageChanged":
+			return { ...state, selectedImage: action.value };
+		case "generationStarted":
+			return { ...state, isGenerating: true };
+		case "imageGenerated":
+			return {
+				...state,
+				images: [action.image, ...state.images],
+				prompt: "",
+				isGenerating: false,
+			};
+	}
+}
 
 function ImageCard({
 	image,
@@ -202,31 +253,28 @@ function ImageDetail({
 }
 
 export function ImageStudio() {
-	const [images, setImages] = useState<GeneratedImage[]>(sampleImages);
-	const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(
-		null
+	const [state, dispatch] = useReducer(
+		imageStudioReducer,
+		initialImageStudioState
 	);
-	const [prompt, setPrompt] = useState("");
-	const [model, setModel] = useState("fal-flux");
-	const [aspectRatio, setAspectRatio] = useState("1:1");
-	const [isGenerating, setIsGenerating] = useState(false);
+	const { images, selectedImage, prompt, model, aspectRatio, isGenerating } =
+		state;
 
 	const handleGenerate = () => {
-		if (!prompt.trim()) return;
-		setIsGenerating(true);
+		const nextPrompt = prompt.trim();
+		if (!nextPrompt) return;
+		dispatch({ type: "generationStarted" });
 		// Simulate generation
 		setTimeout(() => {
 			const newImage: GeneratedImage = {
 				id: Date.now().toString(),
-				prompt: prompt.trim(),
+				prompt: nextPrompt,
 				model,
 				url: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 100000000)}?w=400&h=400&fit=crop`,
 				timestamp: "Just now",
 				aspectRatio,
 			};
-			setImages([newImage, ...images]);
-			setPrompt("");
-			setIsGenerating(false);
+			dispatch({ type: "imageGenerated", image: newImage });
 		}, 1500);
 	};
 
@@ -238,7 +286,9 @@ export function ImageStudio() {
 				<div className="relative">
 					<textarea
 						value={prompt}
-						onChange={(e) => setPrompt(e.target.value)}
+						onChange={(e) =>
+							dispatch({ type: "promptChanged", value: e.target.value })
+						}
 						placeholder="Describe the image you want to create..."
 						rows={2}
 						className="w-full rounded-lg bg-inferay-surface border border-inferay-border px-3 py-2 text-[11px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-accent/50 resize-none"
@@ -252,7 +302,9 @@ export function ImageStudio() {
 						<span className="text-[8px] text-inferay-text-3">Model:</span>
 						<select
 							value={model}
-							onChange={(e) => setModel(e.target.value)}
+							onChange={(e) =>
+								dispatch({ type: "modelChanged", value: e.target.value })
+							}
 							className="bg-transparent text-[9px] text-inferay-text outline-none cursor-pointer"
 						>
 							{models.map((m) => (
@@ -267,8 +319,14 @@ export function ImageStudio() {
 					<div className="flex items-center gap-0.5">
 						{aspectRatios.map((ar) => (
 							<button
+								type="button"
 								key={ar.id}
-								onClick={() => setAspectRatio(ar.id)}
+								onClick={() =>
+									dispatch({
+										type: "aspectRatioChanged",
+										value: ar.id,
+									})
+								}
 								className={`h-6 px-2 rounded-md text-[8px] font-medium transition-colors ${
 									aspectRatio === ar.id
 										? "bg-inferay-surface-2 border border-inferay-border text-inferay-text"
@@ -327,7 +385,12 @@ export function ImageStudio() {
 									key={image.id}
 									image={image}
 									isSelected={selectedImage?.id === image.id}
-									onSelect={() => setSelectedImage(image)}
+									onSelect={() =>
+										dispatch({
+											type: "selectedImageChanged",
+											value: image,
+										})
+									}
 								/>
 							))}
 						</div>
@@ -339,7 +402,12 @@ export function ImageStudio() {
 					<div className="w-[220px] shrink-0 border-l border-inferay-border">
 						<ImageDetail
 							image={selectedImage}
-							onClose={() => setSelectedImage(null)}
+							onClose={() =>
+								dispatch({
+									type: "selectedImageChanged",
+									value: null,
+								})
+							}
 						/>
 					</div>
 				)}
