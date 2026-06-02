@@ -1,24 +1,15 @@
 import {
-	isChatMessagesStorageKey,
 	shouldSyncClientStorageKey,
 	TERMINAL_STATE_STORAGE_KEY,
 } from "../../lib/client-storage-keys.ts";
-import { mergeChatMessageStorageValues } from "../../lib/chat-message-storage.ts";
 import { readJson, writeJson } from "../../lib/route-helpers.ts";
 import { userDataPath } from "../../lib/user-data.ts";
 import { readTerminalState } from "./terminal-state.ts";
 
 type StoredValue = string | null;
-type ClientStorageSnapshot = Record<string, StoredValue>;
+type ClientStorageSnapshot = Record<string, string>;
 
 const CLIENT_STORAGE_PATH = userDataPath("client-storage.json");
-
-function shouldApplyClientStorageEntry(
-	key: string,
-	nextValue: StoredValue
-): boolean {
-	return nextValue === null || !isChatMessagesStorageKey(key);
-}
 
 export function normalizeEntries(value: unknown): Record<string, StoredValue> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -54,17 +45,8 @@ export async function applyClientStorageEntries(
 		{}
 	);
 	for (const [key, value] of Object.entries(entries)) {
-		if (isChatMessagesStorageKey(key)) {
-			snapshot[key] = mergeChatMessageStorageValues(
-				snapshot[key] ?? null,
-				value
-			);
-			continue;
-		}
-		if (!shouldApplyClientStorageEntry(key, value)) {
-			continue;
-		}
-		snapshot[key] = value;
+		if (value === null) delete snapshot[key];
+		else snapshot[key] = value;
 	}
 	await writeJson(CLIENT_STORAGE_PATH, snapshot);
 }

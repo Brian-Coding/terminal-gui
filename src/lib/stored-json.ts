@@ -9,14 +9,12 @@ export function readStoredJson<T>(key: string, fallback: T): T {
 	}
 }
 
-export function writeStoredJson<T>(key: string, value: T): boolean {
+export function writeStoredJson<T>(key: string, value: T) {
 	try {
 		const stored = JSON.stringify(value);
 		localStorage.setItem(key, stored);
 		syncStoredValue(key, stored);
-		return true;
 	} catch {}
-	return false;
 }
 
 export function readStoredValue(

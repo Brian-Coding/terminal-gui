@@ -1,20 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { filterPrompts } from "../src/features/prompts/prompt-utils.ts";
 import { normalizeEntries } from "../src/server/services/client-storage.ts";
-import {
-	chatMessagesContainUnseenIds,
-	mergeChatMessageStorageValues,
-} from "../src/lib/chat-message-storage.ts";
-import {
-	CHAT_LOADING_STATE_KEY_PREFIX,
-	CHAT_MESSAGES_STORAGE_KEY_PREFIX,
-	CHAT_QUEUE_KEY_PREFIX,
-	isChatMessagesStorageKey,
-	isChatQueueStorageKey,
-	TERMINAL_LAYOUT_MODE_STORAGE_KEY,
-	TERMINAL_MAIN_VIEW_STORAGE_KEY,
-	TERMINAL_STATE_STORAGE_KEY,
-} from "../src/lib/client-storage-keys.ts";
+import { TERMINAL_STATE_STORAGE_KEY } from "../src/lib/client-storage-keys.ts";
 
 describe("prompt search and client storage sync filters", () => {
 	/*
@@ -47,18 +34,14 @@ describe("prompt search and client storage sync filters", () => {
 				isBuiltIn: false,
 			},
 		];
-		const [builtIn, releaseNotes, debugHelp] = prompts;
-		if (!builtIn || !releaseNotes || !debugHelp) {
-			throw new Error("Prompt fixtures failed to initialize.");
-		}
 
-		expect(filterPrompts(prompts, "builtin", "")).toEqual([builtIn]);
+		expect(filterPrompts(prompts, "builtin", "")).toEqual([prompts[0]]);
 		expect(filterPrompts(prompts, "custom", "")).toEqual([
-			releaseNotes,
-			debugHelp,
+			prompts[1],
+			prompts[2],
 		]);
-		expect(filterPrompts(prompts, "code", "runtime")).toEqual([debugHelp]);
-		expect(filterPrompts(prompts, "all", "REVIEW")).toEqual([builtIn]);
+		expect(filterPrompts(prompts, "code", "runtime")).toEqual([prompts[2]]);
+		expect(filterPrompts(prompts, "all", "REVIEW")).toEqual([prompts[0]]);
 	});
 
 	/*
@@ -70,51 +53,18 @@ describe("prompt search and client storage sync filters", () => {
 		expect(
 			normalizeEntries({
 				[TERMINAL_STATE_STORAGE_KEY]: '{"groups":[]}',
-				[TERMINAL_LAYOUT_MODE_STORAGE_KEY]: "grid",
+				"terminal-layout-mode": "grid",
 				"unknown-key": "value",
-				[TERMINAL_MAIN_VIEW_STORAGE_KEY]: 42,
-				[`${CHAT_LOADING_STATE_KEY_PREFIX}pane-1`]: JSON.stringify({
-					isLoading: true,
-					status: "thinking",
-					startTime: Date.now(),
-				}),
+				"terminal-main-view": 42,
 				"inferay-custom-theme": null,
 			})
 		).toEqual({
 			[TERMINAL_STATE_STORAGE_KEY]: '{"groups":[]}',
-			[TERMINAL_LAYOUT_MODE_STORAGE_KEY]: "grid",
+			"terminal-layout-mode": "grid",
 			"inferay-custom-theme": null,
 		});
 
 		expect(normalizeEntries(null)).toEqual({});
 		expect(normalizeEntries(["not", "an", "object"])).toEqual({});
-	});
-
-	test("distinguishes chat message history from other chat pane storage", () => {
-		expect(
-			isChatMessagesStorageKey(`${CHAT_MESSAGES_STORAGE_KEY_PREFIX}pane-1`)
-		).toBe(true);
-		expect(isChatMessagesStorageKey(`${CHAT_QUEUE_KEY_PREFIX}pane-1`)).toBe(
-			false
-		);
-		expect(isChatQueueStorageKey(`${CHAT_QUEUE_KEY_PREFIX}pane-1`)).toBe(true);
-	});
-
-	test("merges divergent chat message snapshots by id", () => {
-		const local = JSON.stringify([
-			{ id: "m1", role: "user", content: "existing message" },
-			{ id: "m2", role: "assistant", content: "local assistant reply" },
-		]);
-		const incoming = JSON.stringify([
-			{ id: "m1", role: "user", content: "existing message" },
-			{ id: "m3", role: "user", content: "new message from other window" },
-		]);
-
-		expect(chatMessagesContainUnseenIds(incoming, local)).toBe(true);
-		expect(
-			JSON.parse(mergeChatMessageStorageValues(local, incoming) ?? "[]").map(
-				(message: { id: string }) => message.id
-			)
-		).toEqual(["m1", "m2", "m3"]);
 	});
 });

@@ -1,6 +1,6 @@
-import { renameSync } from "node:fs";
-import { mkdir, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { renameSync } from "fs";
+import { mkdir } from "fs/promises";
+import { dirname } from "path";
 
 /**
  * Atomically write JSON data to a file.
@@ -12,15 +12,8 @@ export async function atomicWriteJson(
 	data: unknown,
 	indent?: number
 ): Promise<void> {
-	const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${Math.random()
-		.toString(36)
-		.slice(2)}.tmp`;
+	const tmpPath = filePath + ".tmp";
 	await mkdir(dirname(filePath), { recursive: true });
-	try {
-		await Bun.write(tmpPath, JSON.stringify(data, null, indent));
-		renameSync(tmpPath, filePath);
-	} catch (error) {
-		await unlink(tmpPath).catch(() => {});
-		throw error;
-	}
+	await Bun.write(tmpPath, JSON.stringify(data, null, indent));
+	renameSync(tmpPath, filePath);
 }
