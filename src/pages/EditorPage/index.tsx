@@ -4,6 +4,7 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
+	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -11,6 +12,7 @@ import {
 	type AgentChatHandle,
 	AgentChatView,
 } from "../../components/chat/AgentChatView.tsx";
+import { BranchDropdown } from "../../components/chat/AgentChatHeader.tsx";
 import { DiffViewerBoundary } from "../../components/diff/DiffViewerBoundary.tsx";
 import {
 	ChangeFileSidebar,
@@ -19,6 +21,8 @@ import {
 import { CommitGraph } from "../../components/git/CommitGraph.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
+	IconCollapse,
+	IconExpand,
 	IconGitBranch,
 	IconLayoutGrid,
 	IconPanelLeft,
@@ -29,7 +33,10 @@ import {
 import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
-import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
+import {
+	clearAgentChatMessages,
+	loadPendingWorkspacePaths,
+} from "../../features/chat/chat-session-store.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
 import { useGitChangeActions } from "../../features/git/useGitChangeActions.ts";
 import {
@@ -88,28 +95,93 @@ interface Session {
 	messageCount: number;
 }
 
+type StateValue<T> = T | ((current: T) => T);
+
+type EditorUiState = {
+	selectedPaneId: string | null;
+	selectedFiles: Record<string, SelectedFile | null>;
+	diffViewMode: DiffViewMode;
+	closedPaneIds: Set<string>;
+	scrollToChange: number;
+	zenMode: boolean;
+	sidebarWidth: number;
+	sidebarVisible: boolean;
+	selectedCommitHash: string | null;
+	fileViewMode: "path" | "tree";
+	mainViewMode: "diff" | "graph";
+	showSettings: boolean;
+};
+
+type EditorUiAction<K extends keyof EditorUiState = keyof EditorUiState> = {
+	type: "fieldChanged";
+	field: K;
+	value: StateValue<EditorUiState[K]>;
+};
+
+function getInitialEditorUiState(): EditorUiState {
+	return {
+		selectedPaneId: readStoredValue("editor-selected-pane") ?? null,
+		selectedFiles: {},
+		diffViewMode: "split",
+		closedPaneIds: new Set(),
+		scrollToChange: 0,
+		zenMode: loadZenMode(),
+		sidebarWidth: 280,
+		sidebarVisible: true,
+		selectedCommitHash: null,
+		fileViewMode: "tree",
+		mainViewMode: "diff",
+		showSettings: false,
+	};
+}
+
+function resolveStateValue<T>(current: T, value: StateValue<T>): T {
+	return typeof value === "function"
+		? (value as (current: T) => T)(current)
+		: value;
+}
+
+function editorUiReducer(
+	state: EditorUiState,
+	action: EditorUiAction
+): EditorUiState {
+	switch (action.type) {
+		case "fieldChanged":
+			return {
+				...state,
+				[action.field]: resolveStateValue(state[action.field], action.value),
+			};
+	}
+}
+
 let cachedKey = "";
 let cachedSessions: Session[] = [];
+const EMPTY_TERMINAL_GROUPS: TerminalGroupModel[] = [];
 
 function flattenSessions(groups: TerminalGroupModel[]): Session[] {
 	return groups.flatMap((g) =>
-		g.panes.flatMap((p) =>
-			isChatAgentKind(p.agentKind)
-				? [
-						{
-							groupId: g.id,
-							groupName: g.name,
-							paneId: p.id,
-							paneTitle: p.title,
-							agentKind: p.agentKind,
-							cwd: p.cwd,
-							referencePaths: p.referencePaths,
-							pendingCwd: p.pendingCwd,
-							messageCount: 0,
-						},
-					]
-				: []
-		)
+		g.panes.flatMap((p) => {
+			if (!isChatAgentKind(p.agentKind)) return [];
+			const pendingWorkspacePaths = p.cwd
+				? []
+				: loadPendingWorkspacePaths(p.id);
+			return [
+				{
+					groupId: g.id,
+					groupName: g.name,
+					paneId: p.id,
+					paneTitle: p.title,
+					agentKind: p.agentKind,
+					cwd: p.cwd ?? pendingWorkspacePaths[0],
+					referencePaths: p.cwd
+						? p.referencePaths
+						: pendingWorkspacePaths.slice(1),
+					pendingCwd:
+						p.pendingCwd || (!p.cwd && pendingWorkspacePaths.length > 0),
+					messageCount: 0,
+				},
+			];
+		})
 	);
 }
 
@@ -156,41 +228,107 @@ export function EditorPage({
 	onDirectoryChange,
 }: EditorPageProps = {}) {
 	const [, setTick] = useState(0);
-	const [selectedPaneId, setSelectedPaneId] = useState<string | null>(
-		() => readStoredValue("editor-selected-pane") ?? null
-	);
-	const [selectedFiles, setSelectedFiles] = useState<
-		Record<string, SelectedFile | null>
-	>({});
 	const [, setAgentStatuses] = useState<Map<string, string>>(new Map());
-	const [diffViewMode, setDiffViewMode] = useState<DiffViewMode>("split");
-	const [closedPaneIds, setClosedPaneIds] = useState<Set<string>>(new Set());
-	const [scrollToChange, setScrollToChange] = useState(0);
-	const [zenMode, setZenMode] = useState(loadZenMode);
-	const [sidebarWidth, setSidebarWidth] = useState(280); // Default 17.5rem
-	const [sidebarVisible, setSidebarVisible] = useState(true);
-	const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(
-		null
+	const [editorUiState, editorUiDispatch] = useReducer(
+		editorUiReducer,
+		undefined,
+		getInitialEditorUiState
 	);
-	const [fileViewMode, setFileViewMode] = useState<"path" | "tree">("tree");
-	const [mainViewMode, setMainViewMode] = useState<"diff" | "graph">("diff");
-	const [showSettings, setShowSettings] = useState(false);
+	const {
+		selectedPaneId,
+		selectedFiles,
+		diffViewMode,
+		closedPaneIds,
+		scrollToChange,
+		zenMode,
+		sidebarWidth,
+		sidebarVisible,
+		selectedCommitHash,
+		fileViewMode,
+		mainViewMode,
+		showSettings,
+	} = editorUiState;
+	const setEditorUiField = useCallback(
+		<K extends keyof EditorUiState>(
+			field: K,
+			value: StateValue<EditorUiState[K]>
+		) =>
+			editorUiDispatch({
+				type: "fieldChanged",
+				field,
+				value,
+			} as EditorUiAction),
+		[]
+	);
+	const setSelectedPaneId = useCallback(
+		(value: StateValue<string | null>) =>
+			setEditorUiField("selectedPaneId", value),
+		[setEditorUiField]
+	);
+	const setSelectedFiles = useCallback(
+		(value: StateValue<Record<string, SelectedFile | null>>) =>
+			setEditorUiField("selectedFiles", value),
+		[setEditorUiField]
+	);
+	const setDiffViewMode = useCallback(
+		(value: StateValue<DiffViewMode>) =>
+			setEditorUiField("diffViewMode", value),
+		[setEditorUiField]
+	);
+	const setClosedPaneIds = useCallback(
+		(value: StateValue<Set<string>>) =>
+			setEditorUiField("closedPaneIds", value),
+		[setEditorUiField]
+	);
+	const setScrollToChange = useCallback(
+		(value: StateValue<number>) => setEditorUiField("scrollToChange", value),
+		[setEditorUiField]
+	);
+	const setZenMode = useCallback(
+		(value: StateValue<boolean>) => setEditorUiField("zenMode", value),
+		[setEditorUiField]
+	);
+	const setSidebarWidth = useCallback(
+		(value: StateValue<number>) => setEditorUiField("sidebarWidth", value),
+		[setEditorUiField]
+	);
+	const setSidebarVisible = useCallback(
+		(value: StateValue<boolean>) => setEditorUiField("sidebarVisible", value),
+		[setEditorUiField]
+	);
+	const setSelectedCommitHash = useCallback(
+		(value: StateValue<string | null>) =>
+			setEditorUiField("selectedCommitHash", value),
+		[setEditorUiField]
+	);
+	const setFileViewMode = useCallback(
+		(value: StateValue<"path" | "tree">) =>
+			setEditorUiField("fileViewMode", value),
+		[setEditorUiField]
+	);
+	const setMainViewMode = useCallback(
+		(value: StateValue<"diff" | "graph">) =>
+			setEditorUiField("mainViewMode", value),
+		[setEditorUiField]
+	);
+	const setShowSettings = useCallback(
+		(value: StateValue<boolean>) => setEditorUiField("showSettings", value),
+		[setEditorUiField]
+	);
 	const chatRef = useRef<AgentChatHandle>(null);
 	const sidebarDragRef = useRef<{
 		startX: number;
 		startWidth: number;
 	} | null>(null);
 
-	const [sessionVersion, setSessionVersion] = useState(0);
-	const terminalState = useMemo(
-		() => (liveGroups ? null : loadTerminalState()),
-		[liveGroups, sessionVersion]
-	);
+	const [, setSessionVersion] = useState(0);
+	const terminalState = liveGroups ? null : loadTerminalState();
 	const themeId =
 		liveThemeId ??
 		terminalState?.themeId ??
 		mapAppThemeToTerminalTheme(loadAppThemeId());
-	const sourceGroups = liveGroups ?? terminalState?.groups ?? [];
+	const sourceGroups =
+		liveGroups ?? terminalState?.groups ?? EMPTY_TERMINAL_GROUPS;
 	const activeGroupId =
 		liveSelectedGroupId ?? terminalState?.selectedGroupId ?? null;
 	const visibleGroups = useMemo(() => {
@@ -238,7 +376,9 @@ export function EditorPage({
 	const selectedDiffStats = useMemo(() => summarizeHunkDiff(diff), [diff]);
 
 	const refresh = useCallback(() => setTick(incrementNumber), []);
-	useEffect(wsClient.connect.bind(wsClient), []);
+	useEffect(() => {
+		return wsClient.connect();
+	}, []);
 
 	useEffect(() => {
 		const id = setInterval(refresh, 5000);
@@ -291,11 +431,12 @@ export function EditorPage({
 	});
 	const project = session?.cwd ? (projectMap.get(session.cwd) ?? null) : null;
 	const files = useMemo(
-		(orderProjectGitFiles<{
-			path: string;
-			staged: boolean;
-			status: string;
-		}>).bind(null, project),
+		() =>
+			orderProjectGitFiles<{
+				path: string;
+				staged: boolean;
+				status: string;
+			}>(project),
 		[project]
 	);
 	const staged = project?.files.filter(isStagedChange) ?? [];
@@ -321,7 +462,7 @@ export function EditorPage({
 			}));
 			loadDiff(req);
 		},
-		[loadDiff]
+		[loadDiff, setSelectedFiles]
 	);
 
 	useActivityFeed({
@@ -343,19 +484,22 @@ export function EditorPage({
 					[session.paneId]: { path, staged },
 				}));
 			},
-			[session?.paneId]
+			[session?.paneId, setSelectedFiles]
 		),
 		onDiffLoaded: useCallback(() => {
 			refresh();
 			setTimeout(setScrollToChange, 50, incrementNumber);
-		}, [refresh]),
+		}, [refresh, setScrollToChange]),
 	});
 
-	const updateZenMode = useCallback((next: boolean) => {
-		setZenMode(next);
-		writeStoredValue("terminal-editor-zen", next ? "true" : "false");
-		window.dispatchEvent(new Event("terminal-shell-change"));
-	}, []);
+	const updateZenMode = useCallback(
+		(next: boolean) => {
+			setZenMode(next);
+			writeStoredValue("terminal-editor-zen", next ? "true" : "false");
+			window.dispatchEvent(new Event("terminal-shell-change"));
+		},
+		[setZenMode]
+	);
 
 	useEffect(() => {
 		const syncEditorShellState = () => {
@@ -366,9 +510,11 @@ export function EditorPage({
 			if (storedPane) setSelectedPaneId(storedPane);
 		};
 		return listenWindowEvent("terminal-shell-change", syncEditorShellState);
-	}, []);
+	}, [setSelectedPaneId, setZenMode]);
 
-	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
+	useEffect(() => {
+		return setupTerminalThemePanelShortcut(setShowSettings);
+	}, [setShowSettings]);
 
 	useEffect(() => {
 		if (diff && !diffLoading) checkPendingScroll();
@@ -411,7 +557,7 @@ export function EditorPage({
 		) {
 			loadDiff({ cwd: session.cwd, file: target.path, staged: target.staged });
 		}
-	}, [clearDiff, files, loadDiff, session]);
+	}, [clearDiff, files, loadDiff, session, setSelectedFiles]);
 
 	const cycleFile = useCallback(
 		(dir: -1 | 1) => {
@@ -469,14 +615,14 @@ export function EditorPage({
 				setSelectedPaneId(rest[0]?.paneId ?? null);
 			}
 		},
-		[effectiveSelectedPaneId, sessions]
+		[effectiveSelectedPaneId, sessions, setClosedPaneIds, setSelectedPaneId]
 	);
 	const selectEditorPane = useCallback(
 		(paneId: string) => {
 			setSelectedPaneId(paneId);
 			onSelectPane?.(paneId);
 		},
-		[onSelectPane]
+		[onSelectPane, setSelectedPaneId]
 	);
 
 	const handleAgentStatusChange = useCallback((id: string, status: string) => {
@@ -513,7 +659,7 @@ export function EditorPage({
 			document.addEventListener("mousemove", handleMouseMove);
 			document.addEventListener("mouseup", handleMouseUp);
 		},
-		[sidebarWidth]
+		[setSidebarWidth, sidebarWidth]
 	);
 
 	const viewer =
@@ -623,6 +769,26 @@ export function EditorPage({
 			sidebar={diffSidebar}
 		/>
 	);
+	const diffToolbar = session ? (
+		<DiffViewerTopBar
+			mainViewMode={mainViewMode}
+			diffViewMode={diffViewMode}
+			cwd={zenMode ? session.cwd : undefined}
+			gitBranch={zenMode ? (project?.branch ?? null) : null}
+			filePath={request?.file}
+			selectedFile={selectedFile}
+			diffStats={selectedDiffStats}
+			sidebarVisible={sidebarVisible}
+			onStageFile={stageFile}
+			onUnstageFile={unstageFile}
+			onToggleSidebar={setSidebarVisible.bind(null, toggleBoolean)}
+			onMainViewModeChange={setMainViewMode}
+			onDiffViewModeChange={setDiffViewMode}
+			onGitBranchChanged={() => void refetchGit()}
+			zenMode={zenMode}
+			onToggleZenMode={() => updateZenMode(!zenMode)}
+		/>
+	) : null;
 
 	return (
 		<div {...stylex.props(styles.root)}>
@@ -664,6 +830,7 @@ export function EditorPage({
 						/>
 					}
 					viewer={viewer}
+					toolbar={diffToolbar}
 					sidebar={diffSidebar}
 				/>
 			) : (
@@ -682,21 +849,7 @@ export function EditorPage({
 					</section>
 
 					<EditorWorkspace
-						toolbar={
-							<DiffViewerTopBar
-								mainViewMode={mainViewMode}
-								diffViewMode={diffViewMode}
-								filePath={request?.file}
-								selectedFile={selectedFile}
-								diffStats={selectedDiffStats}
-								sidebarVisible={sidebarVisible}
-								onStageFile={stageFile}
-								onUnstageFile={unstageFile}
-								onToggleSidebar={setSidebarVisible.bind(null, toggleBoolean)}
-								onMainViewModeChange={setMainViewMode}
-								onDiffViewModeChange={setDiffViewMode}
-							/>
-						}
+						toolbar={diffToolbar}
 						viewer={viewer}
 						sidebar={detailsSidebar}
 					/>
@@ -840,6 +993,8 @@ function ToolbarButton({
 function DiffViewerTopBar({
 	mainViewMode,
 	diffViewMode,
+	cwd,
+	gitBranch,
 	filePath,
 	selectedFile,
 	diffStats,
@@ -849,9 +1004,14 @@ function DiffViewerTopBar({
 	onToggleSidebar,
 	onMainViewModeChange,
 	onDiffViewModeChange,
+	onGitBranchChanged,
+	zenMode,
+	onToggleZenMode,
 }: {
 	mainViewMode: "diff" | "graph";
 	diffViewMode: DiffViewMode;
+	cwd?: string;
+	gitBranch: string | null;
 	filePath?: string;
 	selectedFile: SelectedFile | null;
 	diffStats: ReturnType<typeof summarizeHunkDiff>;
@@ -861,10 +1021,38 @@ function DiffViewerTopBar({
 	onToggleSidebar: () => void;
 	onMainViewModeChange: (mode: "diff" | "graph") => void;
 	onDiffViewModeChange: (mode: DiffViewMode) => void;
+	onGitBranchChanged?: (branch?: string) => void;
+	zenMode: boolean;
+	onToggleZenMode: () => void;
 }) {
 	const fileActionTitle = selectedFile?.staged ? "Unstage file" : "Stage file";
+	const dirName = cwd ? cwd.split("/").pop() || cwd : null;
 	return (
 		<div {...stylex.props(styles.topBar)}>
+			{dirName && (
+				<span {...stylex.props(styles.headerTitle)} title={cwd}>
+					{dirName}
+				</span>
+			)}
+			{gitBranch && (
+				<>
+					<span {...stylex.props(styles.headerMuted)}>›</span>
+					{cwd ? (
+						<BranchDropdown
+							cwd={cwd}
+							branch={gitBranch}
+							onBranchChanged={onGitBranchChanged}
+						/>
+					) : (
+						<span {...stylex.props(styles.headerBranch)} title={gitBranch}>
+							{gitBranch}
+						</span>
+					)}
+				</>
+			)}
+			{(dirName || gitBranch) && (
+				<span {...stylex.props(styles.headerDivider)} />
+			)}
 			<div {...stylex.props(styles.segmented)}>
 				<button
 					type="button"
@@ -943,6 +1131,12 @@ function DiffViewerTopBar({
 					}
 					onClick={onToggleSidebar}
 					icon={<IconPanelLeft size={11} />}
+				/>
+				<ToolbarButton
+					active={zenMode}
+					title={zenMode ? "Exit focus mode" : "Focus editor"}
+					onClick={onToggleZenMode}
+					icon={zenMode ? <IconCollapse size={11} /> : <IconExpand size={11} />}
 				/>
 			</div>
 		</div>
@@ -1069,13 +1263,16 @@ const styles = stylex.create({
 		paddingInline: controlSize._6,
 	},
 	topBar: {
-		display: "flex",
-		flexShrink: 0,
 		alignItems: "center",
-		gap: controlSize._2,
+		backgroundColor: color.background,
 		borderBottomWidth: 1,
 		borderBottomStyle: "solid",
 		borderBottomColor: color.border,
+		display: "flex",
+		flexShrink: 0,
+		gap: controlSize._1_5,
+		minHeight: controlSize._8,
+		minWidth: 0,
 		paddingBlock: controlSize._1,
 		paddingInline: controlSize._3,
 	},
@@ -1086,6 +1283,33 @@ const styles = stylex.create({
 	},
 	spacer: {
 		flex: 1,
+	},
+	headerTitle: {
+		color: color.textMain,
+		fontSize: font.size_1,
+		fontWeight: font.weight_5,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+	},
+	headerMuted: {
+		color: color.textMuted,
+		fontSize: font.size_1,
+	},
+	headerBranch: {
+		color: color.textMuted,
+		fontSize: font.size_1,
+		fontWeight: font.weight_5,
+		maxWidth: 80,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+	},
+	headerDivider: {
+		backgroundColor: color.border,
+		flexShrink: 0,
+		height: controlSize._4,
+		width: 1,
 	},
 	emptyWrap: {
 		display: "flex",

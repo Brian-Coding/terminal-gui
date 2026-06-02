@@ -34,10 +34,7 @@ import {
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { Button } from "../ui/Button.tsx";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
-import { IconButton } from "../ui/IconButton.tsx";
 import {
-	IconCollapse,
-	IconExpand,
 	IconLayoutGrid,
 	IconLayoutRows,
 	IconPlus,
@@ -66,7 +63,6 @@ function loadShellState() {
 		mainView: isTerminalMainView(mainView)
 			? mainView
 			: DEFAULT_TERMINAL_MAIN_VIEW,
-		editorZenMode: readStoredValue("terminal-editor-zen") === "true",
 	};
 }
 
@@ -105,12 +101,13 @@ export function TerminalShellHeader() {
 		setShellState(loadShellState());
 	}, []);
 
-	useEffect(
-		listenWindowEvent.bind(null, "terminal-shell-change", refreshShellState),
-		[refreshShellState]
-	);
+	useEffect(() => {
+		return listenWindowEvent("terminal-shell-change", refreshShellState);
+	}, [refreshShellState]);
 
-	useEffect(listenTerminalLayoutMode.bind(null, setLayoutMode), []);
+	useEffect(() => {
+		return listenTerminalLayoutMode(setLayoutMode);
+	}, []);
 
 	useEffect(() => {
 		if (!showNewMenu) return;
@@ -187,11 +184,6 @@ export function TerminalShellHeader() {
 		},
 		[]
 	);
-
-	const updateEditorZenMode = useCallback((next: boolean) => {
-		writeStoredValue("terminal-editor-zen", next ? "true" : "false");
-		window.dispatchEvent(new Event("terminal-shell-change"));
-	}, []);
 
 	return (
 		<div
@@ -298,24 +290,6 @@ export function TerminalShellHeader() {
 								<IconPlus size={10} />
 							</Button>
 						</div>
-						{shellState.mainView === "editor" && (
-							<IconButton
-								type="button"
-								onClick={() => updateEditorZenMode(!shellState.editorZenMode)}
-								title={
-									shellState.editorZenMode ? "Exit zen mode" : "Enter zen mode"
-								}
-								variant="ghost"
-								size="md"
-								className="h-7 w-7 border border-inferay-gray-border bg-inferay-dark-gray"
-							>
-								{shellState.editorZenMode ? (
-									<IconCollapse size={12} />
-								) : (
-									<IconExpand size={12} />
-								)}
-							</IconButton>
-						)}
 					</div>
 				</>
 			)}

@@ -8,11 +8,11 @@ import {
 	useState,
 } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
-import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
 import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import { IconGitBranch, IconX } from "../../components/ui/Icons.tsx";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
+import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { EditorPage } from "../EditorPage/index.tsx";
@@ -33,6 +33,7 @@ import {
 	DEFAULT_FONT_SIZE,
 	DEFAULT_OPACITY,
 	DEFAULT_ROWS,
+	type GroupId,
 	getInitialGroups,
 	getPaneTitle,
 	getThemeById,
@@ -41,8 +42,8 @@ import {
 	migrateGroup,
 	saveTerminalState,
 	syncTerminalLayoutMode,
-	type GroupId,
 	type TerminalGroupModel,
+	type TerminalLayoutMode,
 	type TerminalPaneModel,
 	type ThemeId,
 } from "../../features/terminal/terminal-utils.ts";
@@ -414,20 +415,62 @@ function groupsReducer(
 	}
 }
 
+type TerminalViewState = {
+	layoutMode: TerminalLayoutMode;
+	mainView: TerminalMainView;
+};
+
+type TerminalViewAction =
+	| { type: "layoutModeChanged"; value: TerminalLayoutMode }
+	| { type: "mainViewChanged"; value: TerminalMainView };
+
+function getInitialTerminalViewState(): TerminalViewState {
+	const stored = readStoredValue("terminal-main-view");
+	return {
+		layoutMode: loadTerminalLayoutMode(),
+		mainView: isTerminalMainView(stored) ? stored : DEFAULT_TERMINAL_MAIN_VIEW,
+	};
+}
+
+function terminalViewReducer(
+	state: TerminalViewState,
+	action: TerminalViewAction
+): TerminalViewState {
+	switch (action.type) {
+		case "layoutModeChanged":
+			return { ...state, layoutMode: action.value };
+		case "mainViewChanged":
+			return { ...state, mainView: action.value };
+	}
+}
+
 export function TerminalPage() {
-	useEffect(wsClient.connect.bind(wsClient), []);
-	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
-	const [mainView, setMainView] = useState<TerminalMainView>(() => {
-		const stored = readStoredValue("terminal-main-view");
-		return isTerminalMainView(stored) ? stored : DEFAULT_TERMINAL_MAIN_VIEW;
-	});
+	useEffect(() => {
+		return wsClient.connect();
+	}, []);
+	const [viewState, viewDispatch] = useReducer(
+		terminalViewReducer,
+		undefined,
+		getInitialTerminalViewState
+	);
+	const { layoutMode, mainView } = viewState;
+	const setLayoutMode = useCallback(
+		(value: TerminalLayoutMode) =>
+			viewDispatch({ type: "layoutModeChanged", value }),
+		[]
+	);
+	const setMainView = useCallback(
+		(value: TerminalMainView) =>
+			viewDispatch({ type: "mainViewChanged", value }),
+		[]
+	);
 	useEffect(() => {
 		writeStoredValue("terminal-layout-mode", layoutMode);
 	}, [layoutMode]);
 	useEffect(() => {
 		writeStoredValue("terminal-main-view", mainView);
 	}, [mainView]);
-	const initialState = useMemo(loadTerminalState, []);
+	const initialState = useMemo(() => loadTerminalState(), []);
 	const initGroups = useMemo(() => getInitialGroups(), []);
 	const [groups, groupsDispatch] = useReducer(groupsReducer, initGroups);
 	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
@@ -560,22 +603,22 @@ export function TerminalPage() {
 					selectedGroupId: savedState.selectedGroupId,
 				};
 			}
-			// Skip full restore check if we have a pending save - this prevents undoing local changes
-			if (pendingSaveRef.current) {
-				return;
-			}
 			if (savedState) {
 				const savedShellKey = shellStateKey(
 					savedState.selectedGroupId,
 					savedState.groups
 				);
-				const currentShellKey = shellStateKey(
-					savedState.selectedGroupId,
-					groups
-				);
+				const currentShellKey = shellStateKey(selectedGroupId, groups);
 				if (savedShellKey !== currentShellKey) {
+					latestStateRef.current = savedState;
 					restoreSavedState(savedState);
+					pendingSaveRef.current = false;
 				}
+			}
+			// Skip the remaining external sync work during a pending save. Shell state
+			// has already been reconciled above so a queued save cannot erase it.
+			if (pendingSaveRef.current) {
+				return;
 			}
 			const storedView = readStoredValue("terminal-main-view");
 			const nextMainView = isTerminalMainView(storedView)
@@ -587,8 +630,18 @@ export function TerminalPage() {
 			syncTerminalLayoutMode(setLayoutMode);
 		};
 		return listenWindowEvent("terminal-shell-change", handleShellChange);
-	}, [groups, mainView, restoreSavedState, selectedGroupId, themeId]);
-	useEffect(setupTerminalThemePanelShortcut.bind(null, setShowSettings), []);
+	}, [
+		groups,
+		mainView,
+		restoreSavedState,
+		selectedGroupId,
+		setLayoutMode,
+		setMainView,
+		themeId,
+	]);
+	useEffect(() => {
+		return setupTerminalThemePanelShortcut(setShowSettings);
+	}, []);
 	const handleAddPane = useCallback(
 		(agentKind: AgentKind) =>
 			withSelectedGroup((groupId) =>

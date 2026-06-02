@@ -606,17 +606,6 @@ export function ChatComposer({
 										overflowWrap: "break-word",
 									}}
 								/>
-								{isLoading && (
-									<div {...stylex.props(styles.loadingDots)}>
-										<span {...stylex.props(styles.loadingDot)} />
-										<span
-											{...stylex.props(styles.loadingDot, styles.loadingDot2)}
-										/>
-										<span
-											{...stylex.props(styles.loadingDot, styles.loadingDot3)}
-										/>
-									</div>
-								)}
 							</div>
 						</div>
 						<div {...stylex.props(styles.pickerRow)}>
@@ -1042,34 +1031,6 @@ const styles = stylex.create({
 	commandDescription: {
 		color: color.textMuted,
 		fontSize: "0.6875rem",
-	},
-	loadingDots: {
-		position: "absolute",
-		right: 0,
-		top: "50%",
-		display: "flex",
-		alignItems: "center",
-		gap: "0.125rem",
-		transform: "translateY(-50%)",
-	},
-	loadingDot: {
-		width: controlSize._1,
-		height: controlSize._1,
-		borderRadius: "999px",
-		backgroundColor: color.accent,
-		animationName: stylex.keyframes({
-			"50%": {
-				opacity: 0.35,
-			},
-		}),
-		animationDuration: "1s",
-		animationIterationCount: "infinite",
-	},
-	loadingDot2: {
-		animationDelay: "150ms",
-	},
-	loadingDot3: {
-		animationDelay: "300ms",
 	},
 	accentText: {
 		color: "currentColor",

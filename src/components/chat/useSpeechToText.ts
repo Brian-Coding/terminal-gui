@@ -109,6 +109,21 @@ async function requestMicrophoneAccess() {
 	}
 }
 
+function cleanupSpeechRecognition({
+	shouldApplyResultsRef,
+	ignoreAbortErrorRef,
+	recognitionRef,
+}: {
+	shouldApplyResultsRef: { current: boolean };
+	ignoreAbortErrorRef: { current: boolean };
+	recognitionRef: { current: BrowserSpeechRecognition | null };
+}) {
+	shouldApplyResultsRef.current = false;
+	ignoreAbortErrorRef.current = true;
+	recognitionRef.current?.abort();
+	recognitionRef.current = null;
+}
+
 export function useSpeechToText({
 	value,
 	onChange,
@@ -134,10 +149,11 @@ export function useSpeechToText({
 	useEffect(() => {
 		setIsSupported(Boolean(getSpeechRecognition()));
 		return () => {
-			shouldApplyResultsRef.current = false;
-			ignoreAbortErrorRef.current = true;
-			recognitionRef.current?.abort();
-			recognitionRef.current = null;
+			cleanupSpeechRecognition({
+				shouldApplyResultsRef,
+				ignoreAbortErrorRef,
+				recognitionRef,
+			});
 		};
 	}, []);
 
