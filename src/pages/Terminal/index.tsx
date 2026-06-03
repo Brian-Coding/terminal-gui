@@ -26,8 +26,6 @@ import "@xterm/xterm/css/xterm.css";
 import {
 	type AgentKind,
 	cacheTerminalState,
-	createPendingAgentChatPane,
-	createTerminalPane,
 	DEFAULT_CHAT_AGENT_KIND,
 	DEFAULT_FONT_FAMILY,
 	DEFAULT_FONT_SIZE,
@@ -35,19 +33,18 @@ import {
 	DEFAULT_ROWS,
 	type GroupId,
 	getInitialGroups,
-	getPaneTitle,
 	getThemeById,
 	loadCanonicalTerminalState,
 	loadTerminalLayoutMode,
 	loadTerminalState,
 	migrateGroup,
 	normalizeTerminalState,
+	reduceTerminalGroups,
 	saveSyncedTerminalState,
 	syncTerminalLayoutMode,
 	type TerminalShellChangeDetail,
 	type TerminalGroupModel,
 	type TerminalLayoutMode,
-	type TerminalPaneModel,
 	type TerminalSavedState,
 	terminalStateKey,
 	terminalStateScore,
@@ -254,142 +251,6 @@ function AgentStartPane({
 	);
 }
 
-type GroupAction =
-	| {
-			type: "addPane";
-			groupId: string;
-			agentKind: AgentKind;
-			cwd?: string;
-			pendingCwd?: boolean;
-			referencePaths?: string[];
-	  }
-	| { type: "removePane"; groupId: string; paneId: string; force?: boolean }
-	| { type: "selectPane"; groupId: string; paneId: string }
-	| {
-			type: "directorySelected";
-			groupId: string;
-			paneId: string;
-			path: string | null;
-			referencePaths?: string[];
-	  }
-	| { type: "removeGroup"; groupId: string }
-	| {
-			type: "reorderPanes";
-			groupId: string;
-			fromIndex: number;
-			toIndex: number;
-	  }
-	| {
-			type: "setPaneAgentKind";
-			groupId: string;
-			paneId: string;
-			agentKind: AgentKind;
-	  }
-	| { type: "replaceAll"; groups: TerminalGroupModel[] };
-
-function groupsReducer(
-	state: TerminalGroupModel[],
-	action: GroupAction
-): TerminalGroupModel[] {
-	switch (action.type) {
-		case "addPane": {
-			const pane = createTerminalPane(
-				action.agentKind,
-				action.cwd,
-				action.pendingCwd
-			);
-			if (action.referencePaths) {
-				pane.referencePaths = action.referencePaths;
-			}
-			return state.map((g) => {
-				if (g.id !== action.groupId) return g;
-				return { ...g, panes: [...g.panes, pane], selectedPaneId: pane.id };
-			});
-		}
-		case "removePane": {
-			return state.map((g) => {
-				if (g.id !== action.groupId) return g;
-				const panes = g.panes.filter(lacksId.bind(null, action.paneId));
-				if (panes.length === 0) {
-					const pane = createPendingAgentChatPane();
-					return { ...g, panes: [pane], selectedPaneId: pane.id };
-				}
-				return {
-					...g,
-					panes,
-					selectedPaneId:
-						g.selectedPaneId === action.paneId
-							? (panes[0]?.id ?? null)
-							: g.selectedPaneId,
-				};
-			});
-		}
-		case "selectPane":
-			return state.map((g) =>
-				g.id === action.groupId
-					? {
-							...g,
-							selectedPaneId:
-								action.paneId as TerminalGroupModel["selectedPaneId"],
-						}
-					: g
-			);
-		case "directorySelected":
-			return state.map((g) =>
-				g.id === action.groupId
-					? {
-							...g,
-							panes: g.panes.map((p) =>
-								p.id === action.paneId
-									? {
-											...p,
-											cwd: action.path ?? undefined,
-											pendingCwd: false,
-											referencePaths: action.referencePaths,
-											title: getPaneTitle(
-												p.agentKind,
-												action.path ?? undefined
-											),
-										}
-									: p
-							),
-						}
-					: g
-			);
-		case "removeGroup":
-			return state.filter(lacksId.bind(null, action.groupId));
-		case "reorderPanes":
-			return state.map((g) => {
-				if (g.id !== action.groupId) return g;
-				const panes = [...g.panes];
-				const [moved] = panes.splice(action.fromIndex, 1);
-				if (moved) panes.splice(action.toIndex, 0, moved);
-				return { ...g, panes };
-			});
-		case "setPaneAgentKind":
-			return state.map((g) =>
-				g.id === action.groupId
-					? {
-							...g,
-							panes: g.panes.map((p) =>
-								p.id === action.paneId
-									? ({
-											...p,
-											agentKind: action.agentKind,
-											isClaude: action.agentKind === "claude",
-											paneType: action.agentKind,
-											title: getPaneTitle(action.agentKind, p.cwd),
-										} as TerminalPaneModel)
-									: p
-							),
-						}
-					: g
-			);
-		case "replaceAll":
-			return action.groups;
-	}
-}
-
 type TerminalViewState = {
 	layoutMode: TerminalLayoutMode;
 	mainView: TerminalMainView;
@@ -447,7 +308,7 @@ export function TerminalPage() {
 	}, [mainView]);
 	const initialState = useMemo(() => loadTerminalState(), []);
 	const initGroups = useMemo(() => getInitialGroups(), []);
-	const [groups, groupsDispatch] = useReducer(groupsReducer, initGroups);
+	const [groups, groupsDispatch] = useReducer(reduceTerminalGroups, initGroups);
 	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
 		() => initialState?.selectedGroupId ?? initGroups[0]?.id ?? null
 	);

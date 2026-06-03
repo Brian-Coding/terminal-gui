@@ -1,5 +1,5 @@
 import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
-import { hasId, noop } from "../../lib/data.ts";
+import { hasId, lacksId, noop } from "../../lib/data.ts";
 import { sendJson } from "../../lib/fetch-json.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import {
@@ -615,6 +615,136 @@ export function mutateTerminalWorkspaceState(
 		reason,
 		options
 	);
+}
+
+export type TerminalGroupsAction =
+	| {
+			type: "addPane";
+			groupId: string;
+			agentKind: AgentKind;
+			cwd?: string;
+			pendingCwd?: boolean;
+			referencePaths?: string[];
+	  }
+	| { type: "removePane"; groupId: string; paneId: string; force?: boolean }
+	| { type: "selectPane"; groupId: string; paneId: string }
+	| {
+			type: "directorySelected";
+			groupId: string;
+			paneId: string;
+			path: string | null;
+			referencePaths?: string[];
+	  }
+	| { type: "removeGroup"; groupId: string }
+	| {
+			type: "reorderPanes";
+			groupId: string;
+			fromIndex: number;
+			toIndex: number;
+	  }
+	| {
+			type: "setPaneAgentKind";
+			groupId: string;
+			paneId: string;
+			agentKind: AgentKind;
+	  }
+	| { type: "replaceAll"; groups: TerminalGroupModel[] };
+
+export function reduceTerminalGroups(
+	state: TerminalGroupModel[],
+	action: TerminalGroupsAction
+): TerminalGroupModel[] {
+	switch (action.type) {
+		case "addPane": {
+			const pane = createTerminalPane(
+				action.agentKind,
+				action.cwd,
+				action.pendingCwd
+			);
+			if (action.referencePaths) pane.referencePaths = action.referencePaths;
+			return state.map((group) =>
+				group.id === action.groupId
+					? { ...group, panes: [...group.panes, pane], selectedPaneId: pane.id }
+					: group
+			);
+		}
+		case "removePane":
+			return state.map((group) => {
+				if (group.id !== action.groupId) return group;
+				const panes = group.panes.filter(lacksId.bind(null, action.paneId));
+				if (panes.length === 0) {
+					const pane = createPendingAgentChatPane();
+					return { ...group, panes: [pane], selectedPaneId: pane.id };
+				}
+				return {
+					...group,
+					panes,
+					selectedPaneId:
+						group.selectedPaneId === action.paneId
+							? (panes[0]?.id ?? null)
+							: group.selectedPaneId,
+				};
+			});
+		case "selectPane":
+			return state.map((group) =>
+				group.id === action.groupId
+					? { ...group, selectedPaneId: action.paneId as PaneId }
+					: group
+			);
+		case "directorySelected":
+			return state.map((group) =>
+				group.id === action.groupId
+					? {
+							...group,
+							panes: group.panes.map((pane) =>
+								pane.id === action.paneId
+									? {
+											...pane,
+											cwd: action.path ?? undefined,
+											pendingCwd: false,
+											referencePaths: action.referencePaths,
+											title: getPaneTitle(
+												pane.agentKind,
+												action.path ?? undefined
+											),
+										}
+									: pane
+							),
+						}
+					: group
+			);
+		case "removeGroup":
+			return state.filter(lacksId.bind(null, action.groupId));
+		case "reorderPanes":
+			return state.map((group) => {
+				if (group.id !== action.groupId) return group;
+				const panes = [...group.panes];
+				const [moved] = panes.splice(action.fromIndex, 1);
+				if (moved) panes.splice(action.toIndex, 0, moved);
+				return { ...group, panes };
+			});
+		case "setPaneAgentKind":
+			return state.map((group) =>
+				group.id === action.groupId
+					? {
+							...group,
+							panes: group.panes.map((pane) =>
+								pane.id === action.paneId
+									? {
+											...pane,
+											agentKind: action.agentKind,
+											isClaude: action.agentKind === "claude",
+											paneType: action.agentKind,
+											title: getPaneTitle(action.agentKind, pane.cwd),
+										}
+									: pane
+							),
+						}
+					: group
+			);
+		case "replaceAll":
+			return action.groups;
+	}
 }
 
 /**
