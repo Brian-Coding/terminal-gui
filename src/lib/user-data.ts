@@ -1,7 +1,7 @@
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
-function resolveUserDataRoot(): string {
+const USER_DATA_ROOT = (() => {
 	if (platform() === "darwin") {
 		return join(homedir(), "Library", "Application Support", "Inferay");
 	}
@@ -12,9 +12,7 @@ function resolveUserDataRoot(): string {
 		process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"),
 		"inferay"
 	);
-}
-
-export const USER_DATA_ROOT = resolveUserDataRoot();
+})();
 
 export function userDataPath(...parts: string[]): string {
 	return join(USER_DATA_ROOT, ...parts);

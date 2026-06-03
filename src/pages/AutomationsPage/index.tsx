@@ -18,7 +18,7 @@ import {
 	IconWorkflow,
 } from "../../components/ui/Icons.tsx";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
-import { hasId, isPresent, lacksId } from "../../lib/data.ts";
+import { hasId, lacksId } from "../../lib/data.ts";
 import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import {
@@ -484,7 +484,7 @@ export function AutomationsPage() {
 	const outgoingNodes = selectedFlow.edges
 		.filter(([fromId]) => fromId === selectedNode.id)
 		.map(([, toId]) => selectedFlow.nodes.find(hasId.bind(null, toId)))
-		.filter(isPresent);
+		.filter((value) => value != null);
 
 	useEffect(() => {
 		flowsRef.current = flows;

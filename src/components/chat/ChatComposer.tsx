@@ -508,9 +508,9 @@ export function ChatComposer({
 										className={`shrink-0 ${
 											stylex.props(
 												voiceInput.isListening && styles.voiceButtonListening,
-												!voiceInput.isListening &&
-													voiceInput.error &&
-													styles.voiceButtonError
+												!voiceInput.isListening && !!voiceInput.error
+													? styles.voiceButtonError
+													: null
 											).className ?? ""
 										}`}
 										title={

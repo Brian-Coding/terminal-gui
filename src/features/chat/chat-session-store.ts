@@ -162,7 +162,7 @@ export async function loadFileBackedQueue<T>(paneId: string): Promise<T[]> {
 	return Array.isArray(response.queue) ? (response.queue as T[]) : [];
 }
 
-export async function saveFileBackedQueue<T>(
+async function saveFileBackedQueue<T>(
 	paneId: string,
 	queue: T[]
 ): Promise<void> {

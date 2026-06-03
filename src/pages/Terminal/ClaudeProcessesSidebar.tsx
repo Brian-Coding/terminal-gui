@@ -2,10 +2,20 @@ import * as stylex from "@stylexjs/stylex";
 import { memo } from "react";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import { IconCircle, IconRobot, IconX } from "../../components/ui/Icons.tsx";
-import type { ClaudeProcess } from "../../features/agents/useClaudeProcesses.ts";
 import { basename, formatKilobytes } from "../../lib/format.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { CollapsibleSidebarSection } from "./CollapsibleSidebarSection.tsx";
+
+interface ClaudeProcess {
+	pid: number;
+	ppid: number;
+	cpu: number;
+	mem: number;
+	rss: number;
+	cwd: string;
+	command: string;
+	elapsed: string;
+}
 
 function formatElapsed(elapsed: string): string {
 	// ps etime format: [[dd-]hh:]mm:ss

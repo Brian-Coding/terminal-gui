@@ -146,7 +146,7 @@ export function flushPendingClientStorageSync(): void {
 	flushPendingSync();
 }
 
-export async function syncAllStoredValues(): Promise<void> {
+async function syncAllStoredValues(): Promise<void> {
 	await sendStoragePatch(readLocalEntries());
 }
 

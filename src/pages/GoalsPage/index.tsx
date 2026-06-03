@@ -2,7 +2,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useState } from "react";
 import { Markdown } from "../../components/chat/ChatRichContent.tsx";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
-import { hasPaneId } from "../../lib/data.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { usePollingResource } from "../../hooks/usePollingResource.ts";
 import { basename, formatElapsedMs } from "../../lib/format.ts";
@@ -63,7 +62,7 @@ export function GoalsPage() {
 	const { data: goals, loaded } = usePollingResource(loadGoals, 1500, []);
 
 	const selectedGoal =
-		goals.find(hasPaneId.bind(null, selectedGoalId)) ?? goals[0] ?? null;
+		goals.find((goal) => goal.paneId === selectedGoalId) ?? goals[0] ?? null;
 
 	return (
 		<div {...stylex.props(styles.root)}>

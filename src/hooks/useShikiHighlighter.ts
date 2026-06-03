@@ -85,14 +85,6 @@ function readSyntaxTheme(): SyntaxHighlightTheme {
 	}
 }
 
-export function saveSyntaxHighlightTheme(theme: SyntaxHighlightTheme) {
-	if (typeof window === "undefined") return;
-	try {
-		window.localStorage.setItem(SYNTAX_THEME_STORAGE_KEY, theme);
-	} catch {}
-	window.dispatchEvent(new CustomEvent(SYNTAX_THEME_EVENT, { detail: theme }));
-}
-
 export function useSyntaxHighlightTheme() {
 	const [theme, setThemeState] =
 		useState<SyntaxHighlightTheme>(readSyntaxTheme);
@@ -119,7 +111,13 @@ export function useSyntaxHighlightTheme() {
 	const setTheme = useCallback((nextTheme: SyntaxHighlightTheme) => {
 		const normalized = normalizeSyntaxTheme(nextTheme);
 		setThemeState(normalized);
-		saveSyntaxHighlightTheme(normalized);
+		if (typeof window === "undefined") return;
+		try {
+			window.localStorage.setItem(SYNTAX_THEME_STORAGE_KEY, normalized);
+		} catch {}
+		window.dispatchEvent(
+			new CustomEvent(SYNTAX_THEME_EVENT, { detail: normalized })
+		);
 	}, []);
 
 	return [theme, setTheme] as const;

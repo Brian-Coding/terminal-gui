@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { runAsync } from "../lib/data.ts";
 
 /**
  * Generic async resource hook. Tracks loading/error state for an arbitrary
@@ -36,7 +35,7 @@ export function useAsyncResource<T>(
 	}, [fetcher]);
 
 	useEffect(() => {
-		runAsync(refresh);
+		void refresh();
 	}, [refresh]);
 
 	return { data, setData, loading, error, refresh };

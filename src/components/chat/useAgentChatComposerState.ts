@@ -7,7 +7,7 @@ import {
 } from "../../features/chat/chat-session-store.ts";
 import { CHAT_QUEUE_KEY_PREFIX } from "../../lib/client-storage-keys.ts";
 import { CLIENT_STORAGE_CHANGED_EVENT } from "../../lib/client-storage-sync.ts";
-import { hasPath, lacksId, lacksPath } from "../../lib/data.ts";
+import { hasPath, lacksId } from "../../lib/data.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 
@@ -207,7 +207,7 @@ export function useAgentChatComposerState(paneId: string) {
 		setAttachedImages((prev) => {
 			const target = prev.find(hasPath.bind(null, path));
 			if (target) URL.revokeObjectURL(target.previewUrl);
-			return prev.filter(lacksPath.bind(null, path));
+			return prev.filter((item) => item.path !== path);
 		});
 	}, []);
 

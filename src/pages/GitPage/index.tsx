@@ -38,14 +38,10 @@ import {
 	buildSummaryPrompt,
 	type ChangeCheckpoint,
 	checkpointKey,
-	buildReviewPrompt as composeReviewPrompt,
 	createChangeSignature,
 } from "../../features/git/changes-workspace.ts";
 import { useGitChangeActions } from "../../features/git/useGitChangeActions.ts";
-import {
-	summarizeHunkDiff,
-	useGitDiff,
-} from "../../features/git/useGitDiff.ts";
+import { useGitDiff } from "../../features/git/useGitDiff.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
 	appendPaneToGroup,
@@ -53,7 +49,7 @@ import {
 	dispatchTerminalShellChange,
 	mutateCanonicalTerminalState,
 } from "../../features/terminal/terminal-utils.ts";
-import { hasCwd, lacksValue } from "../../lib/data.ts";
+import { lacksValue } from "../../lib/data.ts";
 import { fetchJson, postJson } from "../../lib/fetch-json.ts";
 import {
 	isStagedChange,
@@ -75,18 +71,6 @@ const GitDiffView = lazy(() =>
 		default: m.GitDiffView,
 	}))
 );
-
-function persist(dirs: string[]) {
-	writeStoredJson("git-watched-dirs", dirs);
-}
-
-function selectRepositoryPath(
-	addRepo: (path: string) => void | Promise<void>,
-	closePicker: () => void,
-	path: string | null
-): void {
-	path ? void addRepo(path) : closePicker();
-}
 
 type StateValue<T> = T | ((current: T) => T);
 
@@ -217,10 +201,9 @@ export function GitPage() {
 		loadDiff,
 		clear: clearDiff,
 	} = useGitDiff();
-	const selectedDiffStats = useMemo(() => summarizeHunkDiff(diff), [diff]);
 	const project = useMemo(() => {
 		if (activeCwd) {
-			const found = projects.find(hasCwd.bind(null, activeCwd));
+			const found = projects.find((item) => item.cwd === activeCwd);
 			if (found) return found;
 		}
 		return projects[0] || null;
@@ -333,7 +316,7 @@ export function GitPage() {
 			}
 			const next = [...dirs, dir];
 			setDirs(next);
-			persist(next);
+			writeStoredJson("git-watched-dirs", next);
 			setPickerOpen(false);
 			setPickerError(null);
 			prevCwd.current = null;
@@ -346,7 +329,7 @@ export function GitPage() {
 		(cwd: string) => {
 			const next = dirs.filter(lacksValue.bind(null, cwd));
 			setDirs(next);
-			persist(next);
+			writeStoredJson("git-watched-dirs", next);
 			if (activeCwd === cwd) {
 				prevCwd.current = null;
 				setActiveCwd(next[0] || null);
@@ -491,7 +474,22 @@ export function GitPage() {
 				return { file, diff: result.diff };
 			})
 		);
-		return composeReviewPrompt(project, diffs);
+		return [
+			`Review the current changes in ${project.name}.`,
+			"Focus on correctness, regressions, missing tests, and risky implementation choices.",
+			"Return prioritized findings with file paths and concrete fixes.",
+			"",
+			diffs
+				.map(({ file, diff }) =>
+					[
+						`# ${file.staged ? "Staged" : "Unstaged"} ${file.status} ${file.path}`,
+						diff.trim(),
+					]
+						.filter(Boolean)
+						.join("\n")
+				)
+				.join("\n\n"),
+		].join("\n");
 	}, [project]);
 
 	const copyReviewPrompt = useCallback(async () => {
@@ -616,7 +614,7 @@ export function GitPage() {
 						<div {...stylex.props(styles.errorNotice)}>{pickerError}</div>
 					)}
 					<InlineDirectoryPicker
-						onSelect={selectRepositoryPath.bind(null, addRepo, closePicker)}
+						onSelect={(path) => (path ? void addRepo(path) : closePicker())}
 						onCancel={closePicker}
 					/>
 				</div>
@@ -793,11 +791,9 @@ export function GitPage() {
 									<div {...stylex.props(styles.errorNotice)}>{pickerError}</div>
 								)}
 								<InlineDirectoryPicker
-									onSelect={selectRepositoryPath.bind(
-										null,
-										addRepo,
-										closePicker
-									)}
+									onSelect={(path) =>
+										path ? void addRepo(path) : closePicker()
+									}
 									onCancel={closePicker}
 								/>
 							</div>
@@ -902,7 +898,6 @@ export function GitPage() {
 							untracked={untracked}
 							staged={staged}
 							selectedFile={selFile}
-							selectedDiffStats={selectedDiffStats}
 							onSelectFile={(file) => selectFile(file.path, file.staged)}
 							onStageFile={stageFile}
 							onUnstageFile={unstageFile}

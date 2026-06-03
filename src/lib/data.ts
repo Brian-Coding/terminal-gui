@@ -6,10 +6,6 @@ export function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
 }
 
-export function isPresent<T>(value: T | null | undefined): value is T {
-	return value != null;
-}
-
 export function isActive(value: { active: boolean }): boolean {
 	return value.active;
 }
@@ -28,24 +24,6 @@ export function toggleBoolean(value: boolean): boolean {
 
 export function noop(): void {}
 
-export function runAsync(task: () => Promise<unknown>): void {
-	void task();
-}
-
-export function runIfMounted(
-	mountedRef: { current: boolean },
-	action: () => Promise<unknown> | void
-): void {
-	if (mountedRef.current) void action();
-}
-
-export function withRecordEntry<T>(
-	key: string,
-	value: T
-): (current: Record<string, T>) => Record<string, T> {
-	return (current) => ({ ...current, [key]: value });
-}
-
 export function isFirstPath<T extends { path: string }>(
 	seen: Set<string>,
 	item: T
@@ -53,16 +31,6 @@ export function isFirstPath<T extends { path: string }>(
 	if (seen.has(item.path)) return false;
 	seen.add(item.path);
 	return true;
-}
-
-export function setRecordEntry<T>(
-	setRecord: (
-		updater: (current: Record<string, T>) => Record<string, T>
-	) => void,
-	key: string,
-	value: T
-): void {
-	setRecord(withRecordEntry(key, value));
 }
 
 export function comparePort(a: { port: number }, b: { port: number }): number {
@@ -101,14 +69,6 @@ export function hasPath(path: unknown, item: { path: string }): boolean {
 	return item.path === path;
 }
 
-export function lacksPath(path: unknown, item: { path: string }): boolean {
-	return item.path !== path;
-}
-
-export function hasCwd(cwd: unknown, item: { cwd: string }): boolean {
-	return item.cwd === cwd;
-}
-
 export function hasCommand(
 	command: unknown,
 	item: { command: string }
@@ -120,30 +80,12 @@ export function hasPid(pid: unknown, item: { pid: number }): boolean {
 	return item.pid === pid;
 }
 
-export function hasPpid(ppid: unknown, item: { ppid: number }): boolean {
-	return item.ppid === ppid;
-}
-
 export function lacksValue<T>(value: T, item: T): boolean {
 	return item !== value;
 }
 
-export function ppidNotIn(seen: Set<number>, item: { ppid: number }): boolean {
-	return !seen.has(item.ppid);
-}
-
 export function hasRole(role: unknown, item: { role: string }): boolean {
 	return item.role === role;
-}
-
-export function hasPaneId(paneId: unknown, item: { paneId: string }): boolean {
-	return item.paneId === paneId;
-}
-
-export function removePidFromList<T extends { pid: number }>(
-	pid: number
-): (items: T[]) => T[] {
-	return (items) => items.filter((item) => item.pid !== pid);
 }
 
 export function rangeContainsLine(

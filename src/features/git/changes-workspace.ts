@@ -12,11 +12,6 @@ export interface ChangeCheckpoint {
 	signature: string;
 }
 
-export interface DiffTextEntry {
-	file: GitFileEntry;
-	diff: string;
-}
-
 export function checkpointKey(cwd: string) {
 	return `git-change-checkpoint:${cwd}`;
 }
@@ -28,28 +23,6 @@ export function createChangeSignature(files: GitFileEntry[]) {
 		)
 		.sort()
 		.join("|");
-}
-
-export function buildReviewPrompt(
-	project: GitProjectStatus,
-	diffs: DiffTextEntry[]
-) {
-	return [
-		`Review the current changes in ${project.name}.`,
-		"Focus on correctness, regressions, missing tests, and risky implementation choices.",
-		"Return prioritized findings with file paths and concrete fixes.",
-		"",
-		diffs
-			.map(({ file, diff }) =>
-				[
-					`# ${file.staged ? "Staged" : "Unstaged"} ${file.status} ${file.path}`,
-					diff.trim(),
-				]
-					.filter(Boolean)
-					.join("\n")
-			)
-			.join("\n\n"),
-	].join("\n");
 }
 
 export function buildSummaryPrompt(
