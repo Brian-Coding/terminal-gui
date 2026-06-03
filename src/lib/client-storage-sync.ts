@@ -1,4 +1,6 @@
 import {
+	CHAT_MESSAGES_STORAGE_KEY_PREFIX,
+	CHAT_SESSION_INDEX_STORAGE_KEY,
 	shouldSyncClientStorageKey,
 	TERMINAL_STATE_STORAGE_KEY,
 } from "./client-storage-keys.ts";
@@ -10,10 +12,15 @@ interface ClientStoragePayload {
 	entries?: Record<string, StoredValue>;
 }
 
+interface TerminalStateEntryResult {
+	ok: boolean;
+	value: StoredValue;
+}
+
 let hydrating = false;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingSync = new Map<string, StoredValue>();
-const HYDRATION_TIMEOUT_MS = 800;
+const HYDRATION_TIMEOUT_MS = 5_000;
 export const CLIENT_STORAGE_CHANGED_EVENT = "inferay-client-storage-change";
 
 function readLocalEntries(): Record<string, string> {
@@ -29,43 +36,18 @@ function readLocalEntries(): Record<string, string> {
 	return entries;
 }
 
-function terminalStateScore(value: string | null): number {
-	if (!value) return 0;
-	try {
-		const parsed = JSON.parse(value) as {
-			groups?: Array<{ panes?: Array<{ cwd?: string; pendingCwd?: boolean }> }>;
-		};
-		return (parsed.groups ?? []).reduce((score, group) => {
-			const panes = group.panes ?? [];
-			return (
-				score +
-				panes.length +
-				panes.filter((pane) => pane.cwd || pane.pendingCwd === false).length
-			);
-		}, 0);
-	} catch {
-		return 0;
-	}
-}
-
 function shouldApplyServerValue(
 	key: string,
 	serverValue: StoredValue
 ): boolean {
-	if (serverValue === null) return false;
 	let localValue: string | null = null;
 	try {
 		localValue = localStorage.getItem(key);
 	} catch {
 		return false;
 	}
+	if (serverValue === null) return localValue !== null;
 	if (localValue === null) return true;
-	if (key === TERMINAL_STATE_STORAGE_KEY) {
-		const serverScore = terminalStateScore(serverValue);
-		const localScore = terminalStateScore(localValue);
-		if (serverScore <= 1 && localScore > serverScore) return false;
-		return serverValue !== localValue;
-	}
 	return serverValue !== localValue;
 }
 
@@ -75,6 +57,57 @@ async function sendStoragePatch(entries: Record<string, StoredValue>) {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ entries }),
 	});
+}
+
+async function fetchStoredEntries(
+	signal: AbortSignal
+): Promise<Record<string, StoredValue> | null> {
+	const response = await fetch("/api/client-storage", { signal });
+	if (!response.ok) return null;
+	const payload = (await response.json()) as ClientStoragePayload;
+	return payload.entries ?? {};
+}
+
+async function fetchTerminalStateEntry(): Promise<TerminalStateEntryResult> {
+	try {
+		const response = await fetch("/api/terminal/state");
+		if (!response.ok) return { ok: false, value: null };
+		const state = await response.json();
+		return { ok: true, value: state ? JSON.stringify(state) : null };
+	} catch {
+		return { ok: false, value: null };
+	}
+}
+
+function isChatCacheKey(key: string): boolean {
+	return (
+		key === CHAT_SESSION_INDEX_STORAGE_KEY ||
+		key.startsWith(CHAT_MESSAGES_STORAGE_KEY_PREFIX)
+	);
+}
+
+function collectTerminalResetEntries(
+	entries: Record<string, StoredValue>
+): Record<string, null> {
+	const resetEntries: Record<string, null> = {
+		[TERMINAL_STATE_STORAGE_KEY]: null,
+		[CHAT_SESSION_INDEX_STORAGE_KEY]: null,
+	};
+	for (const key of Object.keys(entries)) {
+		if (key === TERMINAL_STATE_STORAGE_KEY || isChatCacheKey(key)) {
+			resetEntries[key] = null;
+		}
+	}
+	try {
+		const localKeys: string[] = [];
+		for (let i = 0; i < localStorage.length; i++) {
+			const key = localStorage.key(i);
+			if (key === TERMINAL_STATE_STORAGE_KEY || (key && isChatCacheKey(key)))
+				localKeys.push(key);
+		}
+		for (const key of localKeys) resetEntries[key] = null;
+	} catch {}
+	return resetEntries;
 }
 
 function sendStorageBeacon(entries: Record<string, StoredValue>): boolean {
@@ -120,22 +153,42 @@ export async function syncAllStoredValues(): Promise<void> {
 export async function hydrateStoredValues(): Promise<void> {
 	if (typeof window === "undefined") return;
 	let entries: Record<string, StoredValue> = {};
+	let hydrated = false;
+	let resetEntries: Record<string, null> | null = null;
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), HYDRATION_TIMEOUT_MS);
 	try {
-		const response = await fetch("/api/client-storage", {
-			signal: controller.signal,
-		});
-		if (response.ok) {
-			const payload = (await response.json()) as ClientStoragePayload;
-			entries = payload.entries ?? {};
+		const fetchedEntries = await fetchStoredEntries(controller.signal);
+		if (fetchedEntries) {
+			entries = fetchedEntries;
+			hydrated = true;
 		}
 	} catch {}
 	clearTimeout(timeout);
 
+	const terminalState = await fetchTerminalStateEntry();
+	hydrating = true;
+	try {
+		if (terminalState.ok && terminalState.value) {
+			localStorage.setItem(TERMINAL_STATE_STORAGE_KEY, terminalState.value);
+		} else if (terminalState.ok) {
+			resetEntries = collectTerminalResetEntries(entries);
+			Object.assign(entries, resetEntries);
+		}
+	} catch {
+	} finally {
+		hydrating = false;
+	}
+
 	hydrating = true;
 	try {
 		for (const [key, value] of Object.entries(entries)) {
+			if (key === TERMINAL_STATE_STORAGE_KEY && value === null) {
+				try {
+					localStorage.removeItem(key);
+				} catch {}
+				continue;
+			}
 			if (!shouldSyncClientStorageKey(key)) continue;
 			if (!shouldApplyServerValue(key, value)) continue;
 			try {
@@ -147,7 +200,11 @@ export async function hydrateStoredValues(): Promise<void> {
 		hydrating = false;
 	}
 
-	syncAllStoredValues().catch(noop);
+	if (resetEntries) {
+		sendStoragePatch(resetEntries).catch(noop);
+	} else if (hydrated) {
+		syncAllStoredValues().catch(noop);
+	}
 }
 
 if (typeof window !== "undefined") {

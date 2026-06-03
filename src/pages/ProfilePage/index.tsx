@@ -24,6 +24,7 @@ import {
 	loadDefaultChatSettings,
 	saveDefaultChatSettings,
 } from "../../features/agents/agents.ts";
+import { dispatchTerminalShellChange } from "../../features/terminal/terminal-utils.ts";
 import {
 	fetchForgeAccounts,
 	fetchGithubRepos,
@@ -404,7 +405,7 @@ export function ProfilePage() {
 			if (!response.ok) throw new Error(payload.error ?? "Clone failed");
 			invalidateGithubReposCache();
 			setCloneStatus(`Cloned ${repo.full_name} to ${payload.displayPath}`);
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			dispatchTerminalShellChange({ source: "cache", reason: "repo-cloned" });
 		} catch (err) {
 			setError(
 				err instanceof Error ? err.message : "Unable to clone repository"

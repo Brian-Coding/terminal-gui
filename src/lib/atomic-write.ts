@@ -1,6 +1,8 @@
-import { renameSync } from "fs";
-import { mkdir } from "fs/promises";
-import { dirname } from "path";
+import { renameSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+const writeQueues = new Map<string, Promise<void>>();
 
 /**
  * Atomically write JSON data to a file.
@@ -12,8 +14,21 @@ export async function atomicWriteJson(
 	data: unknown,
 	indent?: number
 ): Promise<void> {
-	const tmpPath = filePath + ".tmp";
-	await mkdir(dirname(filePath), { recursive: true });
-	await Bun.write(tmpPath, JSON.stringify(data, null, indent));
-	renameSync(tmpPath, filePath);
+	const previous = writeQueues.get(filePath) ?? Promise.resolve();
+	const next = previous
+		.catch(() => {})
+		.then(async () => {
+			const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+			await mkdir(dirname(filePath), { recursive: true });
+			await Bun.write(tmpPath, JSON.stringify(data, null, indent));
+			renameSync(tmpPath, filePath);
+		});
+	writeQueues.set(filePath, next);
+	try {
+		await next;
+	} finally {
+		if (writeQueues.get(filePath) === next) {
+			writeQueues.delete(filePath);
+		}
+	}
 }

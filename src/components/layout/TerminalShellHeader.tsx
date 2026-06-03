@@ -12,25 +12,26 @@ import {
 	type NEW_PANE_AGENT_KINDS,
 } from "../../features/agents/agents.ts";
 import {
-	DEFAULT_TERMINAL_MAIN_VIEW,
+	appendPaneToGroup,
+	createTerminalPane,
+	dispatchTerminalShellChange,
+	listenTerminalLayoutMode,
+	loadTerminalLayoutMode,
+	loadTerminalState,
+	mutateCanonicalTerminalState,
+} from "../../features/terminal/terminal-utils.ts";
+import {
 	APP_PAGE_ROUTES,
+	DEFAULT_TERMINAL_MAIN_VIEW,
 	isTerminalMainView,
 	TERMINAL_MAIN_VIEWS,
 	type TerminalMainView,
 } from "../../lib/app-navigation.tsx";
-import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
-import {
-	appendPaneToGroup,
-	createTerminalPane,
-	listenTerminalLayoutMode,
-	loadTerminalLayoutMode,
-	loadTerminalState,
-	saveTerminalState,
-} from "../../features/terminal/terminal-utils.ts";
 import {
 	listenDocumentEvent,
 	listenWindowEvent,
 } from "../../lib/react-events.ts";
+import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { Button } from "../ui/Button.tsx";
 import { DropdownButton } from "../ui/DropdownButton.tsx";
@@ -125,27 +126,30 @@ export function TerminalShellHeader() {
 	const updateMainView = useCallback(
 		(view: TerminalMainView) => {
 			writeStoredValue("terminal-main-view", view);
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			dispatchTerminalShellChange({ source: "view", reason: "main-view" });
 			navigate("/terminal");
 		},
 		[navigate]
 	);
 
 	const addPaneToSelectedGroup = useCallback(
-		(agentKind: (typeof NEW_PANE_AGENT_KINDS)[number]) => {
-			const terminalState = loadTerminalState();
-			if (!terminalState) return;
-			const selectedGroupId =
-				terminalState.selectedGroupId ?? terminalState.groups[0]?.id;
-			if (!selectedGroupId) return;
+		async (agentKind: (typeof NEW_PANE_AGENT_KINDS)[number]) => {
 			const pane = createTerminalPane(agentKind, undefined, true);
-			saveTerminalState({
-				...terminalState,
-				groups: terminalState.groups.map(
-					appendPaneToGroup.bind(null, selectedGroupId, pane)
-				),
-			});
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			await mutateCanonicalTerminalState(
+				(terminalState) => {
+					const selectedGroupId =
+						terminalState.selectedGroupId ?? terminalState.groups[0]?.id;
+					if (!selectedGroupId) return null;
+					return {
+						...terminalState,
+						groups: terminalState.groups.map(
+							appendPaneToGroup.bind(null, selectedGroupId, pane)
+						),
+					};
+				},
+				"add-pane",
+				{ createIfMissing: true }
+			);
 			setShowNewMenu(false);
 			navigate("/terminal");
 		},
@@ -161,26 +165,26 @@ export function TerminalShellHeader() {
 	const updateLayoutMode = useCallback((mode: "grid" | "rows") => {
 		writeStoredValue("terminal-layout-mode", mode);
 		setLayoutMode(mode);
-		window.dispatchEvent(new Event("terminal-shell-change"));
+		dispatchTerminalShellChange({ source: "view", reason: "layout-mode" });
 	}, []);
 
 	const updateSelectedGroupGrid = useCallback(
-		(patch: { columns?: number; rows?: number }) => {
-			const terminalState = loadTerminalState();
-			if (!terminalState?.selectedGroupId) return;
-			saveTerminalState({
-				...terminalState,
-				groups: terminalState.groups.map((group) =>
-					group.id === terminalState.selectedGroupId
-						? {
-								...group,
-								columns: patch.columns ?? group.columns,
-								rows: patch.rows ?? group.rows,
-							}
-						: group
-				),
-			});
-			window.dispatchEvent(new Event("terminal-shell-change"));
+		async (patch: { columns?: number; rows?: number }) => {
+			await mutateCanonicalTerminalState((terminalState) => {
+				if (!terminalState.selectedGroupId) return null;
+				return {
+					...terminalState,
+					groups: terminalState.groups.map((group) =>
+						group.id === terminalState.selectedGroupId
+							? {
+									...group,
+									columns: patch.columns ?? group.columns,
+									rows: patch.rows ?? group.rows,
+								}
+							: group
+					),
+				};
+			}, "grid-size");
 		},
 		[]
 	);

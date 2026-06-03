@@ -49,13 +49,9 @@ import {
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
 	appendPaneToGroup,
-	createGroupId,
 	createTerminalPane,
-	DEFAULT_FONT_FAMILY,
-	DEFAULT_FONT_SIZE,
-	DEFAULT_OPACITY,
-	loadTerminalState,
-	saveTerminalState,
+	dispatchTerminalShellChange,
+	mutateCanonicalTerminalState,
 } from "../../features/terminal/terminal-utils.ts";
 import { hasCwd, lacksValue } from "../../lib/data.ts";
 import { fetchJson, postJson } from "../../lib/fetch-json.ts";
@@ -421,22 +417,8 @@ export function GitPage() {
 	}, [refetch, project, selFile, loadDiff, setActionBusy]);
 
 	const openPane = useCallback(
-		(agentKind: AgentKind, initialInput?: string, autoSend = false) => {
+		async (agentKind: AgentKind, initialInput?: string, autoSend = false) => {
 			if (!project) return null;
-			const existing = loadTerminalState();
-			const groups = existing?.groups ?? [
-				{
-					id: createGroupId(),
-					name: "Default",
-					panes: [],
-					selectedPaneId: null,
-					columns: 2,
-					rows: 1,
-				},
-			];
-			const selectedGroupId =
-				existing?.selectedGroupId ?? groups[0]?.id ?? null;
-			if (!selectedGroupId) return null;
 			const pane = createTerminalPane(agentKind, project.cwd);
 			if (initialInput && agentKind !== "terminal") {
 				if (autoSend) {
@@ -445,28 +427,35 @@ export function GitPage() {
 					saveStoredInput(pane.id, initialInput);
 				}
 			}
-			saveTerminalState({
-				groups: groups.map(appendPaneToGroup.bind(null, selectedGroupId, pane)),
-				selectedGroupId,
-				themeId: existing?.themeId ?? ("default" as const),
-				fontSize: existing?.fontSize ?? DEFAULT_FONT_SIZE,
-				fontFamily: existing?.fontFamily ?? DEFAULT_FONT_FAMILY,
-				opacity: existing?.opacity ?? DEFAULT_OPACITY,
-			});
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			const next = await mutateCanonicalTerminalState(
+				(state) => {
+					const selectedGroupId = state.selectedGroupId ?? state.groups[0]?.id;
+					if (!selectedGroupId) return null;
+					return {
+						...state,
+						groups: state.groups.map(
+							appendPaneToGroup.bind(null, selectedGroupId, pane)
+						),
+						selectedGroupId,
+					};
+				},
+				"git-open-pane",
+				{ createIfMissing: true }
+			);
+			if (!next) return null;
 			navigate("/terminal");
 			return pane;
 		},
 		[navigate, project]
 	);
 
-	const openEditor = useCallback(() => {
+	const openEditor = useCallback(async () => {
 		if (!project) return;
-		const pane = openPane("terminal");
+		const pane = await openPane("terminal");
 		if (pane) {
 			writeStoredValue("terminal-main-view", "editor");
 			writeStoredValue("editor-selected-pane", pane.id);
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			dispatchTerminalShellChange({ source: "view", reason: "open-editor" });
 		}
 	}, [openPane, project]);
 
@@ -524,7 +513,7 @@ export function GitPage() {
 			const prompt = await loadReviewPrompt();
 			if (!prompt) return;
 			const summaryPrompt = buildSummaryPrompt(project, prompt);
-			openPane("claude", summaryPrompt, true);
+			await openPane("claude", summaryPrompt, true);
 		} catch {
 		} finally {
 			setActionBusy(null);
@@ -537,7 +526,7 @@ export function GitPage() {
 			try {
 				const prompt = await loadReviewPrompt();
 				if (!prompt) return;
-				openPane(agentKind, prompt, autoSend);
+				await openPane(agentKind, prompt, autoSend);
 			} catch {
 			} finally {
 				setActionBusy(null);
@@ -563,9 +552,9 @@ export function GitPage() {
 		setCheckpointVersion((version) => version + 1);
 	}, [project, changeSignature, setCheckpointVersion]);
 
-	const explainRepo = useCallback(() => {
+	const explainRepo = useCallback(async () => {
 		if (!project) return;
-		openPane("claude", buildRepoExplainPrompt(project), true);
+		await openPane("claude", buildRepoExplainPrompt(project), true);
 	}, [openPane, project]);
 
 	useEffect(() => {

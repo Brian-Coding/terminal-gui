@@ -67,12 +67,12 @@ describe("terminal state and git change behavior", () => {
 		expect(migrated.panes.map((item) => item.isClaude)).toEqual([false, true]);
 	});
 
-	test("creates the default workspace as a six-pane agent chat grid", () => {
+	test("creates the default workspace with one pending chat", () => {
 		const group = createDefaultAgentChatGroup();
 
 		expect(group.columns).toBe(3);
 		expect(group.rows).toBe(2);
-		expect(group.panes).toHaveLength(6);
+		expect(group.panes).toHaveLength(1);
 		expect(group.selectedPaneId).toBe(group.panes[0]?.id);
 		expect(group.panes.every((item) => item.agentKind === "codex")).toBe(true);
 		expect(group.panes.every((item) => item.pendingCwd)).toBe(true);

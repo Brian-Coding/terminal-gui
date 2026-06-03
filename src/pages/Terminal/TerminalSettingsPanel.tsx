@@ -9,8 +9,8 @@ import {
 	type HexColor,
 	loadCustomTheme,
 	loadTerminalState,
+	mutateCanonicalTerminalState,
 	saveCustomTheme,
-	saveSyncedTerminalState,
 	type ThemeId,
 } from "../../features/terminal/terminal-utils.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
@@ -293,13 +293,10 @@ export const TerminalSettingsContent = memo(function TerminalSettingsContent({
 			const termThemeId = mapAppThemeToTerminalTheme(id);
 			setTerminalThemeId(termThemeId);
 			onThemeChange?.(termThemeId);
-			const state = loadTerminalState();
-			if (state) {
-				saveSyncedTerminalState(
-					{ ...state, themeId: termThemeId },
-					"theme-change"
-				);
-			}
+			void mutateCanonicalTerminalState(
+				(state) => ({ ...state, themeId: termThemeId }),
+				"theme-change"
+			);
 		},
 		[onThemeChange]
 	);
@@ -312,13 +309,10 @@ export const TerminalSettingsContent = memo(function TerminalSettingsContent({
 				saveCustomTheme(next);
 				if (terminalThemeId === "custom") {
 					onThemeChange?.("custom");
-					const state = loadTerminalState();
-					if (state) {
-						saveSyncedTerminalState(
-							{ ...state, themeId: "custom" },
-							"custom-theme"
-						);
-					}
+					void mutateCanonicalTerminalState(
+						(state) => ({ ...state, themeId: "custom" }),
+						"custom-theme"
+					);
 				}
 				return next;
 			});

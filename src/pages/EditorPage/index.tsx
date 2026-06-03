@@ -50,6 +50,7 @@ import {
 } from "../../features/git/useGitGraph.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
+	dispatchTerminalShellChange,
 	loadTerminalState,
 	type TerminalGroupModel,
 	type ThemeId,
@@ -496,7 +497,7 @@ export function EditorPage({
 		(next: boolean) => {
 			setZenMode(next);
 			writeStoredValue("terminal-editor-zen", next ? "true" : "false");
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			dispatchTerminalShellChange({ source: "view", reason: "editor-zen" });
 		},
 		[setZenMode]
 	);

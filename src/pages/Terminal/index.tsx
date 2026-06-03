@@ -37,14 +37,20 @@ import {
 	getInitialGroups,
 	getPaneTitle,
 	getThemeById,
+	loadCanonicalTerminalState,
 	loadTerminalLayoutMode,
 	loadTerminalState,
 	migrateGroup,
-	saveTerminalState,
+	normalizeTerminalState,
+	saveSyncedTerminalState,
 	syncTerminalLayoutMode,
+	type TerminalShellChangeDetail,
 	type TerminalGroupModel,
 	type TerminalLayoutMode,
 	type TerminalPaneModel,
+	type TerminalSavedState,
+	terminalStateKey,
+	terminalStateScore,
 	type ThemeId,
 } from "../../features/terminal/terminal-utils.ts";
 import {
@@ -75,37 +81,6 @@ function GraphEmptyState({ message }: { message: string }) {
 			</div>
 		</div>
 	);
-}
-
-function paneShellKey(pane: TerminalPaneModel) {
-	return {
-		id: pane.id,
-		agentKind: pane.agentKind,
-		cwd: pane.cwd ?? null,
-		pendingCwd: pane.pendingCwd ?? false,
-		title: pane.title,
-	};
-}
-
-function groupShellKey(group: TerminalGroupModel) {
-	return {
-		id: group.id,
-		name: group.name,
-		selectedPaneId: group.selectedPaneId,
-		columns: group.columns,
-		rows: group.rows,
-		panes: group.panes.map(paneShellKey),
-	};
-}
-
-function shellStateKey(
-	selectedGroupId: string | null,
-	groups: TerminalGroupModel[]
-) {
-	return JSON.stringify({
-		selectedGroupId,
-		groups: groups.map(groupShellKey),
-	});
 }
 
 const styles = stylex.create({
@@ -523,17 +498,18 @@ export function TerminalPage() {
 		: null;
 	const restoreSavedState = useCallback(
 		(s: ReturnType<typeof loadTerminalState>) => {
-			if (!s) return;
+			const normalized = normalizeTerminalState(s);
+			if (!normalized) return;
 			groupsDispatch({
 				type: "replaceAll",
-				groups: s.groups.map(migrateGroup),
+				groups: normalized.groups.map(migrateGroup),
 			});
-			setSelectedGroupId(s.selectedGroupId);
+			setSelectedGroupId(normalized.selectedGroupId);
 			setAppearance({
-				themeId: s.themeId,
-				fontSize: s.fontSize,
-				fontFamily: s.fontFamily,
-				opacity: s.opacity,
+				themeId: normalized.themeId,
+				fontSize: normalized.fontSize,
+				fontFamily: normalized.fontFamily,
+				opacity: normalized.opacity,
 			});
 		},
 		[]
@@ -558,7 +534,33 @@ export function TerminalPage() {
 		opacity,
 	});
 	const pendingSaveRef = useRef(false);
+	const startupRestoreCompleteRef = useRef(false);
+	const canonicalShellKeyRef = useRef<string | null>(null);
+	const latestStateKey = terminalStateKey({
+		groups,
+		selectedGroupId,
+		themeId,
+		fontSize,
+		fontFamily,
+		opacity,
+	});
 	useEffect(() => {
+		const nextState = {
+			groups,
+			selectedGroupId,
+			themeId,
+			fontSize,
+			fontFamily,
+			opacity,
+		};
+		const canonicalShellKey = canonicalShellKeyRef.current;
+		if (
+			canonicalShellKey &&
+			terminalStateKey(nextState) !== canonicalShellKey &&
+			terminalStateScore(nextState) < terminalStateScore(latestStateRef.current)
+		) {
+			return;
+		}
 		latestStateRef.current = {
 			groups,
 			selectedGroupId,
@@ -570,23 +572,88 @@ export function TerminalPage() {
 		cacheTerminalState(latestStateRef.current);
 	}, [groups, selectedGroupId, themeId, fontSize, fontFamily, opacity]);
 	useEffect(() => {
+		void latestStateKey;
 		pendingSaveRef.current = true;
 		const id = setTimeout(() => {
-			saveTerminalState(latestStateRef.current);
+			if (!startupRestoreCompleteRef.current) {
+				pendingSaveRef.current = false;
+				return;
+			}
+			const saved = loadTerminalState();
+			if (
+				saved &&
+				terminalStateScore(latestStateRef.current) < terminalStateScore(saved)
+			) {
+				pendingSaveRef.current = false;
+				return;
+			}
+			saveSyncedTerminalState(
+				latestStateRef.current,
+				"terminal-page-save",
+				"canonical"
+			);
 			pendingSaveRef.current = false;
-			window.dispatchEvent(new Event("terminal-shell-change"));
 		}, 100);
 		return () => clearTimeout(id);
-	});
+	}, [latestStateKey]);
 	useEffect(
 		() => () => {
-			saveTerminalState(latestStateRef.current);
+			if (!startupRestoreCompleteRef.current) return;
+			const saved = loadTerminalState();
+			if (
+				saved &&
+				terminalStateScore(latestStateRef.current) < terminalStateScore(saved)
+			) {
+				return;
+			}
+			saveSyncedTerminalState(
+				latestStateRef.current,
+				"terminal-page-unmount",
+				"canonical"
+			);
 		},
 		[]
 	);
 	useEffect(() => {
-		const handleShellChange = () => {
-			const saved = loadTerminalState();
+		let cancelled = false;
+		const restoreCanonicalState = async () => {
+			const canonicalState = await loadCanonicalTerminalState();
+			if (cancelled) return;
+			if (!canonicalState) {
+				startupRestoreCompleteRef.current = true;
+				return;
+			}
+			const currentState = latestStateRef.current;
+			const canonicalKey = terminalStateKey(canonicalState);
+			const currentKey = terminalStateKey(currentState);
+			if (
+				canonicalKey !== currentKey &&
+				terminalStateScore(canonicalState) >= terminalStateScore(currentState)
+			) {
+				canonicalShellKeyRef.current = canonicalKey;
+				latestStateRef.current = canonicalState;
+				restoreSavedState(canonicalState);
+				saveSyncedTerminalState(
+					canonicalState,
+					"startup-canonical-restore",
+					"canonical"
+				);
+			}
+			startupRestoreCompleteRef.current = true;
+		};
+		restoreCanonicalState().catch(() => {
+			startupRestoreCompleteRef.current = true;
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [restoreSavedState]);
+	useEffect(() => {
+		const handleShellChange = (event: Event) => {
+			const detail = (event as CustomEvent<TerminalShellChangeDetail>).detail;
+			const saved =
+				normalizeTerminalState(detail?.state) ??
+				(detail?.source === "canonical" ? loadTerminalState() : null);
 			if (saved?.themeId && saved.themeId !== themeId) {
 				setAppearance((prev) => ({ ...prev, themeId: saved.themeId }));
 			}
@@ -604,11 +671,15 @@ export function TerminalPage() {
 				};
 			}
 			if (savedState) {
-				const savedShellKey = shellStateKey(
-					savedState.selectedGroupId,
-					savedState.groups
-				);
-				const currentShellKey = shellStateKey(selectedGroupId, groups);
+				const savedShellKey = terminalStateKey(savedState);
+				const currentShellKey = terminalStateKey({
+					groups,
+					selectedGroupId,
+					themeId,
+					fontSize,
+					fontFamily,
+					opacity,
+				});
 				if (savedShellKey !== currentShellKey) {
 					latestStateRef.current = savedState;
 					restoreSavedState(savedState);

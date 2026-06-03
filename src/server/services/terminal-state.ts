@@ -1,14 +1,7 @@
-import { resolve } from "node:path";
-import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import { writeJson } from "../../lib/route-helpers.ts";
 import { userDataPath } from "../../lib/user-data.ts";
 
 const TERMINAL_STATE_PATH = userDataPath("terminal-state.json");
-const LEGACY_TERMINAL_STATE_PATHS = [
-	resolve(import.meta.dir, "../../data/terminal-state.json"),
-	resolve(PROJECT_ROOT, "data/terminal-state.json"),
-	resolve(PROJECT_ROOT, "src/data/terminal-state.json"),
-];
 
 async function readJsonFile<T>(path: string): Promise<T | null> {
 	const file = Bun.file(path);
@@ -21,21 +14,73 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
 }
 
 export async function readTerminalState<T>(fallback: T): Promise<T> {
-	return (
-		(await readJsonFile<T>(TERMINAL_STATE_PATH)) ??
-		(await readFirstLegacyTerminalState<T>()) ??
-		fallback
-	);
+	return (await readJsonFile<T>(TERMINAL_STATE_PATH)) ?? fallback;
 }
 
-export function writeTerminalState(data: unknown): Promise<void> {
+export async function writeTerminalState(data: unknown): Promise<void> {
+	const current = await readJsonFile<unknown>(TERMINAL_STATE_PATH);
+	if (isTerminalStateRegression(current, data)) return;
 	return writeJson(TERMINAL_STATE_PATH, data);
 }
 
-async function readFirstLegacyTerminalState<T>(): Promise<T | null> {
-	for (const path of LEGACY_TERMINAL_STATE_PATHS) {
-		const state = await readJsonFile<T>(path);
-		if (state) return state;
+function isTerminalStateRegression(current: unknown, next: unknown): boolean {
+	if (terminalStateScore(next) < terminalStateScore(current)) return true;
+	const currentPanes = getPaneMap(current);
+	if (currentPanes.size === 0) return false;
+	for (const [paneId, currentPane] of currentPanes) {
+		if (!currentPane.cwd) continue;
+		const nextPane = getPaneMap(next).get(paneId);
+		if (!nextPane) continue;
+		if (!nextPane.cwd && nextPane.pendingCwd) return true;
 	}
-	return null;
+	return false;
+}
+
+export function terminalStateScore(state: unknown): number {
+	if (typeof state !== "object" || state === null) return 0;
+	const groups = (state as { groups?: unknown }).groups;
+	if (!Array.isArray(groups)) return 0;
+	let score = groups.length;
+	for (const group of groups) {
+		if (typeof group !== "object" || group === null) continue;
+		const panes = (group as { panes?: unknown }).panes;
+		if (!Array.isArray(panes)) continue;
+		score += panes.length * 10;
+		for (const pane of panes) {
+			if (typeof pane !== "object" || pane === null) continue;
+			const value = pane as { cwd?: unknown; pendingCwd?: unknown };
+			if (typeof value.cwd === "string" && value.cwd) score += 10;
+			if (value.pendingCwd === false) score += 3;
+		}
+	}
+	return score;
+}
+
+function getPaneMap(
+	state: unknown
+): Map<string, { cwd?: string; pendingCwd?: boolean }> {
+	const panesById = new Map<string, { cwd?: string; pendingCwd?: boolean }>();
+	if (typeof state !== "object" || state === null) return panesById;
+	const groups = (state as { groups?: unknown }).groups;
+	if (!Array.isArray(groups)) return panesById;
+	for (const group of groups) {
+		if (typeof group !== "object" || group === null) continue;
+		const panes = (group as { panes?: unknown }).panes;
+		if (!Array.isArray(panes)) continue;
+		for (const pane of panes) {
+			if (typeof pane !== "object" || pane === null) continue;
+			const value = pane as {
+				id?: unknown;
+				cwd?: unknown;
+				pendingCwd?: unknown;
+			};
+			if (typeof value.id !== "string") continue;
+			panesById.set(value.id, {
+				cwd: typeof value.cwd === "string" ? value.cwd : undefined,
+				pendingCwd:
+					typeof value.pendingCwd === "boolean" ? value.pendingCwd : undefined,
+			});
+		}
+	}
+	return panesById;
 }

@@ -20,12 +20,9 @@ import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { writeStoredValue } from "../../lib/stored-json.ts";
 import {
-	createDefaultAgentChatGroup,
-	DEFAULT_FONT_FAMILY,
-	DEFAULT_FONT_SIZE,
-	DEFAULT_OPACITY,
-	loadTerminalState,
-	saveTerminalState,
+	createDefaultTerminalState,
+	loadCanonicalTerminalState,
+	saveSyncedTerminalState,
 } from "../../features/terminal/terminal-utils.ts";
 import { lacksValue } from "../../lib/data.ts";
 import { fetchJsonOr, sendJsonWithBusy } from "../../lib/fetch-json.ts";
@@ -225,23 +222,18 @@ export function OnboardingPage() {
 		});
 	};
 
-	const finish = useCallback(() => {
+	const finish = useCallback(async () => {
 		writeStoredValue(ONBOARDING_DONE_KEY, "true");
 		// Default to grid layout
 		writeStoredValue("terminal-layout-mode", "grid");
 		writeStoredValue("terminal-main-view", "chat");
 		// New users land directly in the multi-agent chat grid.
-		if (!loadTerminalState()) {
-			const group = createDefaultAgentChatGroup();
-			const groupId = group.id;
-			saveTerminalState({
-				groups: [group],
-				selectedGroupId: groupId,
-				themeId: "default",
-				fontSize: DEFAULT_FONT_SIZE,
-				fontFamily: DEFAULT_FONT_FAMILY,
-				opacity: DEFAULT_OPACITY,
-			});
+		if (!(await loadCanonicalTerminalState())) {
+			saveSyncedTerminalState(
+				createDefaultTerminalState(),
+				"onboarding-default",
+				"canonical"
+			);
 		}
 		navigate("/terminal", { replace: true });
 	}, [navigate]);

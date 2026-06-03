@@ -59,9 +59,16 @@ describe("prompt search and client storage sync filters", () => {
 				"inferay-custom-theme": null,
 			})
 		).toEqual({
-			[TERMINAL_STATE_STORAGE_KEY]: '{"groups":[]}',
 			"terminal-layout-mode": "grid",
 			"inferay-custom-theme": null,
+		});
+
+		expect(
+			normalizeEntries({
+				[TERMINAL_STATE_STORAGE_KEY]: null,
+			})
+		).toEqual({
+			[TERMINAL_STATE_STORAGE_KEY]: null,
 		});
 
 		expect(normalizeEntries(null)).toEqual({});

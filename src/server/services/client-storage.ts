@@ -4,7 +4,6 @@ import {
 } from "../../lib/client-storage-keys.ts";
 import { readJson, writeJson } from "../../lib/route-helpers.ts";
 import { userDataPath } from "../../lib/user-data.ts";
-import { readTerminalState } from "./terminal-state.ts";
 
 type StoredValue = string | null;
 type ClientStorageSnapshot = Record<string, string>;
@@ -17,6 +16,10 @@ export function normalizeEntries(value: unknown): Record<string, StoredValue> {
 	}
 	const entries: Record<string, StoredValue> = {};
 	for (const [key, raw] of Object.entries(value)) {
+		if (key === TERMINAL_STATE_STORAGE_KEY) {
+			if (raw === null) entries[key] = null;
+			continue;
+		}
 		if (!shouldSyncClientStorageKey(key)) continue;
 		if (typeof raw === "string" || raw === null) entries[key] = raw;
 	}
@@ -28,11 +31,9 @@ export async function loadClientStorageEntries(): Promise<ClientStorageSnapshot>
 		CLIENT_STORAGE_PATH,
 		{}
 	);
-	if (!entries[TERMINAL_STATE_STORAGE_KEY]) {
-		const terminalState = await readTerminalState<unknown | null>(null);
-		if (terminalState) {
-			entries[TERMINAL_STATE_STORAGE_KEY] = JSON.stringify(terminalState);
-		}
+	if (TERMINAL_STATE_STORAGE_KEY in entries) {
+		delete entries[TERMINAL_STATE_STORAGE_KEY];
+		await writeJson(CLIENT_STORAGE_PATH, entries);
 	}
 	return entries;
 }
@@ -45,6 +46,9 @@ export async function applyClientStorageEntries(
 		{}
 	);
 	for (const [key, value] of Object.entries(entries)) {
+		if (key === TERMINAL_STATE_STORAGE_KEY && value !== null) {
+			continue;
+		}
 		if (value === null) delete snapshot[key];
 		else snapshot[key] = value;
 	}

@@ -11,20 +11,12 @@ import { isChatAgentKind } from "../../features/agents/agents.ts";
 import { savePendingSend } from "../../features/chat/chat-session-store.ts";
 import {
 	createPendingAgentChatPane,
-	DEFAULT_FONT_FAMILY,
-	DEFAULT_FONT_SIZE,
-	DEFAULT_OPACITY,
-	getInitialGroups,
-	loadTerminalState,
-	saveTerminalState,
+	dispatchTerminalShellChange,
+	mutateCanonicalTerminalState,
 	type TerminalGroupModel,
 } from "../../features/terminal/terminal-utils.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { DEFAULT_APP_ROUTE } from "../../lib/app-navigation.tsx";
-import {
-	loadAppThemeId,
-	mapAppThemeToTerminalTheme,
-} from "../../lib/app-theme.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { formatBytes } from "../../lib/format.ts";
 import { setInputValue } from "../../lib/react-events.ts";
@@ -65,48 +57,53 @@ function buildFileChatMessage(files: FileEntry[]) {
 	};
 }
 
-function ensureChatPaneId(): string | null {
-	const existing = loadTerminalState();
-	const groups = (existing?.groups ?? getInitialGroups()).map((group) => ({
-		...group,
-		panes: [...group.panes],
-	}));
-	const selectedGroupId = existing?.selectedGroupId ?? groups[0]?.id ?? null;
-	const groupIndex = Math.max(
-		0,
-		groups.findIndex((group) => group.id === selectedGroupId)
+async function ensureChatPaneId(): Promise<string | null> {
+	let paneId: string | null = null;
+	await mutateCanonicalTerminalState(
+		(existing) => {
+			const groups = existing.groups.map((group) => ({
+				...group,
+				panes: [...group.panes],
+			}));
+			const selectedGroupId = existing.selectedGroupId ?? groups[0]?.id ?? null;
+			const groupIndex = Math.max(
+				0,
+				groups.findIndex((group) => group.id === selectedGroupId)
+			);
+			const group = groups[groupIndex];
+			if (!group) return null;
+
+			let pane =
+				group.panes.find(
+					(candidate) =>
+						candidate.id === group.selectedPaneId &&
+						isChatAgentKind(candidate.agentKind)
+				) ??
+				group.panes.find((candidate) => isChatAgentKind(candidate.agentKind));
+
+			if (!pane) {
+				pane = createPendingAgentChatPane();
+				group.panes.unshift(pane);
+			}
+			group.selectedPaneId = pane.id;
+			paneId = pane.id;
+
+			const nextGroups = groups.map(
+				(candidate, index): TerminalGroupModel =>
+					index === groupIndex ? group : candidate
+			);
+
+			return {
+				...existing,
+				groups: nextGroups,
+				selectedGroupId: group.id,
+			};
+		},
+		"image-chat-pane",
+		{ createIfMissing: true }
 	);
-	const group = groups[groupIndex];
-	if (!group) return null;
 
-	let pane =
-		group.panes.find(
-			(candidate) =>
-				candidate.id === group.selectedPaneId &&
-				isChatAgentKind(candidate.agentKind)
-		) ?? group.panes.find((candidate) => isChatAgentKind(candidate.agentKind));
-
-	if (!pane) {
-		pane = createPendingAgentChatPane();
-		group.panes.unshift(pane);
-	}
-	group.selectedPaneId = pane.id;
-
-	const nextGroups = groups.map(
-		(candidate, index): TerminalGroupModel =>
-			index === groupIndex ? group : candidate
-	);
-
-	saveTerminalState({
-		groups: nextGroups,
-		selectedGroupId: group.id,
-		themeId: existing?.themeId ?? mapAppThemeToTerminalTheme(loadAppThemeId()),
-		fontSize: existing?.fontSize ?? DEFAULT_FONT_SIZE,
-		fontFamily: existing?.fontFamily ?? DEFAULT_FONT_FAMILY,
-		opacity: existing?.opacity ?? DEFAULT_OPACITY,
-	});
-
-	return pane.id;
+	return paneId;
 }
 
 export function ImagesPage() {
@@ -177,15 +174,15 @@ export function ImagesPage() {
 		setSelectedPaths(new Set());
 	}, [selected, setFiles]);
 
-	const startChat = useCallback(() => {
+	const startChat = useCallback(async () => {
 		if (selected.length === 0) return;
-		const paneId = ensureChatPaneId();
+		const paneId = await ensureChatPaneId();
 		if (!paneId) return;
 
 		const { fullText } = buildFileChatMessage(selected);
 		savePendingSend(paneId, fullText);
 		writeStoredValue("terminal-main-view", "chat");
-		window.dispatchEvent(new Event("terminal-shell-change"));
+		dispatchTerminalShellChange({ source: "view", reason: "image-start-chat" });
 		navigate(DEFAULT_APP_ROUTE);
 	}, [navigate, selected]);
 

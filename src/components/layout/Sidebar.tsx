@@ -20,9 +20,10 @@ import {
 	createPendingAgentChatPane,
 	DEFAULT_COLUMNS,
 	DEFAULT_ROWS,
-	loadTerminalLayoutMode,
+	dispatchTerminalShellChange,
+	loadCanonicalTerminalState,
 	loadTerminalState,
-	saveTerminalState,
+	mutateCanonicalTerminalState,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
@@ -98,23 +99,6 @@ function getPaneBaseFolder(pane: TerminalPaneModel): string {
 	return pane.cwd?.split("/").filter(Boolean).pop() || "No folder";
 }
 
-function getNewWorkspacePaneCount(
-	selectedGroup: {
-		columns?: number;
-		rows?: number;
-		panes?: TerminalPaneModel[];
-	} | null
-): number {
-	if (loadTerminalLayoutMode() === "rows") {
-		return Math.max(1, selectedGroup?.panes?.length ?? 1);
-	}
-	return Math.max(
-		1,
-		(selectedGroup?.columns ?? DEFAULT_COLUMNS) *
-			(selectedGroup?.rows ?? DEFAULT_ROWS)
-	);
-}
-
 function loadSidebarWidth() {
 	const stored = Number(readStoredValue("main-sidebar-width"));
 	return Number.isFinite(stored)
@@ -141,7 +125,10 @@ function deriveSummary(paneId: string): string | null {
 				const title = data?.title?.trim();
 				if (title) {
 					saveStoredSummary(paneId, title);
-					window.dispatchEvent(new Event("terminal-shell-change"));
+					dispatchTerminalShellChange({
+						source: "cache",
+						reason: "session-title",
+					});
 				}
 			})
 			.catch(noop)
@@ -418,18 +405,36 @@ export function Sidebar() {
 	const [workspaces, setWorkspaces] = useState(loadWorkspaces);
 
 	useEffect(() => {
+		let cancelled = false;
+		loadCanonicalTerminalState()
+			.then(() => {
+				if (!cancelled) setWorkspaces(loadWorkspaces());
+			})
+			.catch(noop);
+		return () => {
+			cancelled = true;
+		};
+	}, [loadWorkspaces]);
+
+	useEffect(() => {
 		const refresh = () => setWorkspaces(loadWorkspaces());
 		return listenWindowEvent("terminal-shell-change", refresh);
 	}, [loadWorkspaces]);
 
 	const selectWorkspace = useCallback(
-		(groupId: string) => {
+		async (groupId: string) => {
 			// Optimistic update — render immediately, then persist
 			setWorkspaces((prev) => ({ ...prev, selectedGroupId: groupId as never }));
-			const state = loadTerminalState();
-			if (!state) return;
-			saveTerminalState({ ...state, selectedGroupId: groupId as never });
-			window.dispatchEvent(new Event("terminal-shell-change"));
+			const next = await mutateCanonicalTerminalState((state) => {
+				if (!state.groups.some(hasId.bind(null, groupId))) return state;
+				return { ...state, selectedGroupId: groupId as never };
+			}, "select-workspace");
+			if (next) {
+				setWorkspaces({
+					groups: next.groups,
+					selectedGroupId: next.selectedGroupId,
+				});
+			}
 			if (window.location.hash !== "#/terminal") {
 				navigate("/terminal");
 			}
@@ -438,22 +443,27 @@ export function Sidebar() {
 	);
 
 	const selectPane = useCallback(
-		(groupId: string, paneId: string) => {
-			const state = loadTerminalState();
-			if (!state) return;
+		async (groupId: string, paneId: string) => {
 			const gid = groupId as never;
 			const pid = paneId as never;
-			saveTerminalState({
-				...state,
-				selectedGroupId: gid,
-				groups: state.groups.map((g) =>
-					g.id === groupId ? { ...g, selectedPaneId: pid } : g
-				),
-			});
-			setWorkspaces(loadWorkspaces);
+			const next = await mutateCanonicalTerminalState(
+				(state) => ({
+					...state,
+					selectedGroupId: gid,
+					groups: state.groups.map((g) =>
+						g.id === groupId ? { ...g, selectedPaneId: pid } : g
+					),
+				}),
+				"select-pane"
+			);
+			if (next) {
+				setWorkspaces({
+					groups: next.groups,
+					selectedGroupId: next.selectedGroupId,
+				});
+			}
 			// When on editor view, also update the editor's selected pane
 			writeStoredValue("editor-selected-pane", paneId);
-			window.dispatchEvent(new Event("terminal-shell-change"));
 			if (window.location.hash !== "#/terminal") {
 				navigate("/terminal");
 			}
@@ -461,58 +471,77 @@ export function Sidebar() {
 		[navigate, loadWorkspaces]
 	);
 
-	const addWorkspace = useCallback(() => {
-		const state = loadTerminalState();
-		if (!state) return;
-		const selectedGroup =
-			state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
-			state.groups[0];
-		const paneCount = getNewWorkspacePaneCount(selectedGroup ?? null);
-		const panes = Array.from({ length: paneCount }, () =>
-			createPendingAgentChatPane()
+	const addWorkspace = useCallback(async () => {
+		const next = await mutateCanonicalTerminalState(
+			(state) => {
+				const selectedGroup =
+					state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
+					state.groups[0];
+				const panes = [createPendingAgentChatPane()];
+				const group = {
+					id: createGroupId(),
+					name: `Workspace ${state.groups.length + 1}`,
+					panes,
+					selectedPaneId: panes[0]?.id ?? null,
+					columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
+					rows: selectedGroup?.rows ?? DEFAULT_ROWS,
+				};
+				return {
+					...state,
+					groups: [...state.groups, group],
+					selectedGroupId: group.id,
+				};
+			},
+			"add-workspace",
+			{ createIfMissing: true }
 		);
-		const group = {
-			id: createGroupId(),
-			name: `Workspace ${state.groups.length + 1}`,
-			panes,
-			selectedPaneId: panes[0]?.id ?? null,
-			columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
-			rows: selectedGroup?.rows ?? DEFAULT_ROWS,
-		};
-		saveTerminalState({
-			...state,
-			groups: [...state.groups, group],
-			selectedGroupId: group.id,
-		});
-		window.dispatchEvent(new Event("terminal-shell-change"));
+		if (next) {
+			setWorkspaces({
+				groups: next.groups,
+				selectedGroupId: next.selectedGroupId,
+			});
+		}
 		navigate("/terminal");
 	}, [navigate]);
 
-	const removeWorkspace = useCallback((groupId: string) => {
-		const state = loadTerminalState();
-		if (!state) return;
-		if (state.groups.length <= 1) return;
-		const filtered = state.groups.filter(lacksId.bind(null, groupId));
-		const newSelected =
-			state.selectedGroupId === groupId
-				? (filtered[0]?.id ?? null)
-				: state.selectedGroupId;
-		saveTerminalState({
-			...state,
-			groups: filtered,
-			selectedGroupId: newSelected,
-		});
-		window.dispatchEvent(new Event("terminal-shell-change"));
+	const removeWorkspace = useCallback(async (groupId: string) => {
+		const next = await mutateCanonicalTerminalState((state) => {
+			if (state.groups.length <= 1) return null;
+			const filtered = state.groups.filter(lacksId.bind(null, groupId));
+			const newSelected =
+				state.selectedGroupId === groupId
+					? (filtered[0]?.id ?? null)
+					: state.selectedGroupId;
+			return {
+				...state,
+				groups: filtered,
+				selectedGroupId: newSelected,
+			};
+		}, "remove-workspace");
+		if (next) {
+			setWorkspaces({
+				groups: next.groups,
+				selectedGroupId: next.selectedGroupId,
+			});
+		}
 	}, []);
 
-	const renameWorkspace = useCallback((groupId: string, name: string) => {
-		const state = loadTerminalState();
-		if (!state) return;
-		saveTerminalState({
-			...state,
-			groups: state.groups.map((g) => (g.id === groupId ? { ...g, name } : g)),
-		});
-		window.dispatchEvent(new Event("terminal-shell-change"));
+	const renameWorkspace = useCallback(async (groupId: string, name: string) => {
+		const next = await mutateCanonicalTerminalState(
+			(state) => ({
+				...state,
+				groups: state.groups.map((g) =>
+					g.id === groupId ? { ...g, name } : g
+				),
+			}),
+			"rename-workspace"
+		);
+		if (next) {
+			setWorkspaces({
+				groups: next.groups,
+				selectedGroupId: next.selectedGroupId,
+			});
+		}
 	}, []);
 
 	useEffect(() => {

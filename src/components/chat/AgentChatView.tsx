@@ -20,6 +20,7 @@ import { usePrompts } from "../../features/prompts/usePrompts.ts";
 import {
 	type AgentKind,
 	changePaneAgentKind,
+	dispatchTerminalShellChange,
 } from "../../features/terminal/terminal-utils.ts";
 import { hasId, hasRole, noop } from "../../lib/data.ts";
 import { postJson } from "../../lib/fetch-json.ts";
@@ -279,7 +280,10 @@ export const AgentChatView = forwardRef<AgentChatHandle, AgentChatViewProps>(
 								if (title) {
 									summaryRef.current = title;
 									saveStoredSummary(paneId, title);
-									window.dispatchEvent(new Event("terminal-shell-change"));
+									dispatchTerminalShellChange({
+										source: "cache",
+										reason: "session-title",
+									});
 								}
 							})
 							.catch(noop);

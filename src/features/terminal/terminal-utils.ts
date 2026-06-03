@@ -1,20 +1,18 @@
+import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
+import { hasId, noop } from "../../lib/data.ts";
+import { sendJson } from "../../lib/fetch-json.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
+import {
+	readStoredJson,
+	readStoredValue,
+	writeStoredJson,
+} from "../../lib/stored-json.ts";
 import {
 	type AgentKind,
 	type ChatAgentKind,
 	getAgentDefinition,
 	loadDefaultChatSettings,
 } from "../agents/agents.ts";
-
-import { sendJson } from "../../lib/fetch-json.ts";
-import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
-import { hasId, noop } from "../../lib/data.ts";
-import { listenWindowEvent } from "../../lib/react-events.ts";
-
-import {
-	readStoredJson,
-	readStoredValue,
-	writeStoredJson,
-} from "../../lib/stored-json.ts";
 
 export type { AgentKind } from "../agents/agents.ts";
 
@@ -184,6 +182,20 @@ export interface TerminalSavedState {
 }
 
 const TERMINAL_STORAGE_KEY = "inferay-terminal-state" as const;
+export const TERMINAL_SHELL_CHANGE_EVENT = "terminal-shell-change" as const;
+
+export type TerminalStateChangeSource =
+	| "canonical"
+	| "local"
+	| "view"
+	| "cache";
+
+export interface TerminalShellChangeDetail {
+	source: TerminalStateChangeSource;
+	reason?: string;
+	stateKey?: string;
+	state?: TerminalSavedState;
+}
 
 const CUSTOM_THEME_KEY = "inferay-custom-theme" as const;
 
@@ -213,36 +225,184 @@ function isValidTerminalState(value: unknown): value is TerminalSavedState {
 		typeof obj.opacity === "number"
 	);
 }
+
+function paneStateKey(pane: TerminalPaneModel) {
+	return {
+		id: pane.id,
+		agentKind: pane.agentKind,
+		cwd: pane.cwd ?? null,
+		pendingCwd: pane.pendingCwd ?? false,
+		title: pane.title,
+	};
+}
+
+function groupStateKey(group: TerminalGroupModel) {
+	return {
+		id: group.id,
+		name: group.name,
+		selectedPaneId: group.selectedPaneId,
+		columns: group.columns,
+		rows: group.rows,
+		panes: group.panes.map(paneStateKey),
+	};
+}
+
+export function terminalStateKey(state: TerminalSavedState): string {
+	return JSON.stringify({
+		selectedGroupId: state.selectedGroupId,
+		groups: state.groups.map(groupStateKey),
+		themeId: state.themeId,
+		fontSize: state.fontSize,
+		fontFamily: state.fontFamily,
+		opacity: state.opacity,
+	});
+}
+
+export function terminalStateScore(
+	state: Pick<TerminalSavedState, "groups"> | null
+): number {
+	if (!state) return 0;
+	return state.groups.reduce((score, group) => {
+		return (
+			score +
+			1 +
+			group.panes.length * 10 +
+			group.panes.filter((pane) => pane.cwd || pane.pendingCwd === false)
+				.length *
+				10
+		);
+	}, 0);
+}
+
 let _cachedTerminalState: TerminalSavedState | null = null;
 export function cacheTerminalState(state: TerminalSavedState): void {
 	_cachedTerminalState = state;
 }
 
+export function createDefaultTerminalState(): TerminalSavedState {
+	const group = createDefaultAgentChatGroup();
+	return {
+		groups: [group],
+		selectedGroupId: group.id,
+		themeId: DEFAULT_THEME_ID,
+		fontSize: DEFAULT_FONT_SIZE,
+		fontFamily: DEFAULT_FONT_FAMILY,
+		opacity: DEFAULT_OPACITY,
+	};
+}
+
+function chooseSelectedGroupId(
+	groups: TerminalGroupModel[],
+	selectedGroupId: GroupId | null
+): GroupId | null {
+	if (groups.some(hasId.bind(null, selectedGroupId))) return selectedGroupId;
+	return (
+		[...groups].sort((a, b) => {
+			const scoreDelta =
+				terminalStateScore({ groups: [b] }) -
+				terminalStateScore({ groups: [a] });
+			return scoreDelta || groups.indexOf(a) - groups.indexOf(b);
+		})[0]?.id ?? null
+	);
+}
+
+export function normalizeTerminalState(
+	value: unknown,
+	options: { createDefault?: boolean } = {}
+): TerminalSavedState | null {
+	if (!isValidTerminalState(value)) {
+		return options.createDefault ? createDefaultTerminalState() : null;
+	}
+	const groups = value.groups.map(migrateGroup);
+	if (groups.length === 0) {
+		return options.createDefault ? createDefaultTerminalState() : null;
+	}
+	return {
+		...value,
+		groups,
+		selectedGroupId: chooseSelectedGroupId(groups, value.selectedGroupId),
+		themeId: getThemeById(value.themeId).id,
+		fontSize: Number.isFinite(value.fontSize)
+			? value.fontSize
+			: DEFAULT_FONT_SIZE,
+		fontFamily: value.fontFamily || DEFAULT_FONT_FAMILY,
+		opacity: Number.isFinite(value.opacity) ? value.opacity : DEFAULT_OPACITY,
+	};
+}
+
 export function loadTerminalState(): TerminalSavedState | null {
-	if (_cachedTerminalState) return _cachedTerminalState;
 	const parsed = readStoredJson<unknown>(TERMINAL_STORAGE_KEY, null);
-	const state = parsed && isValidTerminalState(parsed) ? parsed : null;
+	const state = normalizeTerminalState(parsed);
 	_cachedTerminalState = state;
 	return state;
 }
 
+export async function loadCanonicalTerminalState(): Promise<TerminalSavedState | null> {
+	try {
+		const response = await fetch("/api/terminal/state");
+		if (!response.ok) return loadTerminalState();
+		const serverState = await response.json();
+		const normalized = normalizeTerminalState(serverState);
+		if (normalized) {
+			_cachedTerminalState = normalized;
+			writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
+			return normalized;
+		}
+		_cachedTerminalState = null;
+		return null;
+	} catch {
+		return loadTerminalState();
+	}
+}
+
 export function saveTerminalState(state: TerminalSavedState): void {
-	_cachedTerminalState = state;
-	writeStoredJson(TERMINAL_STORAGE_KEY, state);
-	sendJson("/api/terminal/state", state).catch(noop);
+	const normalized = normalizeTerminalState(state, { createDefault: true });
+	if (!normalized) return;
+	_cachedTerminalState = normalized;
+	writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
+	sendJson("/api/terminal/state", normalized).catch(noop);
+}
+
+export function dispatchTerminalShellChange(
+	detail: TerminalShellChangeDetail
+): void {
+	window.dispatchEvent(
+		new CustomEvent<TerminalShellChangeDetail>(TERMINAL_SHELL_CHANGE_EVENT, {
+			detail,
+		})
+	);
 }
 
 export function saveSyncedTerminalState(
 	state: TerminalSavedState,
-	reason?: string
+	reason?: string,
+	source: TerminalStateChangeSource = "canonical"
 ): void {
-	saveTerminalState(state);
+	const normalized = normalizeTerminalState(state, { createDefault: true });
+	if (!normalized) return;
+	saveTerminalState(normalized);
 	flushPendingClientStorageSync();
-	window.dispatchEvent(
-		new CustomEvent("terminal-shell-change", {
-			detail: { source: "local", reason },
-		})
-	);
+	dispatchTerminalShellChange({
+		source,
+		reason,
+		state: normalized,
+		stateKey: terminalStateKey(normalized),
+	});
+}
+
+export async function mutateCanonicalTerminalState(
+	mutate: (state: TerminalSavedState) => TerminalSavedState | null,
+	reason?: string,
+	options: { createIfMissing?: boolean } = {}
+): Promise<TerminalSavedState | null> {
+	const state =
+		(await loadCanonicalTerminalState()) ??
+		(options.createIfMissing ? createDefaultTerminalState() : null);
+	if (!state) return null;
+	const next = mutate(state);
+	if (!next) return null;
+	saveSyncedTerminalState(next, reason);
+	return normalizeTerminalState(next, { createDefault: true });
 }
 
 /**
@@ -253,20 +413,20 @@ export function changePaneAgentKind(
 	paneId: string,
 	agentKind: AgentKind
 ): void {
-	const state = loadTerminalState();
-	if (!state) return;
-	saveTerminalState({
-		...state,
-		groups: state.groups.map((g) => ({
-			...g,
-			panes: g.panes.map((p) =>
-				p.id !== paneId
-					? p
-					: { ...p, agentKind, isClaude: agentKind === "claude" }
-			),
-		})),
-	});
-	window.dispatchEvent(new Event("terminal-shell-change"));
+	void mutateCanonicalTerminalState(
+		(state) => ({
+			...state,
+			groups: state.groups.map((g) => ({
+				...g,
+				panes: g.panes.map((p) =>
+					p.id !== paneId
+						? p
+						: { ...p, agentKind, isClaude: agentKind === "claude" }
+				),
+			})),
+		}),
+		"agent-kind-change"
+	);
 }
 
 export function getPaneTitle(pane: TerminalPaneModel): string;
@@ -310,9 +470,7 @@ export function createPendingAgentChatPane(
 }
 
 export function createDefaultAgentChatGroup(): TerminalGroupModel {
-	const panes = Array.from({ length: DEFAULT_COLUMNS * DEFAULT_ROWS }, () =>
-		createPendingAgentChatPane()
-	);
+	const panes = [createPendingAgentChatPane()];
 	return {
 		id: createGroupId(),
 		name: "Default",
@@ -489,6 +647,6 @@ export function getThemeById(themeId: string): TerminalTheme {
 	return (
 		TERMINAL_THEMES.find(hasId.bind(null, themeId)) ??
 		TERMINAL_THEMES.find(hasId.bind(null, DEFAULT_THEME_ID)) ??
-		TERMINAL_THEMES[0]
+		TERMINAL_THEMES[0]!
 	);
 }
