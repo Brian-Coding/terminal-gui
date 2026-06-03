@@ -44,10 +44,9 @@ import { useGitChangeActions } from "../../features/git/useGitChangeActions.ts";
 import { useGitDiff } from "../../features/git/useGitDiff.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
-	appendPaneToGroup,
 	createTerminalPane,
 	dispatchTerminalShellChange,
-	mutateCanonicalTerminalState,
+	mutateTerminalWorkspaceState,
 } from "../../features/terminal/terminal-utils.ts";
 import { lacksValue } from "../../lib/data.ts";
 import { fetchJson, postJson } from "../../lib/fetch-json.ts";
@@ -410,18 +409,8 @@ export function GitPage() {
 					saveStoredInput(pane.id, initialInput);
 				}
 			}
-			const next = await mutateCanonicalTerminalState(
-				(state) => {
-					const selectedGroupId = state.selectedGroupId ?? state.groups[0]?.id;
-					if (!selectedGroupId) return null;
-					return {
-						...state,
-						groups: state.groups.map(
-							appendPaneToGroup.bind(null, selectedGroupId, pane)
-						),
-						selectedGroupId,
-					};
-				},
+			const next = await mutateTerminalWorkspaceState(
+				{ type: "addPane", pane },
 				"git-open-pane",
 				{ createIfMissing: true }
 			);

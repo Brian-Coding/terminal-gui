@@ -16,28 +16,18 @@ import {
 	saveStoredSummary,
 } from "../../features/chat/chat-session-store.ts";
 import {
-	createGroupId,
-	createPendingAgentChatPane,
-	DEFAULT_COLUMNS,
-	DEFAULT_ROWS,
 	compactTerminalState,
 	dispatchTerminalShellChange,
 	loadCanonicalTerminalState,
 	loadTerminalState,
-	mutateCanonicalTerminalState,
+	mutateTerminalWorkspaceState,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import { loadAppThemeId } from "../../lib/app-theme.ts";
-import {
-	hasId,
-	hasRole,
-	lacksId,
-	noop,
-	toggleBoolean,
-} from "../../lib/data.ts";
+import { hasRole, noop, toggleBoolean } from "../../lib/data.ts";
 import { fetchJsonOr, postJson, sendJson } from "../../lib/fetch-json.ts";
 import {
 	listenWindowEvent,
@@ -423,18 +413,11 @@ export function Sidebar() {
 
 	const selectWorkspace = useCallback(
 		async (groupId: string) => {
-			// Optimistic update — render immediately, then persist
 			setWorkspaces((prev) => ({ ...prev, selectedGroupId: groupId as never }));
-			const next = await mutateCanonicalTerminalState((state) => {
-				if (!state.groups.some(hasId.bind(null, groupId))) return state;
-				return compactTerminalState(
-					{
-						...state,
-						selectedGroupId: groupId as never,
-					},
-					{ keepSelectedDraft: true }
-				);
-			}, "select-workspace");
+			const next = await mutateTerminalWorkspaceState(
+				{ type: "selectWorkspace", groupId },
+				"select-workspace"
+			);
 			if (next) {
 				setWorkspaces({
 					groups: next.groups,
@@ -450,28 +433,16 @@ export function Sidebar() {
 
 	const selectPane = useCallback(
 		async (groupId: string, paneId: string) => {
-			const gid = groupId as never;
-			const pid = paneId as never;
 			setWorkspaces((prev) => ({
 				groups: prev.groups.map((group) =>
 					group.id === groupId
 						? { ...group, selectedPaneId: paneId as never }
 						: group
 				),
-				selectedGroupId: gid,
+				selectedGroupId: groupId as never,
 			}));
-			const next = await mutateCanonicalTerminalState(
-				(state) =>
-					compactTerminalState(
-						{
-							...state,
-							selectedGroupId: gid,
-							groups: state.groups.map((g) =>
-								g.id === groupId ? { ...g, selectedPaneId: pid } : g
-							),
-						},
-						{ keepSelectedDraft: true }
-					),
+			const next = await mutateTerminalWorkspaceState(
+				{ type: "selectPane", groupId, paneId },
 				"select-pane"
 			);
 			if (next) {
@@ -488,30 +459,8 @@ export function Sidebar() {
 	);
 
 	const addWorkspace = useCallback(async () => {
-		const next = await mutateCanonicalTerminalState(
-			(state) => {
-				const cleanState = compactTerminalState(state, {
-					keepSelectedDraft: true,
-				});
-				const selectedGroup =
-					cleanState.groups.find(
-						hasId.bind(null, cleanState.selectedGroupId)
-					) ?? cleanState.groups[0];
-				const panes = [createPendingAgentChatPane()];
-				const group = {
-					id: createGroupId(),
-					name: `Workspace ${cleanState.groups.length + 1}`,
-					panes,
-					selectedPaneId: panes[0]?.id ?? null,
-					columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
-					rows: selectedGroup?.rows ?? DEFAULT_ROWS,
-				};
-				return {
-					...cleanState,
-					groups: [...cleanState.groups, group],
-					selectedGroupId: group.id,
-				};
-			},
+		const next = await mutateTerminalWorkspaceState(
+			{ type: "addWorkspace" },
 			"add-workspace",
 			{ createIfMissing: true }
 		);
@@ -525,19 +474,10 @@ export function Sidebar() {
 	}, [navigate]);
 
 	const removeWorkspace = useCallback(async (groupId: string) => {
-		const next = await mutateCanonicalTerminalState((state) => {
-			if (state.groups.length <= 1) return null;
-			const filtered = state.groups.filter(lacksId.bind(null, groupId));
-			const newSelected =
-				state.selectedGroupId === groupId
-					? (filtered[0]?.id ?? null)
-					: state.selectedGroupId;
-			return {
-				...state,
-				groups: filtered,
-				selectedGroupId: newSelected,
-			};
-		}, "remove-workspace");
+		const next = await mutateTerminalWorkspaceState(
+			{ type: "removeWorkspace", groupId },
+			"remove-workspace"
+		);
 		if (next) {
 			setWorkspaces({
 				groups: next.groups,
@@ -547,13 +487,8 @@ export function Sidebar() {
 	}, []);
 
 	const renameWorkspace = useCallback(async (groupId: string, name: string) => {
-		const next = await mutateCanonicalTerminalState(
-			(state) => ({
-				...state,
-				groups: state.groups.map((g) =>
-					g.id === groupId ? { ...g, name } : g
-				),
-			}),
+		const next = await mutateTerminalWorkspaceState(
+			{ type: "renameWorkspace", groupId, name },
 			"rename-workspace"
 		);
 		if (next) {

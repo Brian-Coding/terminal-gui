@@ -5,11 +5,9 @@ import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
 import { IconMessageCircle, IconPlus } from "../../components/ui/Icons.tsx";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import {
-	appendPaneToGroup,
 	dispatchTerminalShellChange,
 	loadCanonicalTerminalState,
-	mutateCanonicalTerminalState,
-	type GroupId,
+	mutateTerminalWorkspaceState,
 	type PaneId,
 	type TerminalGroupModel,
 	type TerminalPaneModel,
@@ -88,27 +86,18 @@ export function SessionsPage() {
 
 	const restoreSession = useCallback(
 		async (session: LocalSessionInfo, targetGroupId?: string) => {
-			await mutateCanonicalTerminalState(
+			await mutateTerminalWorkspaceState(
 				(state) => {
 					const existingGroup = state.groups.find((group) =>
 						group.panes.some((pane) => pane.id === session.paneId)
 					);
 					if (existingGroup) {
 						return {
-							...state,
-							selectedGroupId: existingGroup.id,
-							groups: state.groups.map((group) =>
-								group.id === existingGroup.id
-									? { ...group, selectedPaneId: session.paneId as PaneId }
-									: group
-							),
+							type: "selectPane",
+							groupId: existingGroup.id,
+							paneId: session.paneId,
 						};
 					}
-					const selectedGroupId =
-						(targetGroupId as GroupId | undefined) ??
-						state.selectedGroupId ??
-						state.groups[0]?.id;
-					if (!selectedGroupId) return null;
 					const pane: TerminalPaneModel = {
 						id: session.paneId as PaneId,
 						title:
@@ -121,11 +110,9 @@ export function SessionsPage() {
 						pendingCwd: !session.cwd,
 					};
 					return {
-						...state,
-						groups: state.groups.map(
-							appendPaneToGroup.bind(null, selectedGroupId, pane)
-						),
-						selectedGroupId,
+						type: "addPane",
+						pane,
+						groupId: targetGroupId,
 					};
 				},
 				"restore-session",

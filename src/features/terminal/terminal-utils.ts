@@ -11,6 +11,7 @@ import {
 	type AgentKind,
 	type ChatAgentKind,
 	getAgentDefinition,
+	isChatAgentKind,
 	loadDefaultChatSettings,
 } from "../agents/agents.ts";
 
@@ -78,6 +79,128 @@ export function appendPaneToGroup(
 			? [pane]
 			: [...group.panes, pane];
 	return { ...group, panes, selectedPaneId: pane.id };
+}
+
+export type TerminalWorkspaceAction =
+	| { type: "selectWorkspace"; groupId: string }
+	| { type: "selectPane"; groupId: string; paneId: string }
+	| { type: "addWorkspace" }
+	| { type: "removeWorkspace"; groupId: string }
+	| { type: "renameWorkspace"; groupId: string; name: string }
+	| { type: "addPane"; pane: TerminalPaneModel; groupId?: string }
+	| { type: "ensureChatPane" };
+
+export function reduceTerminalWorkspaceState(
+	state: TerminalSavedState,
+	action: TerminalWorkspaceAction
+): TerminalSavedState | null {
+	switch (action.type) {
+		case "selectWorkspace":
+			if (!state.groups.some(hasId.bind(null, action.groupId))) return state;
+			return compactTerminalState(
+				{ ...state, selectedGroupId: action.groupId as GroupId },
+				{ keepSelectedDraft: true }
+			);
+		case "selectPane":
+			return compactTerminalState(
+				{
+					...state,
+					selectedGroupId: action.groupId as GroupId,
+					groups: state.groups.map((group) =>
+						group.id === action.groupId
+							? { ...group, selectedPaneId: action.paneId as PaneId }
+							: group
+					),
+				},
+				{ keepSelectedDraft: true }
+			);
+		case "addWorkspace": {
+			const cleanState = compactTerminalState(state, {
+				keepSelectedDraft: true,
+			});
+			const selectedGroup =
+				cleanState.groups.find(hasId.bind(null, cleanState.selectedGroupId)) ??
+				cleanState.groups[0];
+			const panes = [createPendingAgentChatPane()];
+			const group: TerminalGroupModel = {
+				id: createGroupId(),
+				name: `Workspace ${cleanState.groups.length + 1}`,
+				panes,
+				selectedPaneId: panes[0]?.id ?? null,
+				columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
+				rows: selectedGroup?.rows ?? DEFAULT_ROWS,
+			};
+			return {
+				...cleanState,
+				groups: [...cleanState.groups, group],
+				selectedGroupId: group.id,
+			};
+		}
+		case "removeWorkspace": {
+			if (state.groups.length <= 1) return null;
+			const groups = state.groups.filter(
+				(group) => group.id !== action.groupId
+			);
+			return {
+				...state,
+				groups,
+				selectedGroupId:
+					state.selectedGroupId === action.groupId
+						? (groups[0]?.id ?? null)
+						: state.selectedGroupId,
+			};
+		}
+		case "renameWorkspace":
+			return {
+				...state,
+				groups: state.groups.map((group) =>
+					group.id === action.groupId
+						? { ...group, name: action.name.trim() || group.name }
+						: group
+				),
+			};
+		case "addPane": {
+			const selectedGroupId =
+				(action.groupId as GroupId | undefined) ??
+				state.selectedGroupId ??
+				state.groups[0]?.id;
+			if (!selectedGroupId) return null;
+			return {
+				...state,
+				groups: state.groups.map(
+					appendPaneToGroup.bind(null, selectedGroupId, action.pane)
+				),
+				selectedGroupId,
+			};
+		}
+		case "ensureChatPane": {
+			const selectedGroupId = state.selectedGroupId ?? state.groups[0]?.id;
+			const group =
+				state.groups.find(hasId.bind(null, selectedGroupId)) ?? state.groups[0];
+			if (!group) return null;
+			const pane =
+				group.panes.find(
+					(candidate) =>
+						candidate.id === group.selectedPaneId &&
+						isChatAgentKind(candidate.agentKind)
+				) ??
+				group.panes.find((candidate) => isChatAgentKind(candidate.agentKind));
+			const chatPane = pane ?? createPendingAgentChatPane();
+			return {
+				...state,
+				selectedGroupId: group.id,
+				groups: state.groups.map((candidate) =>
+					candidate.id === group.id
+						? {
+								...candidate,
+								panes: pane ? candidate.panes : [chatPane, ...candidate.panes],
+								selectedPaneId: chatPane.id,
+							}
+						: candidate
+				),
+			};
+		}
+	}
 }
 
 // Compact: [id, name, bg, fg, cursor, separator]
@@ -473,6 +596,25 @@ export async function mutateCanonicalTerminalState(
 	if (!next) return null;
 	saveSyncedTerminalState(next, reason);
 	return normalizeTerminalState(next, { createDefault: true });
+}
+
+export function mutateTerminalWorkspaceState(
+	action:
+		| TerminalWorkspaceAction
+		| ((state: TerminalSavedState) => TerminalWorkspaceAction | null),
+	reason?: string,
+	options: { createIfMissing?: boolean } = {}
+): Promise<TerminalSavedState | null> {
+	return mutateCanonicalTerminalState(
+		(state) => {
+			const nextAction = typeof action === "function" ? action(state) : action;
+			return nextAction
+				? reduceTerminalWorkspaceState(state, nextAction)
+				: null;
+		},
+		reason,
+		options
+	);
 }
 
 /**

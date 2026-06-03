@@ -7,13 +7,10 @@ import {
 	IconSearch,
 	IconTrash,
 } from "../../components/ui/Icons.tsx";
-import { isChatAgentKind } from "../../features/agents/agents.ts";
 import { savePendingSend } from "../../features/chat/chat-session-store.ts";
 import {
-	createPendingAgentChatPane,
 	dispatchTerminalShellChange,
-	mutateCanonicalTerminalState,
-	type TerminalGroupModel,
+	mutateTerminalWorkspaceState,
 } from "../../features/terminal/terminal-utils.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { DEFAULT_APP_ROUTE } from "../../lib/app-navigation.tsx";
@@ -58,52 +55,13 @@ function buildFileChatMessage(files: FileEntry[]) {
 }
 
 async function ensureChatPaneId(): Promise<string | null> {
-	let paneId: string | null = null;
-	await mutateCanonicalTerminalState(
-		(existing) => {
-			const groups = existing.groups.map((group) => ({
-				...group,
-				panes: [...group.panes],
-			}));
-			const selectedGroupId = existing.selectedGroupId ?? groups[0]?.id ?? null;
-			const groupIndex = Math.max(
-				0,
-				groups.findIndex((group) => group.id === selectedGroupId)
-			);
-			const group = groups[groupIndex];
-			if (!group) return null;
-
-			let pane =
-				group.panes.find(
-					(candidate) =>
-						candidate.id === group.selectedPaneId &&
-						isChatAgentKind(candidate.agentKind)
-				) ??
-				group.panes.find((candidate) => isChatAgentKind(candidate.agentKind));
-
-			if (!pane) {
-				pane = createPendingAgentChatPane();
-				group.panes.unshift(pane);
-			}
-			group.selectedPaneId = pane.id;
-			paneId = pane.id;
-
-			const nextGroups = groups.map(
-				(candidate, index): TerminalGroupModel =>
-					index === groupIndex ? group : candidate
-			);
-
-			return {
-				...existing,
-				groups: nextGroups,
-				selectedGroupId: group.id,
-			};
-		},
+	const next = await mutateTerminalWorkspaceState(
+		{ type: "ensureChatPane" },
 		"image-chat-pane",
 		{ createIfMissing: true }
 	);
-
-	return paneId;
+	const group = next?.groups.find((item) => item.id === next.selectedGroupId);
+	return group?.selectedPaneId ?? null;
 }
 
 export function ImagesPage() {

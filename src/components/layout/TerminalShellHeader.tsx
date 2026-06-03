@@ -12,13 +12,13 @@ import {
 	type NEW_PANE_AGENT_KINDS,
 } from "../../features/agents/agents.ts";
 import {
-	appendPaneToGroup,
 	createTerminalPane,
 	dispatchTerminalShellChange,
 	listenTerminalLayoutMode,
 	loadTerminalLayoutMode,
 	loadTerminalState,
 	mutateCanonicalTerminalState,
+	mutateTerminalWorkspaceState,
 } from "../../features/terminal/terminal-utils.ts";
 import {
 	APP_PAGE_ROUTES,
@@ -135,18 +135,8 @@ export function TerminalShellHeader() {
 	const addPaneToSelectedGroup = useCallback(
 		async (agentKind: (typeof NEW_PANE_AGENT_KINDS)[number]) => {
 			const pane = createTerminalPane(agentKind, undefined, true);
-			await mutateCanonicalTerminalState(
-				(terminalState) => {
-					const selectedGroupId =
-						terminalState.selectedGroupId ?? terminalState.groups[0]?.id;
-					if (!selectedGroupId) return null;
-					return {
-						...terminalState,
-						groups: terminalState.groups.map(
-							appendPaneToGroup.bind(null, selectedGroupId, pane)
-						),
-					};
-				},
+			await mutateTerminalWorkspaceState(
+				{ type: "addPane", pane },
 				"add-pane",
 				{ createIfMissing: true }
 			);
