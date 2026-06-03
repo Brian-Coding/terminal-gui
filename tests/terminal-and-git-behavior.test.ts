@@ -138,6 +138,35 @@ describe("terminal state and git change behavior", () => {
 		});
 	});
 
+	test("appends pending chats instead of replacing the first pending chat", () => {
+		const starter = pane("starter", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const nextPane = pane("next", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const group: TerminalGroupModel = {
+			id: "group-1" as GroupId,
+			name: "Main",
+			panes: [starter],
+			selectedPaneId: starter.id,
+			columns: 2,
+			rows: 1,
+		};
+
+		expect(appendPaneToGroup("group-1", nextPane, group)).toEqual({
+			...group,
+			panes: [starter, nextPane],
+			selectedPaneId: nextPane.id,
+		});
+	});
+
 	test("creates empty workspaces without a required starter chat", () => {
 		const group = createDefaultAgentChatGroup();
 		const next = reduceTerminalWorkspaceState(

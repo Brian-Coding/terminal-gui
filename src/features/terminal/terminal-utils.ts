@@ -75,7 +75,9 @@ export function appendPaneToGroup(
 ): TerminalGroupModel {
 	if (group.id !== selectedGroupId) return group;
 	const panes =
-		group.panes.length === 1 && isEmptyPendingPane(group.panes[0]!)
+		group.panes.length === 1 &&
+		isEmptyPendingPane(group.panes[0]!) &&
+		!isEmptyPendingPane(pane)
 			? [pane]
 			: [...group.panes, pane];
 	return { ...group, panes, selectedPaneId: pane.id };
