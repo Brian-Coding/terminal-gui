@@ -9,6 +9,7 @@ import { forgeRoutes } from "./forge.ts";
 import { gitRoutes } from "./git.ts";
 import { nativeRoutes } from "./native.ts";
 import { promptRoutes } from "./prompts.ts";
+import { sessionRoutes } from "./sessions.ts";
 import { simulatorRoutes } from "./simulator.ts";
 import { terminalRoutes } from "./terminal.ts";
 import { titleRoutes } from "./title.ts";
@@ -25,6 +26,7 @@ export function buildApiRoutes() {
 		...checkpointRoutes(),
 		...promptRoutes(),
 		...gitRoutes(),
+		...sessionRoutes(),
 		...simulatorRoutes(),
 		...titleRoutes(),
 		...featureRoutes(),

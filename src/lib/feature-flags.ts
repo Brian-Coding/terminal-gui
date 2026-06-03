@@ -1,21 +1,35 @@
 declare const __INFERAY_FEATURE_FLAGS__: FeatureFlags | undefined;
 
-export const ENABLED_FEATURE_FLAGS = {
+export type FeatureFlagName =
+	| "terminal"
+	| "git"
+	| "prompts"
+	| "automations"
+	| "goals"
+	| "sessions"
+	| "images"
+	| "simulators"
+	| "profile"
+	| "chat"
+	| "editor"
+	| "graph";
+
+export type FeatureFlags = Record<FeatureFlagName, boolean>;
+
+export const ENABLED_FEATURE_FLAGS: FeatureFlags = {
 	terminal: true,
 	git: true,
 	prompts: true,
 	automations: true,
 	goals: true,
+	sessions: true,
 	images: true,
 	simulators: true,
 	profile: true,
 	chat: true,
 	editor: true,
 	graph: true,
-} as const satisfies FeatureFlags;
-
-export type FeatureFlagName = keyof typeof ENABLED_FEATURE_FLAGS;
-export type FeatureFlags = Record<FeatureFlagName, boolean>;
+};
 
 export const DEV_FEATURE_FLAGS: FeatureFlags = {
 	...ENABLED_FEATURE_FLAGS,

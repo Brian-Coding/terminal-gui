@@ -1,6 +1,4 @@
 import type { ComponentType } from "react";
-import { hasId } from "./data.ts";
-import { FEATURE_FLAGS } from "./feature-flags.ts";
 import {
 	IconCode,
 	IconFilePlus,
@@ -10,11 +8,14 @@ import {
 	IconSlash,
 	IconTarget,
 } from "../components/ui/Icons.tsx";
+import { hasId } from "./data.ts";
+import { FEATURE_FLAGS } from "./feature-flags.ts";
 
 export type AppRouteId =
 	| "terminal"
 	| "prompts"
 	| "goals"
+	| "sessions"
 	| "automations"
 	| "images"
 	| "simulators"
@@ -56,6 +57,13 @@ const ALL_APP_PAGE_ROUTES = [
 		path: "/goals",
 		sidebar: true,
 		icon: IconTarget,
+	},
+	{
+		id: "sessions",
+		label: "Sessions",
+		path: "/sessions",
+		sidebar: true,
+		icon: IconMessageCircle,
 	},
 	{
 		id: "automations",

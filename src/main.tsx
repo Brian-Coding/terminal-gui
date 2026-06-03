@@ -21,6 +21,7 @@ import { ImagesPage } from "./pages/ImagesPage";
 import { ONBOARDING_DONE_KEY, OnboardingPage } from "./pages/OnboardingPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { PromptsPage } from "./pages/PromptsPage";
+import { SessionsPage } from "./pages/SessionsPage";
 import { SimulatorsPage } from "./pages/SimulatorsPage";
 import {
 	colorTheme,
@@ -38,7 +39,7 @@ const TerminalPage = lazy(() =>
 
 if (window.location.origin !== getServerOrigin()) {
 	const originalFetch = window.fetch.bind(window);
-	window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+	window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 		if (typeof input === "string" && input.startsWith("/")) {
 			return originalFetch(resolveServerUrl(input), init);
 		}
@@ -58,7 +59,7 @@ if (window.location.origin !== getServerOrigin()) {
 			}
 		}
 		return originalFetch(input, init);
-	};
+	}) as typeof window.fetch;
 }
 
 await hydrateStoredValues();
@@ -89,6 +90,7 @@ function AppShell() {
 		terminal: <TerminalPage />,
 		prompts: <PromptsPage />,
 		goals: <GoalsPage />,
+		sessions: <SessionsPage />,
 		automations: <AutomationsPage />,
 		images: <ImagesPage />,
 		simulators: <SimulatorsPage />,
