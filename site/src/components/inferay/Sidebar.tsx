@@ -186,8 +186,12 @@ function TreeNodeRow({
 						</span>
 						{/* Stage/Unstage button */}
 						<button
+							type="button"
+							aria-label={
+								isStaged ? `Unstage ${node.name}` : `Stage ${node.name}`
+							}
 							onClick={stopPropagation}
-							className="opacity-0 group-hover/row:opacity-100 w-4 h-4 flex items-center justify-center text-inferay-text-3 hover:text-inferay-text transition-all"
+							className="opacity-0 group-hover/row:opacity-100 size-4 flex items-center justify-center text-inferay-text-3 hover:text-inferay-text transition-all"
 						>
 							{isStaged ? "−" : "+"}
 						</button>
@@ -252,6 +256,10 @@ function FileGroupTree({
 				<span className="text-[8px] text-inferay-text-3">{fileCount}</span>
 				{/* Stage/Unstage All button */}
 				<button
+					type="button"
+					aria-label={
+						isStaged ? `Unstage all ${title} files` : `Stage all ${title} files`
+					}
 					onClick={stopPropagation}
 					className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[7px] text-inferay-text-3 hover:text-inferay-text hover:bg-inferay-surface-2 transition-all"
 				>
@@ -315,6 +323,10 @@ function FileGroupPath({
 				<span className="text-[8px] text-inferay-text-3">{files.length}</span>
 				{/* Stage/Unstage All button */}
 				<button
+					type="button"
+					aria-label={
+						isStaged ? `Unstage all ${title} files` : `Stage all ${title} files`
+					}
 					onClick={stopPropagation}
 					className="opacity-0 group-hover:opacity-100 px-1 py-0.5 rounded text-[7px] text-inferay-text-3 hover:text-inferay-text hover:bg-inferay-surface-2 transition-all"
 				>
@@ -344,8 +356,12 @@ function FileGroupPath({
 							</div>
 							{/* Stage/Unstage button */}
 							<button
+								type="button"
+								aria-label={
+									isStaged ? `Unstage ${file.name}` : `Stage ${file.name}`
+								}
 								onClick={stopPropagation}
-								className="opacity-0 group-hover/file:opacity-100 w-4 h-4 flex items-center justify-center text-inferay-text-3 hover:text-inferay-text transition-all shrink-0"
+								className="opacity-0 group-hover/file:opacity-100 size-4 flex items-center justify-center text-inferay-text-3 hover:text-inferay-text transition-all shrink-0"
 							>
 								{isStaged ? "−" : "+"}
 							</button>
@@ -449,7 +465,7 @@ export function UnifiedSidebar({
 								className="flex items-center gap-1.5 px-1.5 py-1 rounded-md hover:bg-inferay-surface/50 transition-colors"
 							>
 								<div
-									className={`w-3 h-3 rounded-full flex items-center justify-center shrink-0 ${
+									className={`size-3 rounded-full flex items-center justify-center shrink-0 ${
 										item.status === "checkpoint"
 											? "bg-inferay-accent/20 border border-inferay-accent"
 											: "bg-inferay-surface border border-inferay-border"
@@ -561,11 +577,13 @@ export function UnifiedSidebar({
 					{/* Commit section */}
 					<div className="p-1.5 border-t border-inferay-border space-y-1.5">
 						<input
+							aria-label="Commit summary"
 							type="text"
 							placeholder="Summary"
 							className="w-full px-2 py-1 rounded-md bg-inferay-surface border border-inferay-border text-[9px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-accent/50 transition-colors"
 						/>
 						<textarea
+							aria-label="Commit description"
 							placeholder="Description (optional)"
 							className="w-full h-10 px-2 py-1 rounded-md bg-inferay-surface border border-inferay-border text-[9px] text-inferay-text placeholder:text-inferay-text-3 resize-none outline-none focus:border-inferay-accent/50 transition-colors"
 						/>

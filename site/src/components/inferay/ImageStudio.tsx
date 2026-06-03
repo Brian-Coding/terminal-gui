@@ -168,6 +168,7 @@ function ImageDetail({
 				<button
 					type="button"
 					onClick={onClose}
+					aria-label="Close image details"
 					className="p-1 rounded text-inferay-text-3 hover:bg-inferay-surface hover:text-inferay-text-2 transition-colors"
 				>
 					<Icons.Close />
@@ -285,6 +286,7 @@ export function ImageStudio() {
 				{/* Prompt input */}
 				<div className="relative">
 					<textarea
+						aria-label="Image prompt"
 						value={prompt}
 						onChange={(e) =>
 							dispatch({ type: "promptChanged", value: e.target.value })
@@ -301,6 +303,7 @@ export function ImageStudio() {
 					<div className="flex items-center gap-1 h-7 px-2 rounded-md bg-inferay-surface border border-inferay-border">
 						<span className="text-[8px] text-inferay-text-3">Model:</span>
 						<select
+							aria-label="Image model"
 							value={model}
 							onChange={(e) =>
 								dispatch({ type: "modelChanged", value: e.target.value })
@@ -349,8 +352,8 @@ export function ImageStudio() {
 					>
 						{isGenerating ? (
 							<>
-								<div className="w-3 h-3 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-								Generating...
+								<div className="size-3 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+								Generating…
 							</>
 						) : (
 							<>
@@ -368,8 +371,8 @@ export function ImageStudio() {
 				<div className="flex-1 overflow-y-auto p-3">
 					{images.length === 0 ? (
 						<div className="flex flex-col items-center justify-center h-full text-center">
-							<div className="w-12 h-12 rounded-full bg-inferay-surface border border-inferay-border flex items-center justify-center mb-3">
-								<Icons.Sparkle className="w-5 h-5 text-inferay-text-3" />
+							<div className="size-12 rounded-full bg-inferay-surface border border-inferay-border flex items-center justify-center mb-3">
+								<Icons.Sparkle className="size-5 text-inferay-text-3" />
 							</div>
 							<p className="text-[11px] text-inferay-text mb-1">
 								No images yet

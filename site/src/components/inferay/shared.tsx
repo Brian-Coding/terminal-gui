@@ -9,9 +9,9 @@ function stopPropagation(event: MouseEvent) {
 
 export function ClaudeAvatar({ size = "sm" }: { size?: "sm" | "md" | "lg" }) {
 	const sizeClasses = {
-		sm: "w-5 h-5 text-[8px]",
-		md: "w-6 h-6 text-[9px]",
-		lg: "w-7 h-7 text-[10px]",
+		sm: "size-5 text-[8px]",
+		md: "size-6 text-[9px]",
+		lg: "size-7 text-[10px]",
 	};
 	return (
 		<div
@@ -40,7 +40,7 @@ export function ModelSelector({
 				className="flex items-center gap-1.5 h-5 px-1.5 rounded-md border border-inferay-border bg-inferay-surface hover:bg-inferay-surface-2 transition-colors"
 			>
 				<span
-					className="w-1.5 h-1.5 rounded-full"
+					className="size-1.5 rounded-full"
 					style={{ backgroundColor: current.color }}
 				/>
 				<span className="text-[9px] font-medium text-inferay-text">
@@ -60,7 +60,7 @@ export function ModelSelector({
 							className={`w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-inferay-surface-2 first:rounded-t-md last:rounded-b-md ${model.id === selectedModel ? "bg-inferay-surface-2" : ""}`}
 						>
 							<span
-								className="w-1.5 h-1.5 rounded-full"
+								className="size-1.5 rounded-full"
 								style={{ backgroundColor: model.color }}
 							/>
 							<span className="text-[9px] font-medium text-inferay-text">
@@ -80,7 +80,7 @@ export function ModelSelector({
 export function CommandBar({ onClose }: { onClose: () => void }) {
 	const [query, setQuery] = useState("");
 	const commands = [
-		{ icon: <Icons.File />, label: "Open file...", shortcut: "⌘P" },
+		{ icon: <Icons.File />, label: "Open file…", shortcut: "⌘P" },
 		{ icon: <Icons.Search />, label: "Search in files", shortcut: "⌘⇧F" },
 		{ icon: <Icons.Git />, label: "Git: Commit", shortcut: "⌘⇧G" },
 		{ icon: <Icons.Split />, label: "Split editor", shortcut: "⌘\\" },
@@ -99,6 +99,7 @@ export function CommandBar({ onClose }: { onClose: () => void }) {
 				<div className="flex items-center gap-3 px-4 py-3 border-b border-inferay-border">
 					<Icons.Search />
 					<input
+						aria-label="Command search"
 						autoFocus
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}
@@ -140,7 +141,7 @@ export function ThinkingIndicator() {
 				{[0, 1, 2].map((i) => (
 					<div
 						key={i}
-						className="w-1 h-1 rounded-full bg-inferay-accent animate-bounce"
+						className="size-1 rounded-full bg-inferay-accent animate-bounce"
 						style={{
 							animationDuration: "0.6s",
 							animationDelay: `${i * 0.1}s`,
@@ -149,7 +150,7 @@ export function ThinkingIndicator() {
 				))}
 			</div>
 			<span className="text-[10px] text-inferay-accent font-medium">
-				Editing file...
+				Editing file…
 			</span>
 		</div>
 	);

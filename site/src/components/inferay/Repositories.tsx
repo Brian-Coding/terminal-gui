@@ -66,7 +66,7 @@ function RepoCard({
 			}`}
 		>
 			<div className="flex items-start gap-3">
-				<div className="w-8 h-8 rounded-md bg-inferay-surface border border-inferay-border flex items-center justify-center shrink-0">
+				<div className="size-8 rounded-md bg-inferay-surface border border-inferay-border flex items-center justify-center shrink-0">
 					<Icons.Folder className="text-inferay-text-2" />
 				</div>
 				<div className="flex-1 min-w-0">
@@ -76,19 +76,19 @@ function RepoCard({
 						</span>
 						{repo.status === "changes" && (
 							<span className="flex items-center gap-1 text-[8px] text-inferay-text-3">
-								<div className="w-1.5 h-1.5 rounded-full bg-inferay-accent" />
+								<div className="size-1.5 rounded-full bg-inferay-accent" />
 								{repo.changes} changes
 							</span>
 						)}
 						{repo.status === "behind" && (
 							<span className="flex items-center gap-1 text-[8px] text-inferay-text-3">
-								<Icons.ArrowDown className="w-2 h-2" />
+								<Icons.ArrowDown className="size-2" />
 								Behind
 							</span>
 						)}
 						{repo.status === "clean" && (
 							<span className="flex items-center gap-1 text-[8px] text-inferay-text-3">
-								<div className="w-1.5 h-1.5 rounded-full bg-inferay-text-3" />
+								<div className="size-1.5 rounded-full bg-inferay-text-3" />
 								Clean
 							</span>
 						)}
@@ -277,6 +277,7 @@ export function Repositories() {
 					<div className="flex items-center gap-2 h-7 px-2 rounded-md bg-inferay-surface border border-inferay-border">
 						<Icons.Search className="text-inferay-text-3" />
 						<input
+							aria-label="Search repositories"
 							type="text"
 							placeholder="Search repositories..."
 							className="flex-1 bg-transparent text-[9px] text-inferay-text placeholder:text-inferay-text-3 outline-none"
@@ -313,7 +314,7 @@ export function Repositories() {
 			) : (
 				<div className="flex-1 flex items-center justify-center">
 					<div className="text-center">
-						<Icons.Folder className="w-8 h-8 mx-auto text-inferay-text-3 mb-2" />
+						<Icons.Folder className="size-8 mx-auto text-inferay-text-3 mb-2" />
 						<p className="text-[10px] text-inferay-text-3">
 							Select a repository to view details
 						</p>

@@ -65,7 +65,7 @@ function ApiKeyRow({
 	return (
 		<div className="flex items-center gap-3 px-3 py-2.5 border-b border-inferay-border last:border-b-0">
 			{/* Provider icon */}
-			<div className="w-8 h-8 rounded-lg bg-inferay-surface border border-inferay-border flex items-center justify-center">
+			<div className="size-8 rounded-lg bg-inferay-surface border border-inferay-border flex items-center justify-center">
 				<span className="text-[12px] font-bold text-inferay-text-2">
 					{provider.icon}
 				</span>
@@ -79,7 +79,7 @@ function ApiKeyRow({
 					</span>
 					{provider.isSet && (
 						<span className="flex items-center gap-0.5 text-[7px] text-emerald-500">
-							<div className="w-1 h-1 rounded-full bg-emerald-500" />
+							<div className="size-1 rounded-full bg-emerald-500" />
 							Connected
 						</span>
 					)}
@@ -153,6 +153,7 @@ function EditKeyModal({
 							API Key
 						</label>
 						<input
+							aria-label={`${provider.provider} API key`}
 							type="password"
 							value={key}
 							onChange={(e) => setKey(e.target.value)}
@@ -234,7 +235,7 @@ export function Profile() {
 				{/* Profile header */}
 				<div className="p-4 border-b border-inferay-border">
 					<div className="flex items-center gap-3">
-						<div className="w-10 h-10 rounded-full bg-inferay-surface-2 border border-inferay-border flex items-center justify-center">
+						<div className="size-10 rounded-full bg-inferay-surface-2 border border-inferay-border flex items-center justify-center">
 							<Icons.User className="text-inferay-text-2" />
 						</div>
 						<div>
@@ -290,8 +291,8 @@ export function Profile() {
 
 						{/* Avatar section */}
 						<div className="flex items-center gap-4 p-4 rounded-lg border border-inferay-border bg-inferay-surface/30">
-							<div className="w-16 h-16 rounded-full bg-inferay-surface-2 border border-inferay-border flex items-center justify-center">
-								<Icons.User className="w-6 h-6 text-inferay-text-2" />
+							<div className="size-16 rounded-full bg-inferay-surface-2 border border-inferay-border flex items-center justify-center">
+								<Icons.User className="size-6 text-inferay-text-2" />
 							</div>
 							<div className="flex-1">
 								<p className="text-[11px] font-medium text-inferay-text mb-1">
@@ -315,6 +316,7 @@ export function Profile() {
 									Display Name
 								</label>
 								<input
+									aria-label="Display name"
 									type="text"
 									placeholder="Enter your name"
 									className="mt-1.5 w-full h-8 rounded-md bg-inferay-surface border border-inferay-border px-3 text-[10px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-accent/50"
@@ -325,6 +327,7 @@ export function Profile() {
 									Email
 								</label>
 								<input
+									aria-label="Email"
 									type="email"
 									placeholder="user@example.com"
 									className="mt-1.5 w-full h-8 rounded-md bg-inferay-surface border border-inferay-border px-3 text-[10px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-accent/50"
@@ -422,7 +425,10 @@ export function Profile() {
 										Model used for new conversations
 									</p>
 								</div>
-								<select className="h-7 px-2 rounded-md bg-inferay-surface border border-inferay-border text-[9px] text-inferay-text outline-none">
+								<select
+									aria-label="Default model"
+									className="h-7 px-2 rounded-md bg-inferay-surface border border-inferay-border text-[9px] text-inferay-text outline-none"
+								>
 									<option>Claude Opus</option>
 									<option>Claude Sonnet</option>
 									<option>GPT-4</option>
@@ -438,8 +444,11 @@ export function Profile() {
 										Automatically save chat history
 									</p>
 								</div>
-								<button className="w-8 h-5 rounded-full bg-inferay-accent p-0.5 transition-colors">
-									<div className="w-4 h-4 rounded-full bg-black translate-x-3" />
+								<button
+									aria-label="Toggle auto-save conversations"
+									className="w-8 h-5 rounded-full bg-inferay-accent p-0.5 transition-colors"
+								>
+									<div className="size-4 rounded-full bg-black translate-x-3" />
 								</button>
 							</div>
 						</div>

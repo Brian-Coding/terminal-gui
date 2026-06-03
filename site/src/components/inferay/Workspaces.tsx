@@ -170,7 +170,7 @@ function WorkspaceRow({
 			}`}
 		>
 			{/* Icon */}
-			<div className="w-6 h-6 rounded-md border border-inferay-border bg-inferay-surface flex items-center justify-center text-inferay-text-3">
+			<div className="size-6 rounded-md border border-inferay-border bg-inferay-surface flex items-center justify-center text-inferay-text-3">
 				<Icons.Layers />
 			</div>
 
@@ -375,6 +375,7 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 						Name
 					</label>
 					<input
+						aria-label="Workspace name"
 						type="text"
 						value={name}
 						onChange={(e) =>
@@ -390,6 +391,7 @@ function CreateWorkspacePanel({ onClose }: { onClose: () => void }) {
 						Description
 					</label>
 					<input
+						aria-label="Workspace description"
 						type="text"
 						value={description}
 						onChange={(e) =>

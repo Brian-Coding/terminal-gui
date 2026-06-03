@@ -225,11 +225,14 @@ function Sidebar() {
 	return (
 		<aside className="flex w-48 shrink-0 select-none flex-col overflow-hidden border-r border-inferay-gray-border bg-inferay-black">
 			<div className="flex h-12 shrink-0 items-center border-b border-inferay-gray-border px-3">
-				<button className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-md">
+				<button
+					aria-label="Open home"
+					className="flex size-7 items-center justify-center overflow-hidden rounded-md"
+				>
 					<img
 						src="/app-icon.png"
 						alt=""
-						className="h-7 w-7 rounded-md object-cover"
+						className="size-7 rounded-md object-cover"
 					/>
 				</button>
 			</div>
@@ -252,7 +255,10 @@ function Sidebar() {
 						<span className="text-[11px] font-medium uppercase tracking-normal text-inferay-soft-white">
 							Workspaces
 						</span>
-						<button className="flex h-5 w-5 items-center justify-center rounded text-inferay-muted-gray">
+						<button
+							aria-label="Add workspace"
+							className="flex size-5 items-center justify-center rounded text-inferay-muted-gray"
+						>
 							<Icons.Plus />
 						</button>
 					</div>
@@ -273,8 +279,11 @@ function Sidebar() {
 					<Icons.Settings />
 					<span>Settings</span>
 				</button>
-				<button className="flex h-7 w-full items-center gap-2 rounded-lg px-1.5 text-[11px] font-medium text-inferay-soft-white">
-					<span className="flex h-5 w-5 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-dark-gray text-[9px] uppercase">
+				<button
+					aria-label="Open user menu"
+					className="flex h-7 w-full items-center gap-2 rounded-lg px-1.5 text-[11px] font-medium text-inferay-soft-white"
+				>
+					<span className="flex size-5 items-center justify-center rounded-full border border-inferay-gray-border bg-inferay-dark-gray text-[9px] uppercase">
 						ra
 					</span>
 				</button>
@@ -331,10 +340,16 @@ function TerminalShellHeader() {
 					</span>
 				</div>
 				<div className="flex h-7 overflow-hidden rounded-lg border border-inferay-gray-border bg-inferay-dark-gray">
-					<button className="flex w-7 items-center justify-center bg-white/[0.055] text-inferay-white">
+					<button
+						aria-label="Context view"
+						className="flex w-7 items-center justify-center bg-white/[0.055] text-inferay-white"
+					>
 						<Icons.Context />
 					</button>
-					<button className="flex w-7 items-center justify-center border-l border-inferay-gray-border text-inferay-muted-gray">
+					<button
+						aria-label="Stack view"
+						className="flex w-7 items-center justify-center border-l border-inferay-gray-border text-inferay-muted-gray"
+					>
 						<Icons.Stack />
 					</button>
 				</div>
@@ -392,7 +407,7 @@ function ToolStatus({ status }: { status: Pane["status"] }) {
 							<span className="min-w-0 flex-1 truncate text-inferay-soft-white">
 								{summary}
 							</span>
-							<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-inferay-muted-gray" />
+							<span className="size-1.5 shrink-0 rounded-full bg-inferay-muted-gray" />
 						</div>
 					))}
 				</div>
@@ -524,11 +539,14 @@ function Composer({ pane }: { pane: Pane }) {
 			<div className="px-3 pb-2 pt-1">
 				<div className="relative flex flex-col overflow-visible rounded-xl border border-inferay-gray-border bg-inferay-dark-gray">
 					<div className="flex items-end gap-1 px-1 py-1.5 pr-3">
-						<button className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-inferay-muted-gray">
+						<button
+							aria-label="Attach file"
+							className="flex size-8 shrink-0 items-center justify-center rounded-md text-inferay-muted-gray"
+						>
 							<Icons.Plus />
 						</button>
 						<div className="min-h-5 min-w-0 flex-1 py-0.5 text-[13px] leading-5 text-inferay-muted-gray">
-							Message... (/ commands, @ files)
+							Message… (/ commands, @ files)
 						</div>
 					</div>
 					<div className="flex min-w-0 items-center gap-1.5 overflow-x-auto px-2 pb-1.5">
@@ -620,7 +638,7 @@ function InlineDirectoryPickerReplica() {
 						<Icons.Folder />
 					</span>
 					<span className="min-w-0 flex-1 text-[13px] text-inferay-muted-gray">
-						Search folder...
+						Search folder…
 					</span>
 				</div>
 			</div>
@@ -641,7 +659,10 @@ function StartPane({ pane }: { pane: Pane }) {
 					New Session
 				</span>
 				<span className="flex-1" />
-				<button className="flex h-4 w-4 items-center justify-center rounded text-inferay-muted-gray">
+				<button
+					aria-label="Close new session"
+					className="flex size-4 items-center justify-center rounded text-inferay-muted-gray"
+				>
 					<Icons.Close />
 				</button>
 			</header>
@@ -678,9 +699,12 @@ export function ChatPane({
 				</span>
 				<span className="flex-1" />
 				{selected && (
-					<span className="h-1.5 w-1.5 rounded-full bg-inferay-accent" />
+					<span className="size-1.5 rounded-full bg-inferay-accent" />
 				)}
-				<button className="flex h-4 w-4 items-center justify-center rounded text-inferay-muted-gray">
+				<button
+					aria-label={`Close ${pane.title}`}
+					className="flex size-4 items-center justify-center rounded text-inferay-muted-gray"
+				>
 					<Icons.Close />
 				</button>
 			</header>
@@ -723,9 +747,9 @@ export function ProductFrame() {
 			}}
 		>
 			<div className="flex h-6 shrink-0 items-center gap-1.5 bg-inferay-black px-3">
-				<span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" />
-				<span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" />
-				<span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+				<span className="size-2.5 rounded-full bg-[#ff5f57]" />
+				<span className="size-2.5 rounded-full bg-[#febc2e]" />
+				<span className="size-2.5 rounded-full bg-[#28c840]" />
 			</div>
 			<div className="flex h-[860px] bg-inferay-black">
 				<Sidebar />

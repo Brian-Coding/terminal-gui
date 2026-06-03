@@ -124,7 +124,7 @@ function AgentBadge({
 	return (
 		<div className="flex items-center gap-1.5 min-w-0">
 			<span
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[9px] font-semibold ${
+				className={`flex size-5 shrink-0 items-center justify-center rounded-md border text-[9px] font-semibold ${
 					agent === "Codex"
 						? "border-emerald-400/20 bg-emerald-400/10 text-emerald-200"
 						: "border-amber-400/20 bg-amber-400/10 text-amber-200"
@@ -245,21 +245,24 @@ function Composer({ compact = false }: { compact?: boolean }) {
 				<div className="flex items-start gap-1.5 px-1.5 py-1.5">
 					<button
 						type="button"
-						className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-inferay-text-3 hover:bg-inferay-surface-2 hover:text-inferay-text"
+						aria-label="Attach file"
+						className="flex size-7 shrink-0 items-center justify-center rounded-md text-inferay-text-3 hover:bg-inferay-surface-2 hover:text-inferay-text"
 						title="Attach file"
 					>
 						<Icons.Plus />
 					</button>
 					<textarea
+						aria-label="Message"
 						value={input}
 						onChange={(event) => setInput(event.target.value)}
-						placeholder="Message... (/ commands, @ files)"
+						placeholder="Message… (/ commands, @ files)"
 						rows={compact ? 1 : 2}
 						className="min-h-7 flex-1 resize-none bg-transparent py-1 text-[10px] leading-5 text-inferay-text outline-none placeholder:text-inferay-text-3"
 					/>
 					<button
 						type="button"
-						className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-inferay-text-3 hover:bg-inferay-surface-2 hover:text-inferay-text"
+						aria-label="Send message"
+						className="flex size-7 shrink-0 items-center justify-center rounded-md text-inferay-text-3 hover:bg-inferay-surface-2 hover:text-inferay-text"
 						title="Send"
 					>
 						<Icons.Send />
@@ -324,7 +327,10 @@ function ChatColumn({
 					{thread.time}
 				</span>
 				{thread.status !== "done" && (
-					<button className="flex h-5 w-5 items-center justify-center rounded border border-inferay-border bg-inferay-surface text-inferay-text-3">
+					<button
+						aria-label={`Pause ${thread.title}`}
+						className="flex size-5 items-center justify-center rounded border border-inferay-border bg-inferay-surface text-inferay-text-3"
+					>
 						<Icons.Pause />
 					</button>
 				)}

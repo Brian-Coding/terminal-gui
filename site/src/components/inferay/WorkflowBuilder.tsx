@@ -312,7 +312,7 @@ function NodeComponent({
 					{node.inputs.map((input) => (
 						<div key={input} className="flex items-center gap-1.5 -ml-4">
 							<div
-								className={`w-2 h-2 rounded-full border-2 ${
+								className={`size-2 rounded-full border-2 ${
 									hasInputConnection(input)
 										? `${dotColors[nodeType.color]} border-inferay-bg`
 										: "bg-inferay-bg border-inferay-border"
@@ -330,7 +330,7 @@ function NodeComponent({
 						>
 							<span className="text-[8px] text-inferay-text-3">{output}</span>
 							<div
-								className={`w-2 h-2 rounded-full border-2 ${
+								className={`size-2 rounded-full border-2 ${
 									hasOutputConnection(output)
 										? `${dotColors[nodeType.color]} border-inferay-bg`
 										: "bg-inferay-bg border-inferay-border"
@@ -422,7 +422,7 @@ function WorkflowList({
 								{wf.name}
 							</span>
 							{wf.status === "active" && (
-								<div className="w-1.5 h-1.5 rounded-full bg-inferay-accent shrink-0" />
+								<div className="size-1.5 rounded-full bg-inferay-accent shrink-0" />
 							)}
 						</div>
 						<p className="text-[8px] text-inferay-text-3 truncate mt-0.5">
@@ -549,6 +549,7 @@ function NodeDetail({
 						/>
 						<ConfigField label="Prompt Template">
 							<textarea
+								aria-label="Prompt template"
 								defaultValue={node.config.template as string}
 								rows={4}
 								className="mt-1 w-full rounded-md bg-inferay-surface border border-inferay-border px-2 py-1.5 text-[9px] text-inferay-text outline-none resize-none font-mono"
@@ -585,7 +586,12 @@ function NodeDetail({
 							options={["Quick", "Thorough", "Deep"]}
 						/>
 						<ConfigField label="Max Sources">
-							<input type="number" defaultValue={5} className={inputClass} />
+							<input
+								aria-label="Max sources"
+								type="number"
+								defaultValue={5}
+								className={inputClass}
+							/>
 						</ConfigField>
 					</>
 				)}
@@ -593,6 +599,7 @@ function NodeDetail({
 				{node.type === "input" && (
 					<ConfigField label="Default Value">
 						<input
+							aria-label="Default value"
 							type="text"
 							defaultValue={node.config.value as string}
 							className={inputClass}
@@ -743,8 +750,8 @@ export function WorkflowBuilder() {
 					>
 						{isRunning ? (
 							<>
-								<div className="w-3 h-3 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-								Running...
+								<div className="size-3 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+								Running…
 							</>
 						) : (
 							<>
@@ -814,9 +821,9 @@ export function WorkflowBuilder() {
 						{/* Running indicator */}
 						{isRunning && (
 							<div className="absolute bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-lg bg-inferay-surface border border-inferay-border">
-								<div className="w-2 h-2 rounded-full bg-inferay-accent animate-pulse" />
+								<div className="size-2 rounded-full bg-inferay-accent animate-pulse" />
 								<span className="text-[10px] text-inferay-text">
-									Executing workflow...
+									Executing workflow…
 								</span>
 								<span className="text-[9px] text-inferay-text-3">
 									Step 2 of 5

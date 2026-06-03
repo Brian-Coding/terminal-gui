@@ -132,6 +132,7 @@ function SingleTerminalPane({
 			>
 				<span className="text-inferay-accent text-[10px] select-none">❯</span>
 				<input
+					aria-label={`${pane.name} command`}
 					type="text"
 					value={inputValue}
 					onChange={(e) => setInputValue(e.target.value)}
@@ -211,7 +212,10 @@ export function TerminalPanel({
 						</button>
 					))}
 					{/* New terminal button */}
-					<button className="flex items-center justify-center w-6 h-full text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-surface/50 transition-colors">
+					<button
+						aria-label="New terminal"
+						className="flex items-center justify-center w-6 h-full text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-surface/50 transition-colors"
+					>
 						<Icons.Plus />
 					</button>
 				</div>
@@ -221,6 +225,7 @@ export function TerminalPanel({
 					{/* Split view toggle */}
 					<button
 						onClick={() => setSplitView(!splitView)}
+						aria-label="Toggle split view"
 						className={`p-1 rounded-md transition-colors ${
 							splitView
 								? "text-inferay-text bg-inferay-surface border border-inferay-border"
@@ -245,6 +250,7 @@ export function TerminalPanel({
 					{/* Maximize/Restore */}
 					<button
 						onClick={() => setIsMaximized(!isMaximized)}
+						aria-label={isMaximized ? "Restore terminal" : "Maximize terminal"}
 						className="p-1 rounded-md text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-surface/50 transition-colors border border-transparent"
 						title={isMaximized ? "Restore" : "Maximize"}
 					>
@@ -252,6 +258,7 @@ export function TerminalPanel({
 					</button>
 					{/* Clear */}
 					<button
+						aria-label="Clear terminal"
 						className="p-1 rounded-md text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-surface/50 transition-colors border border-transparent"
 						title="Clear"
 					>
@@ -260,6 +267,7 @@ export function TerminalPanel({
 					{/* Minimize */}
 					<button
 						onClick={onToggle}
+						aria-label="Minimize terminal"
 						className="p-1 rounded-md text-inferay-text-3 hover:text-inferay-text-2 hover:bg-inferay-surface/50 transition-colors border border-transparent"
 						title="Minimize"
 					>

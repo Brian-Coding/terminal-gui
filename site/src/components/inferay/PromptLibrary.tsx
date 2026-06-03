@@ -391,6 +391,7 @@ function PromptDetailPanel({
 								/
 							</span>
 							<input
+								aria-label="Prompt command"
 								type="text"
 								value={formCommand}
 								onChange={(e) =>
@@ -459,14 +460,16 @@ function PromptDetailPanel({
 							<button
 								type="button"
 								onClick={onStartEdit}
-								className="h-5 w-5 rounded flex items-center justify-center text-inferay-text-3 hover:bg-inferay-surface"
+								aria-label="Edit prompt"
+								className="size-5 rounded flex items-center justify-center text-inferay-text-3 hover:bg-inferay-surface"
 							>
 								<Icons.Edit />
 							</button>
 							{prompt && !prompt.isBuiltIn && (
 								<button
 									type="button"
-									className="h-5 w-5 rounded flex items-center justify-center text-inferay-text-3 hover:bg-inferay-surface"
+									aria-label="Delete prompt"
+									className="size-5 rounded flex items-center justify-center text-inferay-text-3 hover:bg-inferay-surface"
 								>
 									<Icons.Close />
 								</button>
@@ -476,7 +479,8 @@ function PromptDetailPanel({
 					<button
 						type="button"
 						onClick={onClose}
-						className="h-5 w-5 rounded flex items-center justify-center text-inferay-text-3 hover:bg-inferay-surface"
+						aria-label="Close prompt details"
+						className="size-5 rounded flex items-center justify-center text-inferay-text-3 hover:bg-inferay-surface"
 					>
 						<Icons.Close />
 					</button>
@@ -490,6 +494,7 @@ function PromptDetailPanel({
 						<span className={labelCls}>Name</span>
 						{isEditMode ? (
 							<input
+								aria-label="Prompt name"
 								type="text"
 								value={formName}
 								onChange={(e) =>
@@ -511,6 +516,7 @@ function PromptDetailPanel({
 						<span className={labelCls}>Category</span>
 						{isEditMode ? (
 							<select
+								aria-label="Prompt category"
 								value={formCategory}
 								onChange={(e) =>
 									dispatchForm({
@@ -538,6 +544,7 @@ function PromptDetailPanel({
 					<span className={labelCls}>Description</span>
 					{isEditMode ? (
 						<textarea
+							aria-label="Prompt description"
 							value={formDescription}
 							onChange={(e) =>
 								dispatchForm({
@@ -567,6 +574,7 @@ function PromptDetailPanel({
 					</span>
 					{isEditMode ? (
 						<textarea
+							aria-label="Prompt template"
 							value={formTemplate}
 							onChange={(e) =>
 								dispatchForm({
@@ -574,7 +582,7 @@ function PromptDetailPanel({
 									value: e.target.value,
 								})
 							}
-							placeholder="Enter prompt template..."
+							placeholder="Enter prompt template…"
 							rows={4}
 							className="mt-1 w-full rounded-md bg-inferay-surface border border-inferay-border p-2 font-mono text-[9px] text-inferay-text placeholder:text-inferay-text-3 outline-none focus:border-inferay-text-3 resize-none leading-relaxed"
 						/>
@@ -589,6 +597,7 @@ function PromptDetailPanel({
 					<span className={labelCls}>Tags</span>
 					{isEditMode ? (
 						<input
+							aria-label="Prompt tags"
 							type="text"
 							value={formTags}
 							onChange={(e) =>
