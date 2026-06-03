@@ -105,6 +105,35 @@ describe("terminal state and git change behavior", () => {
 		expect(getPaneTitle("claude")).toBe("Claude");
 	});
 
+	test("replaces the starter pending pane when opening the first real pane", () => {
+		const starter = pane("starter", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const nextPane = pane("real", {
+			agentKind: "codex",
+			paneType: "codex",
+			cwd: "/Users/test/project-a",
+			pendingCwd: false,
+		});
+		const group: TerminalGroupModel = {
+			id: "group-1" as GroupId,
+			name: "Main",
+			panes: [starter],
+			selectedPaneId: starter.id,
+			columns: 2,
+			rows: 1,
+		};
+
+		expect(appendPaneToGroup("group-1", nextPane, group)).toEqual({
+			...group,
+			panes: [nextPane],
+			selectedPaneId: nextPane.id,
+		});
+	});
+
 	/*
 	 * This protects status mapping used by terminal and agent surfaces. Tool
 	 * statuses carry the tool name through the UI, active statuses remain marked

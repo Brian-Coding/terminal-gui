@@ -741,21 +741,24 @@ export function TerminalPage() {
 	);
 	const removePane = useCallback(
 		(paneId: string, force?: boolean) => {
-			if (!selectedGroupId) return;
-			const group = groups.find(hasId.bind(null, selectedGroupId));
+			const group =
+				groups.find((item) => item.panes.some(hasId.bind(null, paneId))) ??
+				(selectedGroupId
+					? groups.find(hasId.bind(null, selectedGroupId))
+					: null);
 			if (!group) return;
 			if (group.panes.length <= 1 && groups.length > 1) {
 				for (const pane of group.panes) cleanupPane(pane.id);
-				groupsDispatch({ type: "removeGroup", groupId: selectedGroupId });
+				groupsDispatch({ type: "removeGroup", groupId: group.id });
 				setSelectedGroupId(
-					groups.find(lacksId.bind(null, selectedGroupId))?.id ?? null
+					groups.find(lacksId.bind(null, group.id))?.id ?? null
 				);
 				return;
 			}
 			cleanupPane(paneId);
 			groupsDispatch({
 				type: "removePane",
-				groupId: selectedGroupId,
+				groupId: group.id,
 				paneId,
 				force,
 			});

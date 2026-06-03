@@ -72,13 +72,12 @@ export function appendPaneToGroup(
 	pane: TerminalPaneModel,
 	group: TerminalGroupModel
 ): TerminalGroupModel {
-	return group.id === selectedGroupId
-		? {
-				...group,
-				panes: [...group.panes, pane],
-				selectedPaneId: pane.id,
-			}
-		: group;
+	if (group.id !== selectedGroupId) return group;
+	const panes =
+		group.panes.length === 1 && isEmptyPendingPane(group.panes[0]!)
+			? [pane]
+			: [...group.panes, pane];
+	return { ...group, panes, selectedPaneId: pane.id };
 }
 
 // Compact: [id, name, bg, fg, cursor, separator]
@@ -330,6 +329,14 @@ export function normalizeTerminalState(
 	};
 }
 
+function isEmptyPendingPane(pane: TerminalPaneModel): boolean {
+	return (
+		pane.pendingCwd === true &&
+		!pane.cwd &&
+		(!pane.referencePaths || pane.referencePaths.length === 0)
+	);
+}
+
 export function loadTerminalState(): TerminalSavedState | null {
 	const parsed = readStoredJson<unknown>(TERMINAL_STORAGE_KEY, null);
 	const state = normalizeTerminalState(parsed);
@@ -344,8 +351,20 @@ export async function loadCanonicalTerminalState(): Promise<TerminalSavedState |
 		const serverState = await response.json();
 		const normalized = normalizeTerminalState(serverState);
 		if (normalized) {
+			const previousKey = _cachedTerminalState
+				? terminalStateKey(_cachedTerminalState)
+				: null;
+			const nextKey = terminalStateKey(normalized);
 			_cachedTerminalState = normalized;
 			writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
+			if (previousKey !== nextKey && typeof window !== "undefined") {
+				dispatchTerminalShellChange({
+					source: "canonical",
+					reason: "canonical-load",
+					state: normalized,
+					stateKey: nextKey,
+				});
+			}
 			return normalized;
 		}
 		_cachedTerminalState = null;
