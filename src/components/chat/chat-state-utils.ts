@@ -1,9 +1,11 @@
+import type { ChatMessagePart } from "../../features/chat/agent-chat-shared.ts";
 import { hasRole } from "../../lib/data.ts";
 
 export type ChatStateMessage = {
 	id: string;
 	role: "user" | "assistant" | "tool" | "system" | "btw";
 	content: string;
+	parts?: ChatMessagePart[];
 	isStreaming?: boolean;
 };
 
@@ -37,6 +39,7 @@ export function appendMessageContent(
 ): ChatStateMessage[] {
 	return patchMessageById(messages, id, (message) => ({
 		content: message.content + content,
+		parts: [{ type: "text", content: message.content + content }],
 	}));
 }
 

@@ -19,11 +19,24 @@ export interface AttachedImageInfo {
 	previewUrl: string;
 }
 
+export type ChatMessagePart =
+	| { type: "text"; content: string }
+	| { type: "thinking"; content: string }
+	| {
+			type: "tool";
+			id: string;
+			name: string;
+			input?: unknown;
+			output?: unknown;
+			error?: string;
+	  };
+
 export interface ChatMessage {
 	id: string;
 	role: "user" | "assistant" | "tool" | "system" | "btw";
 	content: string;
 	toolName?: string;
+	parts?: ChatMessagePart[];
 	isStreaming?: boolean;
 	btwQuestion?: string;
 	images?: string[];
