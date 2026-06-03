@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-	appendTrimmedMessage,
-	trimMessages,
-	type ChatMessage,
-} from "../src/features/chat/agent-chat-shared.ts";
-import {
 	applyInlineCompletion,
 	expandInlineCommandPrompts,
 	getCommandDisplayText,
@@ -15,6 +10,12 @@ import {
 	mergeSyncedMessages,
 	patchMessageById,
 } from "../src/components/chat/chat-state-utils.ts";
+import {
+	appendTrimmedMessage,
+	type ChatMessage,
+	trimMessages,
+} from "../src/features/chat/agent-chat-shared.ts";
+import { prepareTranscriptForStorage } from "../src/server/services/chat-transcripts.ts";
 
 function message(
 	id: string,
@@ -94,6 +95,31 @@ describe("chat data behavior", () => {
 			message("server-1", "/review src/app.ts"),
 			message("server-a", "assistant reply", "assistant"),
 			message("server-2", "plain local message"),
+		]);
+	});
+
+	/*
+	 * This protects durable chat restore. A response can be streaming while the
+	 * app is open, but the transcript saved to disk should reopen as settled
+	 * content instead of making the old chat look like it is still running.
+	 */
+	test("stores durable transcripts without stale streaming state", () => {
+		expect(
+			prepareTranscriptForStorage([
+				{
+					id: "server-1",
+					role: "assistant",
+					content: "partial answer",
+					isStreaming: true,
+				},
+			])
+		).toEqual([
+			{
+				id: "server-1",
+				role: "assistant",
+				content: "partial answer",
+				isStreaming: false,
+			},
 		]);
 	});
 

@@ -14,32 +14,30 @@ import {
 } from "../agents/stream-utils.ts";
 import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
 import { resolveAllowedLocalPath } from "../security.ts";
+import {
+	type ChatTranscriptMessage,
+	readChatTranscript,
+	writeChatTranscript,
+} from "./chat-transcripts.ts";
 import { CheckpointService } from "./checkpoint.ts";
-
-interface ServerChatMessage {
-	id: string;
-	role: "user" | "assistant" | "tool" | "system";
-	content: string;
-	toolName?: string;
-	isStreaming?: boolean;
-}
 
 const MAX_BUFFER_MESSAGES = 500;
 const MAX_BUFFER_CHARS = 1_000_000;
 const DISCONNECTED_SESSION_TTL_MS = 5 * 60 * 1000;
+const TRANSCRIPT_PERSIST_DEBOUNCE_MS = 250;
 
 let serverMsgId = 0;
 
 class ChatMessageBuffer {
-	private messages: ServerChatMessage[] = [];
+	private messages: ChatTranscriptMessage[] = [];
 	private currentAssistantIdx = -1;
 	private currentToolIdx = -1;
 	private hasStreamed = false;
 
 	private push(
-		role: ServerChatMessage["role"],
+		role: ChatTranscriptMessage["role"],
 		content: string,
-		extra?: Partial<ServerChatMessage>
+		extra?: Partial<ChatTranscriptMessage>
 	) {
 		this.messages.push({ id: `s${++serverMsgId}`, role, content, ...extra });
 		this.trim();
@@ -162,11 +160,22 @@ class ChatMessageBuffer {
 		}
 	}
 
-	getMessages(): ServerChatMessage[] {
+	getMessages(): ChatTranscriptMessage[] {
 		return this.messages;
 	}
 	get streaming(): boolean {
 		return this.currentAssistantIdx >= 0 || this.currentToolIdx >= 0;
+	}
+
+	replaceMessages(messages: ChatTranscriptMessage[]) {
+		this.messages = messages.map((message) => ({
+			...message,
+			isStreaming: false,
+		}));
+		this.currentAssistantIdx = -1;
+		this.currentToolIdx = -1;
+		this.hasStreamed = false;
+		this.trim();
 	}
 
 	private trim() {
@@ -205,6 +214,7 @@ interface ChatSession {
 	referencePaths: string[];
 	messageBuffer: ChatMessageBuffer;
 	cleanupTimer: ReturnType<typeof setTimeout> | null;
+	transcriptPersistTimer: ReturnType<typeof setTimeout> | null;
 	cancelled: boolean;
 	goal: GoalState | null;
 	agentEvents: AgentEvent[];
@@ -268,6 +278,29 @@ const _g = globalThis as any;
 if (!_g.__inferay_chatSessions)
 	_g.__inferay_chatSessions = new Map<string, ChatSession>();
 const sessions: Map<string, ChatSession> = _g.__inferay_chatSessions;
+
+function persistChatTranscript(session: ChatSession, paneId: string): void {
+	if (session.transcriptPersistTimer) {
+		clearTimeout(session.transcriptPersistTimer);
+		session.transcriptPersistTimer = null;
+	}
+	writeChatTranscript(paneId, session.messageBuffer.getMessages()).catch(
+		(error) => {
+			console.error("[ChatService] Failed to persist chat transcript:", error);
+		}
+	);
+}
+
+function scheduleChatTranscriptPersist(
+	session: ChatSession,
+	paneId: string
+): void {
+	if (session.transcriptPersistTimer) return;
+	session.transcriptPersistTimer = setTimeout(() => {
+		session.transcriptPersistTimer = null;
+		persistChatTranscript(session, paneId);
+	}, TRANSCRIPT_PERSIST_DEBOUNCE_MS);
+}
 
 function sendTo(ws: ServerWebSocket<any>, msg: object) {
 	if (ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -361,6 +394,7 @@ async function finalizeCheckpoint(
 
 function finalizeChatTurn(session: ChatSession, paneId: string) {
 	session.messageBuffer.finalize();
+	persistChatTranscript(session, paneId);
 	broadcast(session, {
 		type: "chat:sync",
 		paneId,
@@ -396,6 +430,7 @@ async function runAgent(
 		emitChatEvent: (event) => {
 			broadcast(session, { type: "chat:event", paneId, event });
 			session.messageBuffer.applyEvent(event);
+			scheduleChatTranscriptPersist(session, paneId);
 		},
 		emitAgentEvent: (event) => {
 			session.agentEvents.push(event);
@@ -410,6 +445,7 @@ async function runAgent(
 			broadcast(session, { type: "chat:activity", paneId, activity }),
 		emitSystemMessage: (message) => {
 			session.messageBuffer.pushSystem(message);
+			persistChatTranscript(session, paneId);
 			broadcast(session, { type: "chat:system", paneId, message });
 		},
 	};
@@ -722,6 +758,11 @@ export const ChatService = {
 		const nextCwd = normalizeCwd(cwd);
 		let session = sessions.get(paneId);
 		if (!session) {
+			const messageBuffer = new ChatMessageBuffer();
+			const transcript = await readChatTranscript(paneId);
+			if (transcript?.length) {
+				messageBuffer.replaceMessages(transcript);
+			}
 			session = {
 				paneId,
 				agentKind,
@@ -732,8 +773,9 @@ export const ChatService = {
 				currentHandle: null,
 				cwd: nextCwd,
 				referencePaths: nextReferencePaths,
-				messageBuffer: new ChatMessageBuffer(),
+				messageBuffer,
 				cleanupTimer: null,
+				transcriptPersistTimer: null,
 				cancelled: false,
 				goal: null,
 				agentEvents: [],
@@ -755,6 +797,7 @@ export const ChatService = {
 			updateSessionId(session, paneId, clientSessionId);
 
 		session.messageBuffer.pushUser(text);
+		persistChatTranscript(session, paneId);
 		broadcastExcept(session, ws, { type: "chat:user_message", paneId, text });
 
 		if (session.currentHandle) {
@@ -839,6 +882,7 @@ export const ChatService = {
 				e instanceof Error ? e.message : `Failed to run ${session.agentKind}`;
 			session.messageBuffer.pushSystem(errMsg);
 			session.messageBuffer.finalize();
+			persistChatTranscript(session, paneId);
 			broadcast(session, { type: "chat:error", paneId, error: errMsg });
 			await finalizeCheckpoint(session, paneId, checkpointId);
 			scheduleSessionCleanup(session);
@@ -946,6 +990,7 @@ export const ChatService = {
 				session.currentHandle.stop();
 			} catch {}
 		}
+		if (session) persistChatTranscript(session, paneId);
 	},
 
 	destroySession(paneId: string) {
@@ -959,7 +1004,10 @@ export const ChatService = {
 				session.currentHandle.kill();
 			} catch {}
 		}
-		if (session) clearCleanupTimer(session);
+		if (session) {
+			clearCleanupTimer(session);
+			persistChatTranscript(session, paneId);
+		}
 		sessions.delete(paneId);
 	},
 
@@ -970,9 +1018,20 @@ export const ChatService = {
 		}
 	},
 
-	reassignWs(paneId: string, ws: ServerWebSocket<any>) {
+	async reassignWs(paneId: string, ws: ServerWebSocket<any>) {
 		const session = sessions.get(paneId);
-		if (!session) return;
+		if (!session) {
+			const transcript = await readChatTranscript(paneId);
+			if (transcript?.length) {
+				sendTo(ws, {
+					type: "chat:sync",
+					paneId,
+					messages: transcript,
+					isStreaming: false,
+				});
+			}
+			return;
+		}
 		clearCleanupTimer(session);
 		session.clients.add(ws);
 		if (session.sessionId)
