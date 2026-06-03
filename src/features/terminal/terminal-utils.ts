@@ -399,7 +399,7 @@ export async function loadCanonicalTerminalState(): Promise<TerminalSavedState |
 		const serverState = await response.json();
 		const normalizedBase = normalizeTerminalState(serverState);
 		const normalized = normalizedBase
-			? compactTerminalState(normalizedBase)
+			? compactTerminalState(normalizedBase, { keepSelectedDraft: true })
 			: null;
 		if (normalized) {
 			const previousKey = _cachedTerminalState

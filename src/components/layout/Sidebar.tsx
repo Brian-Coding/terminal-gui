@@ -452,6 +452,14 @@ export function Sidebar() {
 		async (groupId: string, paneId: string) => {
 			const gid = groupId as never;
 			const pid = paneId as never;
+			setWorkspaces((prev) => ({
+				groups: prev.groups.map((group) =>
+					group.id === groupId
+						? { ...group, selectedPaneId: paneId as never }
+						: group
+				),
+				selectedGroupId: gid,
+			}));
 			const next = await mutateCanonicalTerminalState(
 				(state) =>
 					compactTerminalState(
