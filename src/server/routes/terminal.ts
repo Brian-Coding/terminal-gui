@@ -20,6 +20,7 @@ import { ChatService } from "../services/agent-chat.ts";
 import { ConfigManager } from "../services/config-manager.ts";
 import { PidTracker } from "../services/pid-tracker.ts";
 import {
+	applyTerminalWorkspaceAction,
 	readTerminalState,
 	writeTerminalState,
 } from "../services/terminal-state.ts";
@@ -666,6 +667,13 @@ export function terminalRoutes() {
 			POST: tryRoute(async (req) => {
 				await writeTerminalState(await req.json());
 				return Response.json({ ok: true });
+			}),
+		},
+		"/api/terminal/state/workspace-action": {
+			POST: tryRoute(async (req) => {
+				return Response.json({
+					state: await applyTerminalWorkspaceAction((await req.json()).action),
+				});
 			}),
 		},
 		"/api/terminal/list": {

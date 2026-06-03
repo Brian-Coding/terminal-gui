@@ -1,5 +1,12 @@
 import { writeJson } from "../../lib/route-helpers.ts";
 import { userDataPath } from "../../lib/user-data.ts";
+import {
+	createDefaultTerminalState,
+	normalizeTerminalState,
+	reduceTerminalWorkspaceState,
+	type TerminalSavedState,
+	type TerminalWorkspaceAction,
+} from "../../features/terminal/terminal-utils.ts";
 
 const TERMINAL_STATE_PATH = userDataPath("terminal-state.json");
 
@@ -21,6 +28,23 @@ export async function writeTerminalState(data: unknown): Promise<void> {
 	const current = await readJsonFile<unknown>(TERMINAL_STATE_PATH);
 	if (isTerminalStateRegression(current, data)) return;
 	return writeJson(TERMINAL_STATE_PATH, data);
+}
+
+export async function applyTerminalWorkspaceAction(
+	action: TerminalWorkspaceAction
+): Promise<TerminalSavedState | null> {
+	const current = normalizeTerminalState(
+		await readJsonFile<unknown>(TERMINAL_STATE_PATH),
+		{ createDefault: true }
+	);
+	const next = reduceTerminalWorkspaceState(
+		current ?? createDefaultTerminalState(),
+		action
+	);
+	const normalized = normalizeTerminalState(next, { createDefault: true });
+	if (!normalized) return null;
+	await writeTerminalState(normalized);
+	return normalized;
 }
 
 function isTerminalStateRegression(current: unknown, next: unknown): boolean {

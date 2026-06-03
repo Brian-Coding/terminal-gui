@@ -1,6 +1,6 @@
 import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
 import { hasId, lacksId, noop } from "../../lib/data.ts";
-import { sendJson } from "../../lib/fetch-json.ts";
+import { postJson, sendJson } from "../../lib/fetch-json.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import {
 	readStoredJson,
@@ -571,9 +571,19 @@ export function saveSyncedTerminalState(
 ): void {
 	const normalized = normalizeTerminalState(state, { createDefault: true });
 	if (!normalized) return;
+	saveLocalTerminalState(normalized, reason, source);
+	sendJson("/api/terminal/state", normalized).catch(noop);
+}
+
+function saveLocalTerminalState(
+	state: TerminalSavedState,
+	reason?: string,
+	source: TerminalStateChangeSource = "local"
+): void {
+	const normalized = normalizeTerminalState(state, { createDefault: true });
+	if (!normalized) return;
 	_cachedTerminalState = normalized;
 	writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
-	sendJson("/api/terminal/state", normalized).catch(noop);
 	flushPendingClientStorageSync();
 	dispatchTerminalShellChange({
 		source,
@@ -605,16 +615,30 @@ export function mutateTerminalWorkspaceState(
 	reason?: string,
 	options: { createIfMissing?: boolean } = {}
 ): Promise<TerminalSavedState | null> {
-	return mutateCanonicalTerminalState(
-		(state) => {
-			const nextAction = typeof action === "function" ? action(state) : action;
-			return nextAction
-				? reduceTerminalWorkspaceState(state, nextAction)
-				: null;
-		},
-		reason,
-		options
-	);
+	return (async () => {
+		const state =
+			(await loadCanonicalTerminalState()) ??
+			(options.createIfMissing ? createDefaultTerminalState() : null);
+		if (!state) return null;
+		const nextAction = typeof action === "function" ? action(state) : action;
+		if (!nextAction) return null;
+		const optimistic = reduceTerminalWorkspaceState(state, nextAction);
+		if (optimistic) saveLocalTerminalState(optimistic, reason);
+		try {
+			const payload = await postJson<{ state: TerminalSavedState | null }>(
+				"/api/terminal/state/workspace-action",
+				{ action: nextAction }
+			);
+			const normalized = normalizeTerminalState(payload.state, {
+				createDefault: true,
+			});
+			if (!normalized) return optimistic;
+			saveLocalTerminalState(normalized, reason, "canonical");
+			return normalized;
+		} catch {
+			return optimistic;
+		}
+	})();
 }
 
 export type TerminalGroupsAction =
