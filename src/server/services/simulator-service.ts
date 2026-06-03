@@ -433,7 +433,7 @@ export function parseSimctlDevices(data: unknown): SimulatorDevice[] {
 				name: device.name,
 				state: device.state ?? "Unknown",
 				runtime: runtime.replace("com.apple.CoreSimulator.SimRuntime.", ""),
-				isAvailable: device.isAvailable !== false,
+				isAvailable: true,
 			});
 		}
 	}

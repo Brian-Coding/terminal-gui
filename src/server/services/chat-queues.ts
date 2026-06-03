@@ -15,7 +15,7 @@ function safePaneId(paneId: string): string {
 	throw new Error("Invalid pane id");
 }
 
-export function createChatQueueStore(root = CHAT_QUEUE_DIR) {
+function createChatQueueStore(root = CHAT_QUEUE_DIR) {
 	const queuePath = (paneId: string) =>
 		join(root, `${safePaneId(paneId)}.json`);
 

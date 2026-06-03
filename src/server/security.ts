@@ -6,23 +6,23 @@ import { PROJECT_ROOT } from "../lib/path-utils.ts";
 const LOCAL_AUTH_COOKIE = "inferay_local_auth";
 const LOCAL_AUTH_TOKEN = crypto.randomUUID();
 
-function cookieValue(req: Request, name: string): string | null {
-	const cookie = req.headers.get("cookie");
-	if (!cookie) return null;
-	for (const part of cookie.split(";")) {
-		const [key, ...valueParts] = part.trim().split("=");
-		if (key === name) return decodeURIComponent(valueParts.join("="));
-	}
-	return null;
-}
-
 export function localAuthCookieHeader(): string {
 	return `${LOCAL_AUTH_COOKIE}=${encodeURIComponent(LOCAL_AUTH_TOKEN)}; Path=/; SameSite=Strict`;
 }
 
-export function isAuthorizedLocalRequest(req: Request): boolean {
-	const token =
-		req.headers.get("x-inferay-auth") ?? cookieValue(req, LOCAL_AUTH_COOKIE);
+function isAuthorizedLocalRequest(req: Request): boolean {
+	let cookieToken: string | null = null;
+	const cookie = req.headers.get("cookie");
+	if (cookie) {
+		for (const part of cookie.split(";")) {
+			const [key, ...valueParts] = part.trim().split("=");
+			if (key === LOCAL_AUTH_COOKIE) {
+				cookieToken = decodeURIComponent(valueParts.join("="));
+				break;
+			}
+		}
+	}
+	const token = req.headers.get("x-inferay-auth") ?? cookieToken;
 	return token === LOCAL_AUTH_TOKEN;
 }
 
@@ -77,12 +77,10 @@ export function isWithinDirectory(
 	return rel === "" || (!!rel && !rel.startsWith("..") && !rel.startsWith("/"));
 }
 
-export function allowedLocalRoots(): string[] {
-	return [PROJECT_ROOT, homedir()].filter(Boolean);
-}
-
 export function isAllowedLocalPath(pathname: string): boolean {
-	return allowedLocalRoots().some((root) => isWithinDirectory(pathname, root));
+	return [PROJECT_ROOT, homedir()].some((root) =>
+		isWithinDirectory(pathname, root)
+	);
 }
 
 export function resolveAllowedLocalPath(pathname: string): string | null {

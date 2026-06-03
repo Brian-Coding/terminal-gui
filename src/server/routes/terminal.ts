@@ -8,9 +8,7 @@ import {
 	compareName,
 	comparePort,
 	hasPid,
-	hasPpid,
 	isFirstPath,
-	ppidNotIn,
 } from "../../lib/data.ts";
 import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import {
@@ -596,21 +594,25 @@ async function getClaudeProcesses(): Promise<ClaudeProcess[]> {
 		}
 
 		const claudePids = new Set(processes.map((p) => p.pid));
-		return processes.filter(ppidNotIn.bind(null, claudePids)).map((parent) => {
-			const children = processes.filter(hasPpid.bind(null, parent.pid));
-			return {
-				...parent,
-				cpu:
-					Math.round(
-						children.reduce((sum, c) => sum + c.cpu, parent.cpu) * 10
-					) / 10,
-				rss: children.reduce((sum, c) => sum + c.rss, parent.rss),
-				mem:
-					Math.round(
-						children.reduce((sum, c) => sum + c.mem, parent.mem) * 10
-					) / 10,
-			};
-		});
+		return processes
+			.filter((process) => !claudePids.has(process.ppid))
+			.map((parent) => {
+				const children = processes.filter(
+					(process) => process.ppid === parent.pid
+				);
+				return {
+					...parent,
+					cpu:
+						Math.round(
+							children.reduce((sum, c) => sum + c.cpu, parent.cpu) * 10
+						) / 10,
+					rss: children.reduce((sum, c) => sum + c.rss, parent.rss),
+					mem:
+						Math.round(
+							children.reduce((sum, c) => sum + c.mem, parent.mem) * 10
+						) / 10,
+				};
+			});
 	} catch {
 		return [];
 	}

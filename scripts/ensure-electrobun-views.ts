@@ -12,17 +12,17 @@ if (!buildDir) {
 const sourceDir = join(process.cwd(), "dist");
 const sourceIndex = join(sourceDir, "index.html");
 
-async function waitForFile(path: string, timeoutMs = 5000) {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		if (await Bun.file(path).exists()) return true;
+try {
+	let hasSourceIndex = false;
+	const waitStartedAt = Date.now();
+	while (Date.now() - waitStartedAt < 5000) {
+		if (await Bun.file(sourceIndex).exists()) {
+			hasSourceIndex = true;
+			break;
+		}
 		await Bun.sleep(100);
 	}
-	return false;
-}
-
-try {
-	if (!(await waitForFile(sourceIndex))) {
+	if (!hasSourceIndex) {
 		throw new Error(`renderer index was not built at ${sourceIndex}`);
 	}
 

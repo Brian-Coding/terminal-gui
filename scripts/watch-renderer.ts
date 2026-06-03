@@ -4,7 +4,6 @@ import { spawn } from "node:child_process";
 import { existsSync, watch } from "node:fs";
 import { cp, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { resolveExitCode } from "./watch-utils.ts";
 
 const ROOT = process.cwd();
 const watchTargets = [
@@ -32,7 +31,7 @@ function runBuild(): Promise<number> {
 			cwd: ROOT,
 			stdio: "inherit",
 		});
-		proc.on("exit", resolveExitCode.bind(null, resolve));
+		proc.on("exit", (code) => resolve(code ?? 0));
 		proc.on("error", resolve.bind(null, 1));
 	});
 }

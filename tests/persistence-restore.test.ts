@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -64,13 +65,23 @@ describe("app persistence restore flow", () => {
 			opacity: 1,
 		});
 
-		expect(normalized?.selectedGroupId).toBe("real-workspace");
+		expect(normalized?.selectedGroupId).toBe("real-workspace" as never);
 		expect(normalized?.groups).toHaveLength(2);
-		expect(normalized?.groups[1]?.panes[0]?.id).toBe("real-pane");
+		expect(normalized?.groups[1]?.panes[0]?.id).toBe("real-pane" as never);
 	});
 
 	test("hydrates real workspace panes and chat transcripts from durable server state", async () => {
-		const port = 46_000 + Math.floor(Math.random() * 1_000);
+		const port = await new Promise<number>((resolve, reject) => {
+			const server = createServer();
+			server.on("error", reject);
+			server.listen(0, "127.0.0.1", () => {
+				const address = server.address();
+				server.close(() => {
+					if (address && typeof address === "object") resolve(address.port);
+					else reject(new Error("Could not allocate a test server port"));
+				});
+			});
+		});
 		const origin = `http://127.0.0.1:${port}`;
 		tempHome = await mkdtemp(join(tmpdir(), "inferay-persistence-home-"));
 		await installFakeCodex(tempHome);
@@ -540,6 +551,10 @@ async function waitForServerReady(
 		throw new Error("Inferay test server stdout is unavailable");
 	}
 	const reader = stdout.getReader();
+	const stderrPromise =
+		proc.stderr && typeof proc.stderr !== "number"
+			? new Response(proc.stderr).text()
+			: Promise.resolve("");
 	const decoder = new TextDecoder();
 	let output = "";
 	const timeout = Date.now() + SERVER_START_TIMEOUT_MS;
@@ -553,7 +568,9 @@ async function waitForServerReady(
 		output += decoder.decode(result.value);
 		if (output.includes("READY")) return;
 	}
-	throw new Error(`Inferay test server did not start. Output: ${output}`);
+	throw new Error(
+		`Inferay test server did not start. Output: ${output}${await stderrPromise}`
+	);
 }
 
 async function readAuthCookie(origin: string): Promise<string> {

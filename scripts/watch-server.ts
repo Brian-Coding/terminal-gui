@@ -5,7 +5,6 @@
 import { existsSync, watch } from "node:fs";
 import { resolve } from "node:path";
 import { execFile, spawn } from "node:child_process";
-import { resolveExitCode } from "./watch-utils.ts";
 
 const ROOT = process.cwd();
 const ELECTROBUN =
@@ -54,17 +53,6 @@ async function killDevApps(): Promise<void> {
 			process.kill(pid, "SIGTERM");
 		} catch {}
 	}
-}
-
-function runElectrobun(args: string[]): Promise<number> {
-	return new Promise((resolve) => {
-		const proc = spawn(ELECTROBUN, args, {
-			stdio: "inherit",
-			env: { ...process.env, TERMINAL_GUI_APP_ROOT: ROOT },
-		});
-		proc.on("exit", resolveExitCode.bind(null, resolve));
-		proc.on("error", resolve.bind(null, 1));
-	});
 }
 
 async function killChild(): Promise<void> {

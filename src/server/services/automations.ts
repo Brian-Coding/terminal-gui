@@ -25,7 +25,7 @@ export async function loadAutomations(): Promise<AutomationStore> {
 	return { flows: Array.isArray(data.flows) ? data.flows : [] };
 }
 
-export function normalizeAutomationStore(
+function normalizeAutomationStore(
 	body: Partial<AutomationStore>
 ): AutomationStore {
 	return {

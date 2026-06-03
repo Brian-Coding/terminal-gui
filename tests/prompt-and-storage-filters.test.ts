@@ -11,37 +11,36 @@ describe("prompt search and client storage sync filters", () => {
 	 * prompt UI.
 	 */
 	test("filters prompts by source, category, and text query", () => {
-		const prompts = [
-			{
-				name: "Code Review",
-				command: "review",
-				description: "Find bugs",
-				category: "code",
-				isBuiltIn: true,
-			},
-			{
-				name: "Release Notes",
-				command: "release",
-				description: "Summarize changes",
-				category: "writing",
-				isBuiltIn: false,
-			},
-			{
-				name: "Debug Help",
-				command: "debug",
-				description: "Trace runtime issues",
-				category: "code",
-				isBuiltIn: false,
-			},
-		];
+		const reviewPrompt = {
+			name: "Code Review",
+			command: "review",
+			description: "Find bugs",
+			category: "code",
+			isBuiltIn: true,
+		};
+		const releasePrompt = {
+			name: "Release Notes",
+			command: "release",
+			description: "Summarize changes",
+			category: "writing",
+			isBuiltIn: false,
+		};
+		const debugPrompt = {
+			name: "Debug Help",
+			command: "debug",
+			description: "Trace runtime issues",
+			category: "code",
+			isBuiltIn: false,
+		};
+		const prompts = [reviewPrompt, releasePrompt, debugPrompt];
 
-		expect(filterPrompts(prompts, "builtin", "")).toEqual([prompts[0]]);
+		expect(filterPrompts(prompts, "builtin", "")).toEqual([reviewPrompt]);
 		expect(filterPrompts(prompts, "custom", "")).toEqual([
-			prompts[1],
-			prompts[2],
+			releasePrompt,
+			debugPrompt,
 		]);
-		expect(filterPrompts(prompts, "code", "runtime")).toEqual([prompts[2]]);
-		expect(filterPrompts(prompts, "all", "REVIEW")).toEqual([prompts[0]]);
+		expect(filterPrompts(prompts, "code", "runtime")).toEqual([debugPrompt]);
+		expect(filterPrompts(prompts, "all", "REVIEW")).toEqual([reviewPrompt]);
 	});
 
 	/*
