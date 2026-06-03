@@ -181,7 +181,7 @@ export interface TerminalSavedState {
 }
 
 const TERMINAL_STORAGE_KEY = "inferay-terminal-state" as const;
-export const TERMINAL_SHELL_CHANGE_EVENT = "terminal-shell-change" as const;
+const TERMINAL_SHELL_CHANGE_EVENT = "terminal-shell-change" as const;
 
 export type TerminalStateChangeSource =
 	| "canonical"
@@ -225,31 +225,23 @@ function isValidTerminalState(value: unknown): value is TerminalSavedState {
 	);
 }
 
-function paneStateKey(pane: TerminalPaneModel) {
-	return {
-		id: pane.id,
-		agentKind: pane.agentKind,
-		cwd: pane.cwd ?? null,
-		pendingCwd: pane.pendingCwd ?? false,
-		title: pane.title,
-	};
-}
-
-function groupStateKey(group: TerminalGroupModel) {
-	return {
-		id: group.id,
-		name: group.name,
-		selectedPaneId: group.selectedPaneId,
-		columns: group.columns,
-		rows: group.rows,
-		panes: group.panes.map(paneStateKey),
-	};
-}
-
 export function terminalStateKey(state: TerminalSavedState): string {
 	return JSON.stringify({
 		selectedGroupId: state.selectedGroupId,
-		groups: state.groups.map(groupStateKey),
+		groups: state.groups.map((group) => ({
+			id: group.id,
+			name: group.name,
+			selectedPaneId: group.selectedPaneId,
+			columns: group.columns,
+			rows: group.rows,
+			panes: group.panes.map((pane) => ({
+				id: pane.id,
+				agentKind: pane.agentKind,
+				cwd: pane.cwd ?? null,
+				pendingCwd: pane.pendingCwd ?? false,
+				title: pane.title,
+			})),
+		})),
 		themeId: state.themeId,
 		fontSize: state.fontSize,
 		fontFamily: state.fontFamily,
@@ -341,29 +333,56 @@ function hasDurablePane(group: TerminalGroupModel): boolean {
 	return group.panes.some((pane) => pane.cwd || pane.pendingCwd === false);
 }
 
-export function prepareRestoredTerminalState(
-	state: TerminalSavedState
+export function compactTerminalState(
+	state: TerminalSavedState,
+	options: { keepSelectedDraft?: boolean } = {}
 ): TerminalSavedState {
-	let groups = state.groups.map((group) => {
-		if (!hasDurablePane(group)) return group;
-		const panes = group.panes.filter((pane) => !isEmptyPendingPane(pane));
-		return panes.length === group.panes.length
-			? group
-			: {
+	let changed = false;
+	const hasDurableGroup = state.groups.some(hasDurablePane);
+	const selectedGroup =
+		state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
+		state.groups[0];
+	const groups = state.groups
+		.filter(
+			(group) =>
+				(!hasDurableGroup && group.id === selectedGroup?.id) ||
+				(options.keepSelectedDraft && group.id === state.selectedGroupId) ||
+				hasDurablePane(group)
+		)
+		.map((group) => {
+			if (!hasDurablePane(group)) {
+				const selectedPane =
+					group.panes.find(hasId.bind(null, group.selectedPaneId)) ??
+					group.panes[0];
+				const panes = selectedPane ? [selectedPane] : [];
+				if (panes.length === group.panes.length) return group;
+				changed = true;
+				return {
 					...group,
 					panes,
-					selectedPaneId: panes.some(hasId.bind(null, group.selectedPaneId))
-						? group.selectedPaneId
-						: (panes[0]?.id ?? null),
+					selectedPaneId: selectedPane?.id ?? null,
 				};
-	});
-	const durableGroups = groups.filter(hasDurablePane);
-	if (durableGroups.length > 0) groups = durableGroups;
-	return {
-		...state,
-		groups,
-		selectedGroupId: chooseSelectedGroupId(groups, state.selectedGroupId),
-	};
+			}
+			const panes = group.panes.filter(
+				(pane) => pane.id === group.selectedPaneId || !isEmptyPendingPane(pane)
+			);
+			if (panes.length === group.panes.length) return group;
+			changed = true;
+			return {
+				...group,
+				panes,
+				selectedPaneId: panes.some(hasId.bind(null, group.selectedPaneId))
+					? group.selectedPaneId
+					: (panes[0]?.id ?? null),
+			};
+		});
+	return changed || groups.length !== state.groups.length
+		? {
+				...state,
+				groups,
+				selectedGroupId: chooseSelectedGroupId(groups, state.selectedGroupId),
+			}
+		: state;
 }
 
 export function loadTerminalState(): TerminalSavedState | null {
@@ -380,7 +399,7 @@ export async function loadCanonicalTerminalState(): Promise<TerminalSavedState |
 		const serverState = await response.json();
 		const normalizedBase = normalizeTerminalState(serverState);
 		const normalized = normalizedBase
-			? prepareRestoredTerminalState(normalizedBase)
+			? compactTerminalState(normalizedBase)
 			: null;
 		if (normalized) {
 			const previousKey = _cachedTerminalState
@@ -409,14 +428,6 @@ export async function loadCanonicalTerminalState(): Promise<TerminalSavedState |
 	}
 }
 
-export function saveTerminalState(state: TerminalSavedState): void {
-	const normalized = normalizeTerminalState(state, { createDefault: true });
-	if (!normalized) return;
-	_cachedTerminalState = normalized;
-	writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
-	sendJson("/api/terminal/state", normalized).catch(noop);
-}
-
 export function dispatchTerminalShellChange(
 	detail: TerminalShellChangeDetail
 ): void {
@@ -434,7 +445,9 @@ export function saveSyncedTerminalState(
 ): void {
 	const normalized = normalizeTerminalState(state, { createDefault: true });
 	if (!normalized) return;
-	saveTerminalState(normalized);
+	_cachedTerminalState = normalized;
+	writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
+	sendJson("/api/terminal/state", normalized).catch(noop);
 	flushPendingClientStorageSync();
 	dispatchTerminalShellChange({
 		source,

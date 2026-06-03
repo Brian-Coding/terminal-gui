@@ -20,6 +20,7 @@ import {
 	createPendingAgentChatPane,
 	DEFAULT_COLUMNS,
 	DEFAULT_ROWS,
+	compactTerminalState,
 	dispatchTerminalShellChange,
 	loadCanonicalTerminalState,
 	loadTerminalState,
@@ -95,17 +96,6 @@ const MAX_SIDEBAR_WIDTH = 340;
 // Track which panes have a pending title request to avoid duplicates
 const pendingTitleRequests = new Set<string>();
 
-function getPaneBaseFolder(pane: TerminalPaneModel): string {
-	return pane.cwd?.split("/").filter(Boolean).pop() || "No folder";
-}
-
-function loadSidebarWidth() {
-	const stored = Number(readStoredValue("main-sidebar-width"));
-	return Number.isFinite(stored)
-		? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, stored))
-		: DEFAULT_SIDEBAR_WIDTH;
-}
-
 function deriveSummary(paneId: string): string | null {
 	const existing = loadStoredSummary(paneId);
 	if (existing) return existing;
@@ -150,7 +140,6 @@ function PaneSummaryItem({
 }) {
 	const isChat = isChatAgentKind(pane.agentKind);
 	const summary = isChat ? deriveSummary(pane.id) : null;
-	const folderLabel = getPaneBaseFolder(pane);
 	const primaryLabel = isChat ? (summary ?? pane.title) : pane.title;
 
 	return (
@@ -171,7 +160,9 @@ function PaneSummaryItem({
 				)}
 			</span>
 			<div {...stylex.props(styles.paneSummaryText)}>
-				<p {...stylex.props(styles.paneSummaryFolder)}>{folderLabel}</p>
+				<p {...stylex.props(styles.paneSummaryFolder)}>
+					{pane.cwd?.split("/").filter(Boolean).pop() || "No folder"}
+				</p>
 				<p {...stylex.props(styles.paneSummaryTitle)}>{primaryLabel}</p>
 			</div>
 		</button>
@@ -373,7 +364,12 @@ export function Sidebar() {
 	const [collapsed, setCollapsed] = useState(() => {
 		return readStoredBoolean("sidebar-collapsed");
 	});
-	const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+	const [sidebarWidth, setSidebarWidth] = useState(() => {
+		const stored = Number(readStoredValue("main-sidebar-width"));
+		return Number.isFinite(stored)
+			? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, stored))
+			: DEFAULT_SIDEBAR_WIDTH;
+	});
 	const [resizing, setResizing] = useState(false);
 	const [updateStatus, setUpdateStatus] = useState<
 		"idle" | "updating" | "error"
@@ -396,9 +392,13 @@ export function Sidebar() {
 	// Workspace state
 	const loadWorkspaces = useCallback(() => {
 		const state = loadTerminalState();
+		const cleanState = state
+			? compactTerminalState(state, { keepSelectedDraft: true })
+			: null;
 		return {
-			groups: state?.groups ?? [],
-			selectedGroupId: state?.selectedGroupId ?? state?.groups[0]?.id ?? null,
+			groups: cleanState?.groups ?? [],
+			selectedGroupId:
+				cleanState?.selectedGroupId ?? cleanState?.groups[0]?.id ?? null,
 		};
 	}, []);
 
@@ -427,7 +427,13 @@ export function Sidebar() {
 			setWorkspaces((prev) => ({ ...prev, selectedGroupId: groupId as never }));
 			const next = await mutateCanonicalTerminalState((state) => {
 				if (!state.groups.some(hasId.bind(null, groupId))) return state;
-				return { ...state, selectedGroupId: groupId as never };
+				return compactTerminalState(
+					{
+						...state,
+						selectedGroupId: groupId as never,
+					},
+					{ keepSelectedDraft: true }
+				);
 			}, "select-workspace");
 			if (next) {
 				setWorkspaces({
@@ -447,13 +453,17 @@ export function Sidebar() {
 			const gid = groupId as never;
 			const pid = paneId as never;
 			const next = await mutateCanonicalTerminalState(
-				(state) => ({
-					...state,
-					selectedGroupId: gid,
-					groups: state.groups.map((g) =>
-						g.id === groupId ? { ...g, selectedPaneId: pid } : g
+				(state) =>
+					compactTerminalState(
+						{
+							...state,
+							selectedGroupId: gid,
+							groups: state.groups.map((g) =>
+								g.id === groupId ? { ...g, selectedPaneId: pid } : g
+							),
+						},
+						{ keepSelectedDraft: true }
 					),
-				}),
 				"select-pane"
 			);
 			if (next) {
@@ -468,27 +478,29 @@ export function Sidebar() {
 				navigate("/terminal");
 			}
 		},
-		[navigate, loadWorkspaces]
+		[navigate]
 	);
 
 	const addWorkspace = useCallback(async () => {
 		const next = await mutateCanonicalTerminalState(
 			(state) => {
+				const cleanState = compactTerminalState(state);
 				const selectedGroup =
-					state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
-					state.groups[0];
+					cleanState.groups.find(
+						hasId.bind(null, cleanState.selectedGroupId)
+					) ?? cleanState.groups[0];
 				const panes = [createPendingAgentChatPane()];
 				const group = {
 					id: createGroupId(),
-					name: `Workspace ${state.groups.length + 1}`,
+					name: `Workspace ${cleanState.groups.length + 1}`,
 					panes,
 					selectedPaneId: panes[0]?.id ?? null,
 					columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
 					rows: selectedGroup?.rows ?? DEFAULT_ROWS,
 				};
 				return {
-					...state,
-					groups: [...state.groups, group],
+					...cleanState,
+					groups: [...cleanState.groups, group],
 					selectedGroupId: group.id,
 				};
 			},

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
 	appendPaneToGroup,
+	compactTerminalState,
 	createDefaultAgentChatGroup,
 	getPaneTitle,
 	getStatusInfo,
 	migrateGroup,
-	prepareRestoredTerminalState,
 	type GroupId,
 	type PaneId,
 	type TerminalGroupModel,
@@ -58,7 +58,7 @@ describe("terminal state and git change behavior", () => {
 			],
 		});
 
-		expect(migrated.selectedPaneId).toBe("p1");
+		expect(migrated.selectedPaneId).toBe("p1" as PaneId);
 		expect(migrated.columns).toBe(3);
 		expect(migrated.rows).toBe(2);
 		expect(migrated.panes.map((item) => item.agentKind)).toEqual([
@@ -74,7 +74,7 @@ describe("terminal state and git change behavior", () => {
 		expect(group.columns).toBe(3);
 		expect(group.rows).toBe(2);
 		expect(group.panes).toHaveLength(1);
-		expect(group.selectedPaneId).toBe(group.panes[0]?.id);
+		expect(group.selectedPaneId).toBe(group.panes[0]!.id);
 		expect(group.panes.every((item) => item.agentKind === "codex")).toBe(true);
 		expect(group.panes.every((item) => item.pendingCwd)).toBe(true);
 	});
@@ -96,10 +96,11 @@ describe("terminal state and git change behavior", () => {
 			rows: 1,
 		};
 
+		const expectedPane = pane("p1");
 		expect(appendPaneToGroup("group-1", nextPane, group)).toEqual({
 			...group,
-			panes: [pane("p1"), nextPane],
-			selectedPaneId: "p2",
+			panes: [expectedPane, nextPane],
+			selectedPaneId: nextPane.id,
 		});
 		expect(appendPaneToGroup("other", nextPane, group)).toBe(group);
 		expect(getPaneTitle("codex", "/Users/test/project-a")).toBe("project-a");
@@ -148,7 +149,7 @@ describe("terminal state and git change behavior", () => {
 			title: "Codex",
 			pendingCwd: true,
 		});
-		const restored = prepareRestoredTerminalState({
+		const restored = compactTerminalState({
 			groups: [
 				{
 					id: "default" as GroupId,
@@ -174,8 +175,153 @@ describe("terminal state and git change behavior", () => {
 			opacity: 1,
 		});
 
-		expect(restored.groups.map((group) => group.id)).toEqual(["default"]);
-		expect(restored.selectedGroupId).toBe("default");
+		expect(restored.groups.map((group) => group.id)).toEqual([
+			"default" as GroupId,
+		]);
+		expect(restored.selectedGroupId).toBe("default" as GroupId);
+	});
+
+	test("keeps the starter draft workspace when no durable workspace exists", () => {
+		const group = createDefaultAgentChatGroup();
+		const cleaned = compactTerminalState({
+			groups: [group],
+			selectedGroupId: group.id,
+			themeId: "default",
+			fontSize: 13,
+			fontFamily: "SF Mono",
+			opacity: 1,
+		});
+
+		expect(cleaned.groups).toEqual([group]);
+		expect(cleaned.selectedGroupId).toBe(group.id);
+	});
+
+	test("collapses all-draft workspace state to the selected starter workspace", () => {
+		const first = createDefaultAgentChatGroup();
+		const extraPane = pane("extra-draft", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const second = {
+			...createDefaultAgentChatGroup(),
+			name: "Workspace 2",
+		};
+		const dirtySecond = {
+			...second,
+			panes: [...second.panes, extraPane],
+		};
+		const cleaned = compactTerminalState({
+			groups: [first, dirtySecond],
+			selectedGroupId: second.id,
+			themeId: "default",
+			fontSize: 13,
+			fontFamily: "SF Mono",
+			opacity: 1,
+		});
+
+		expect(cleaned.groups).toEqual([second]);
+		expect(cleaned.selectedGroupId).toBe(second.id);
+	});
+
+	test("removes inactive draft panes and workspaces after switching back to real work", () => {
+		const realPane = pane("real", {
+			agentKind: "codex",
+			paneType: "codex",
+			cwd: "/Users/ray/Developer/inferay",
+			pendingCwd: false,
+		});
+		const draftPane = pane("draft", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const cleaned = compactTerminalState(
+			{
+				groups: [
+					{
+						id: "default" as GroupId,
+						name: "Default",
+						panes: [realPane, draftPane],
+						selectedPaneId: realPane.id,
+						columns: 3,
+						rows: 2,
+					},
+					{
+						id: "draft-workspace" as GroupId,
+						name: "Workspace 2",
+						panes: [draftPane],
+						selectedPaneId: draftPane.id,
+						columns: 3,
+						rows: 2,
+					},
+				],
+				selectedGroupId: "default" as GroupId,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{ keepSelectedDraft: true }
+		);
+
+		expect(cleaned.groups.map((group) => group.id)).toEqual([
+			"default" as GroupId,
+		]);
+		expect(cleaned.groups[0]?.panes.map((item) => item.id)).toEqual([
+			"real" as PaneId,
+		]);
+		expect(cleaned.selectedGroupId).toBe("default" as GroupId);
+	});
+
+	test("drops selected draft workspaces when compacting for restore or new workspace creation", () => {
+		const realPane = pane("real", {
+			agentKind: "codex",
+			paneType: "codex",
+			cwd: "/Users/ray/Developer/inferay",
+			pendingCwd: false,
+		});
+		const draftPane = pane("draft", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const cleaned = compactTerminalState({
+			groups: [
+				{
+					id: "default" as GroupId,
+					name: "Default",
+					panes: [realPane],
+					selectedPaneId: realPane.id,
+					columns: 3,
+					rows: 2,
+				},
+				{
+					id: "draft-workspace" as GroupId,
+					name: "Workspace 2",
+					panes: [draftPane],
+					selectedPaneId: draftPane.id,
+					columns: 3,
+					rows: 2,
+				},
+			],
+			selectedGroupId: "draft-workspace" as GroupId,
+			themeId: "default",
+			fontSize: 13,
+			fontFamily: "SF Mono",
+			opacity: 1,
+		});
+
+		expect(cleaned.groups.map((group) => group.id)).toEqual([
+			"default" as GroupId,
+		]);
+		expect(cleaned.groups[0]?.panes.map((item) => item.id)).toEqual([
+			"real" as PaneId,
+		]);
+		expect(cleaned.selectedGroupId).toBe("default" as GroupId);
 	});
 
 	/*
