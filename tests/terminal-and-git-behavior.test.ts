@@ -276,7 +276,67 @@ describe("terminal state and git change behavior", () => {
 		expect(cleaned.selectedGroupId).toBe("default" as GroupId);
 	});
 
-	test("drops selected draft workspaces when compacting for restore or new workspace creation", () => {
+	test("preserves pending panes inside the selected draft workspace", () => {
+		const realPane = pane("real", {
+			agentKind: "codex",
+			paneType: "codex",
+			cwd: "/Users/ray/Developer/inferay",
+			pendingCwd: false,
+		});
+		const firstDraftPane = pane("draft-1", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const secondDraftPane = pane("draft-2", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const cleaned = compactTerminalState(
+			{
+				groups: [
+					{
+						id: "default" as GroupId,
+						name: "Default",
+						panes: [realPane],
+						selectedPaneId: realPane.id,
+						columns: 3,
+						rows: 2,
+					},
+					{
+						id: "draft-workspace" as GroupId,
+						name: "ihl",
+						panes: [firstDraftPane, secondDraftPane],
+						selectedPaneId: secondDraftPane.id,
+						columns: 3,
+						rows: 2,
+					},
+				],
+				selectedGroupId: "draft-workspace" as GroupId,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{ keepSelectedDraft: true }
+		);
+
+		expect(cleaned.groups.map((group) => group.id)).toEqual([
+			"default" as GroupId,
+			"draft-workspace" as GroupId,
+		]);
+		expect(cleaned.groups[1]?.panes.map((item) => item.id)).toEqual([
+			firstDraftPane.id,
+			secondDraftPane.id,
+		]);
+		expect(cleaned.groups[1]?.selectedPaneId).toBe(secondDraftPane.id);
+		expect(cleaned.selectedGroupId).toBe("draft-workspace" as GroupId);
+	});
+
+	test("drops selected draft workspaces during explicit cleanup compaction", () => {
 		const realPane = pane("real", {
 			agentKind: "codex",
 			paneType: "codex",

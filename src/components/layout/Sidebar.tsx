@@ -480,8 +480,6 @@ export function Sidebar() {
 					selectedGroupId: next.selectedGroupId,
 				});
 			}
-			// When on editor view, also update the editor's selected pane
-			writeStoredValue("editor-selected-pane", paneId);
 			if (window.location.hash !== "#/terminal") {
 				navigate("/terminal");
 			}
@@ -492,7 +490,9 @@ export function Sidebar() {
 	const addWorkspace = useCallback(async () => {
 		const next = await mutateCanonicalTerminalState(
 			(state) => {
-				const cleanState = compactTerminalState(state);
+				const cleanState = compactTerminalState(state, {
+					keepSelectedDraft: true,
+				});
 				const selectedGroup =
 					cleanState.groups.find(
 						hasId.bind(null, cleanState.selectedGroupId)

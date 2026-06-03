@@ -351,6 +351,9 @@ export function compactTerminalState(
 		)
 		.map((group) => {
 			if (!hasDurablePane(group)) {
+				if (options.keepSelectedDraft && group.id === state.selectedGroupId) {
+					return group;
+				}
 				const selectedPane =
 					group.panes.find(hasId.bind(null, group.selectedPaneId)) ??
 					group.panes[0];
