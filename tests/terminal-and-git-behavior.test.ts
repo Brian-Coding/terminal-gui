@@ -6,6 +6,8 @@ import {
 	getPaneTitle,
 	getStatusInfo,
 	migrateGroup,
+	reduceTerminalGroups,
+	reduceTerminalWorkspaceState,
 	type GroupId,
 	type PaneId,
 	type TerminalGroupModel,
@@ -134,6 +136,38 @@ describe("terminal state and git change behavior", () => {
 			panes: [nextPane],
 			selectedPaneId: nextPane.id,
 		});
+	});
+
+	test("creates empty workspaces without a required starter chat", () => {
+		const group = createDefaultAgentChatGroup();
+		const next = reduceTerminalWorkspaceState(
+			{
+				groups: [group],
+				selectedGroupId: group.id,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{ type: "addWorkspace" }
+		);
+
+		expect(next?.groups).toHaveLength(2);
+		expect(next?.groups[1]?.panes).toEqual([]);
+		expect(next?.groups[1]?.selectedPaneId).toBeNull();
+		expect(next?.selectedGroupId).toBe(next?.groups[1]?.id);
+	});
+
+	test("removes the final pane without recreating a pending chat", () => {
+		const group = createDefaultAgentChatGroup();
+		const cleaned = reduceTerminalGroups([group], {
+			type: "removePane",
+			groupId: group.id,
+			paneId: group.panes[0]!.id,
+		});
+
+		expect(cleaned[0]?.panes).toEqual([]);
+		expect(cleaned[0]?.selectedPaneId).toBeNull();
 	});
 
 	test("restores to durable workspaces instead of empty draft workspaces", () => {

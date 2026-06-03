@@ -121,12 +121,11 @@ export function reduceTerminalWorkspaceState(
 			const selectedGroup =
 				cleanState.groups.find(hasId.bind(null, cleanState.selectedGroupId)) ??
 				cleanState.groups[0];
-			const panes = [createPendingAgentChatPane()];
 			const group: TerminalGroupModel = {
 				id: createGroupId(),
 				name: `Workspace ${cleanState.groups.length + 1}`,
-				panes,
-				selectedPaneId: panes[0]?.id ?? null,
+				panes: [],
+				selectedPaneId: null,
 				columns: selectedGroup?.columns ?? DEFAULT_COLUMNS,
 				rows: selectedGroup?.rows ?? DEFAULT_ROWS,
 			};
@@ -696,10 +695,6 @@ export function reduceTerminalGroups(
 			return state.map((group) => {
 				if (group.id !== action.groupId) return group;
 				const panes = group.panes.filter(lacksId.bind(null, action.paneId));
-				if (panes.length === 0) {
-					const pane = createPendingAgentChatPane();
-					return { ...group, panes: [pane], selectedPaneId: pane.id };
-				}
 				return {
 					...group,
 					panes,

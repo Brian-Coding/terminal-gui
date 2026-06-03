@@ -608,14 +608,6 @@ export function TerminalPage() {
 					? groups.find(hasId.bind(null, selectedGroupId))
 					: null);
 			if (!group) return;
-			if (group.panes.length <= 1 && groups.length > 1) {
-				for (const pane of group.panes) cleanupPane(pane.id);
-				groupsDispatch({ type: "removeGroup", groupId: group.id });
-				setSelectedGroupId(
-					groups.find(lacksId.bind(null, group.id))?.id ?? null
-				);
-				return;
-			}
 			cleanupPane(paneId);
 			groupsDispatch({
 				type: "removePane",
