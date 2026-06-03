@@ -1,22 +1,22 @@
 import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/Button.tsx";
-import {
-	IconMessageCircle,
-	IconPlus,
-	IconRefreshCw,
-} from "../../components/ui/Icons.tsx";
+import { DropdownButton } from "../../components/ui/DropdownButton.tsx";
+import { IconMessageCircle, IconPlus } from "../../components/ui/Icons.tsx";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import {
 	appendPaneToGroup,
 	dispatchTerminalShellChange,
+	loadCanonicalTerminalState,
 	mutateCanonicalTerminalState,
+	type TerminalGroupModel,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { basename, formatRelativeTime, trimText } from "../../lib/format.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
 import { writeStoredValue } from "../../lib/stored-json.ts";
-import { color, font, radius, shadow } from "../../tokens.stylex.ts";
+import { color, font, radius } from "../../tokens.stylex.ts";
 
 interface LocalSessionInfo {
 	paneId: string;
@@ -40,19 +40,18 @@ async function loadSessions(): Promise<LocalSessionInfo[]> {
 
 export function SessionsPage() {
 	const [sessions, setSessions] = useState<LocalSessionInfo[]>([]);
-	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [workspaces, setWorkspaces] = useState<TerminalGroupModel[]>([]);
 	const [loading, setLoading] = useState(true);
 
 	const refresh = useCallback(async () => {
 		setLoading(true);
 		try {
-			const next = await loadSessions();
+			const [next, terminalState] = await Promise.all([
+				loadSessions(),
+				loadCanonicalTerminalState(),
+			]);
 			setSessions(next);
-			setSelectedId((current) =>
-				current && next.some((session) => session.paneId === current)
-					? current
-					: (next[0]?.paneId ?? null)
-			);
+			setWorkspaces(terminalState?.groups ?? []);
 		} finally {
 			setLoading(false);
 		}
@@ -60,12 +59,18 @@ export function SessionsPage() {
 
 	useEffect(() => {
 		void refresh();
+		const id = window.setInterval(() => void refresh(), 2000);
+		const cleanupShell = listenWindowEvent("terminal-shell-change", () => {
+			void refresh();
+		});
+		const refreshOnFocus = () => void refresh();
+		window.addEventListener("focus", refreshOnFocus);
+		return () => {
+			window.clearInterval(id);
+			cleanupShell();
+			window.removeEventListener("focus", refreshOnFocus);
+		};
 	}, [refresh]);
-
-	const selected =
-		sessions.find((session) => session.paneId === selectedId) ??
-		sessions[0] ??
-		null;
 
 	const groupedSessions = useMemo(() => {
 		const active = sessions.filter((session) => session.inCurrentWorkspace);
@@ -73,51 +78,58 @@ export function SessionsPage() {
 		return { active, archived };
 	}, [sessions]);
 
-	const restoreSession = useCallback(async (session: LocalSessionInfo) => {
-		await mutateCanonicalTerminalState(
-			(state) => {
-				const selectedGroupId = state.selectedGroupId ?? state.groups[0]?.id;
-				if (!selectedGroupId) return null;
-				const existingGroup = state.groups.find((group) =>
-					group.panes.some((pane) => pane.id === session.paneId)
-				);
-				if (existingGroup) {
+	const restoreSession = useCallback(
+		async (session: LocalSessionInfo, targetGroupId?: string) => {
+			await mutateCanonicalTerminalState(
+				(state) => {
+					const existingGroup = state.groups.find((group) =>
+						group.panes.some((pane) => pane.id === session.paneId)
+					);
+					if (existingGroup) {
+						return {
+							...state,
+							selectedGroupId: existingGroup.id,
+							groups: state.groups.map((group) =>
+								group.id === existingGroup.id
+									? { ...group, selectedPaneId: session.paneId as never }
+									: group
+							),
+						};
+					}
+					const selectedGroupId =
+						targetGroupId ?? state.selectedGroupId ?? state.groups[0]?.id;
+					if (!selectedGroupId) return null;
+					const pane: TerminalPaneModel = {
+						id: session.paneId as never,
+						title:
+							session.title ||
+							(session.cwd ? basename(session.cwd) : "Archived session"),
+						agentKind: session.agentKind,
+						isClaude: session.agentKind === "claude",
+						paneType: session.agentKind,
+						cwd: session.cwd ?? undefined,
+						pendingCwd: !session.cwd,
+					};
 					return {
 						...state,
-						selectedGroupId: existingGroup.id,
-						groups: state.groups.map((group) =>
-							group.id === existingGroup.id
-								? { ...group, selectedPaneId: session.paneId as never }
-								: group
+						groups: state.groups.map(
+							appendPaneToGroup.bind(null, selectedGroupId, pane)
 						),
+						selectedGroupId,
 					};
-				}
-				const pane: TerminalPaneModel = {
-					id: session.paneId as never,
-					title:
-						session.title ||
-						(session.cwd ? basename(session.cwd) : "Archived session"),
-					agentKind: session.agentKind,
-					isClaude: session.agentKind === "claude",
-					paneType: session.agentKind,
-					cwd: session.cwd ?? undefined,
-					pendingCwd: !session.cwd,
-				};
-				return {
-					...state,
-					groups: state.groups.map(
-						appendPaneToGroup.bind(null, selectedGroupId, pane)
-					),
-					selectedGroupId,
-				};
-			},
-			"restore-session",
-			{ createIfMissing: true }
-		);
-		writeStoredValue("terminal-main-view", "chat");
-		dispatchTerminalShellChange({ source: "view", reason: "restore-session" });
-		window.location.hash = "#/terminal";
-	}, []);
+				},
+				"restore-session",
+				{ createIfMissing: true }
+			);
+			writeStoredValue("terminal-main-view", "chat");
+			dispatchTerminalShellChange({
+				source: "view",
+				reason: "restore-session",
+			});
+			window.location.hash = "#/terminal";
+		},
+		[]
+	);
 
 	return (
 		<div {...stylex.props(styles.root)}>
@@ -129,22 +141,18 @@ export function SessionsPage() {
 							{sessions.length} local chat archives
 						</p>
 					</div>
-					<Button type="button" variant="secondary" size="sm" onClick={refresh}>
-						<IconRefreshCw size={12} />
-						<span>Refresh</span>
-					</Button>
 				</div>
 				<SessionGroup
 					title="In Workspace"
 					sessions={groupedSessions.active}
-					selectedId={selected?.paneId ?? null}
-					onSelect={setSelectedId}
+					workspaces={workspaces}
+					onOpen={restoreSession}
 				/>
 				<SessionGroup
 					title="Archived"
 					sessions={groupedSessions.archived}
-					selectedId={selected?.paneId ?? null}
-					onSelect={setSelectedId}
+					workspaces={workspaces}
+					onOpen={restoreSession}
 				/>
 				{!loading && sessions.length === 0 ? (
 					<div {...stylex.props(styles.empty)}>
@@ -153,70 +161,6 @@ export function SessionsPage() {
 					</div>
 				) : null}
 			</section>
-			<aside {...stylex.props(styles.detailPane)}>
-				{selected ? (
-					<>
-						<div {...stylex.props(styles.detailHeader)}>
-							<span {...stylex.props(styles.detailIcon)}>
-								{getAgentIcon(selected.agentKind, 14)}
-							</span>
-							<div {...stylex.props(styles.detailTitleGroup)}>
-								<span {...stylex.props(styles.detailKicker)}>
-									{selected.cwd ? basename(selected.cwd) : "No folder"}
-								</span>
-								<h2 {...stylex.props(styles.detailTitle)}>{selected.title}</h2>
-							</div>
-						</div>
-						<div {...stylex.props(styles.metaGrid)}>
-							<Meta label="Messages" value={String(selected.messageCount)} />
-							<Meta
-								label="Updated"
-								value={
-									selected.updatedAt
-										? formatRelativeTime(selected.updatedAt)
-										: "Unknown"
-								}
-							/>
-							<Meta
-								label="Status"
-								value={
-									selected.inCurrentWorkspace ? "In workspace" : "Archived"
-								}
-							/>
-						</div>
-						<div {...stylex.props(styles.pathBlock)}>
-							<span {...stylex.props(styles.pathLabel)}>Directory</span>
-							<span {...stylex.props(styles.pathValue)}>
-								{selected.cwd ?? "No folder saved"}
-							</span>
-						</div>
-						<div {...stylex.props(styles.preview)}>
-							<span {...stylex.props(styles.pathLabel)}>Last message</span>
-							<p {...stylex.props(styles.previewText)}>
-								{selected.lastMessage ?? "No message preview"}
-							</p>
-						</div>
-						<Button
-							type="button"
-							variant="primary"
-							size="md"
-							onClick={() => restoreSession(selected)}
-						>
-							<IconPlus size={13} />
-							<span>
-								{selected.inCurrentWorkspace
-									? "Open in Grid"
-									: "Add to Current Grid"}
-							</span>
-						</Button>
-					</>
-				) : (
-					<div {...stylex.props(styles.emptyDetail)}>
-						<IconMessageCircle size={20} />
-						<span>Select a session</span>
-					</div>
-				)}
-			</aside>
 		</div>
 	);
 }
@@ -229,23 +173,15 @@ function SessionGroup({
 }: {
 	title: string;
 	sessions: LocalSessionInfo[];
-	selectedId: string | null;
-	onSelect: (id: string) => void;
+	workspaces: TerminalGroupModel[];
+	onOpen: (session: LocalSessionInfo, targetGroupId?: string) => void;
 }) {
 	if (sessions.length === 0) return null;
 	return (
 		<div {...stylex.props(styles.group)}>
 			<div {...stylex.props(styles.groupTitle)}>{title}</div>
 			{sessions.map((session) => (
-				<button
-					key={session.paneId}
-					type="button"
-					onClick={() => onSelect(session.paneId)}
-					{...stylex.props(
-						styles.sessionRow,
-						session.paneId === selectedId && styles.sessionRowSelected
-					)}
-				>
+				<div key={session.paneId} {...stylex.props(styles.sessionRow)}>
 					<span {...stylex.props(styles.sessionIcon)}>
 						{getAgentIcon(session.agentKind, 13)}
 					</span>
@@ -264,25 +200,64 @@ function SessionGroup({
 							{trimText(session.lastMessage ?? "No message preview", 110)}
 						</span>
 					</span>
-				</button>
+					<SessionAction
+						session={session}
+						workspaces={workspaces}
+						onOpen={onOpen}
+					/>
+				</div>
 			))}
 		</div>
 	);
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function SessionAction({
+	session,
+	workspaces,
+	onOpen,
+}: {
+	session: LocalSessionInfo;
+	workspaces: TerminalGroupModel[];
+	onOpen: (session: LocalSessionInfo, targetGroupId?: string) => void;
+}) {
+	if (session.inCurrentWorkspace) {
+		return (
+			<div {...stylex.props(styles.actionWrap)}>
+				<Button
+					type="button"
+					variant="secondary"
+					size="sm"
+					onClick={() => onOpen(session)}
+				>
+					<IconPlus size={12} />
+					<span>Open in Grid</span>
+				</Button>
+			</div>
+		);
+	}
+	const options = workspaces.map((workspace) => ({
+		id: workspace.id,
+		label: workspace.name,
+		detail: `${workspace.panes.length} panes`,
+	}));
 	return (
-		<div {...stylex.props(styles.metaItem)}>
-			<span {...stylex.props(styles.metaLabel)}>{label}</span>
-			<span {...stylex.props(styles.metaValue)}>{value}</span>
+		<div {...stylex.props(styles.actionWrap)}>
+			<DropdownButton
+				value={null}
+				options={options}
+				onChange={(groupId) => onOpen(session, groupId)}
+				placeholder="Add to Grid"
+				icon={<IconPlus size={12} />}
+				minWidth={180}
+				menuPlacement="auto"
+			/>
 		</div>
 	);
 }
 
 const styles = stylex.create({
 	root: {
-		display: "grid",
-		gridTemplateColumns: "minmax(360px, 1fr) minmax(320px, 420px)",
+		display: "block",
 		height: "100%",
 		backgroundColor: color.background,
 		color: color.textMain,
@@ -290,9 +265,7 @@ const styles = stylex.create({
 	listPane: {
 		minWidth: 0,
 		overflow: "auto",
-		borderRightWidth: 1,
-		borderRightStyle: "solid",
-		borderRightColor: color.border,
+		height: "100%",
 	},
 	toolbar: {
 		position: "sticky",
@@ -331,8 +304,9 @@ const styles = stylex.create({
 	sessionRow: {
 		display: "flex",
 		width: "100%",
+		alignItems: "center",
 		gap: 10,
-		padding: 10,
+		padding: "10px 12px",
 		borderWidth: 1,
 		borderStyle: "solid",
 		borderColor: "transparent",
@@ -340,13 +314,7 @@ const styles = stylex.create({
 		backgroundColor: "transparent",
 		color: color.textMain,
 		textAlign: "left",
-		cursor: "pointer",
 		":hover": { backgroundColor: color.surfaceControlHover },
-	},
-	sessionRowSelected: {
-		backgroundColor: color.surfaceControl,
-		borderColor: color.borderStrong,
-		boxShadow: shadow.selectedRing,
 	},
 	sessionIcon: {
 		display: "flex",
@@ -384,101 +352,18 @@ const styles = stylex.create({
 		lineHeight: "17px",
 		color: color.textSoft,
 	},
+	actionWrap: {
+		display: "flex",
+		flexShrink: 0,
+		width: 180,
+		justifyContent: "flex-end",
+	},
 	dot: {
 		width: 3,
 		height: 3,
 		borderRadius: 99,
 		backgroundColor: color.textMuted,
 		flexShrink: 0,
-	},
-	detailPane: {
-		display: "flex",
-		minWidth: 0,
-		flexDirection: "column",
-		gap: 16,
-		padding: 20,
-		backgroundColor: color.backgroundRaised,
-	},
-	detailHeader: { display: "flex", gap: 12, alignItems: "flex-start" },
-	detailIcon: {
-		display: "flex",
-		width: 30,
-		height: 30,
-		alignItems: "center",
-		justifyContent: "center",
-		borderRadius: radius.sm,
-		backgroundColor: color.surfaceControlHover,
-		color: color.textMuted,
-	},
-	detailTitleGroup: {
-		display: "flex",
-		minWidth: 0,
-		flexDirection: "column",
-		gap: 4,
-	},
-	detailKicker: { fontSize: 11, color: color.textMuted },
-	detailTitle: {
-		margin: 0,
-		fontSize: 18,
-		fontWeight: font.weight_6,
-		letterSpacing: 0,
-	},
-	metaGrid: {
-		display: "grid",
-		gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-		gap: 8,
-	},
-	metaItem: {
-		padding: 10,
-		borderRadius: radius.sm,
-		backgroundColor: color.background,
-		borderWidth: 1,
-		borderStyle: "solid",
-		borderColor: color.border,
-	},
-	metaLabel: { display: "block", fontSize: 10, color: color.textMuted },
-	metaValue: {
-		display: "block",
-		marginTop: 4,
-		fontSize: 12,
-		fontWeight: font.weight_6,
-	},
-	pathBlock: {
-		display: "flex",
-		flexDirection: "column",
-		gap: 6,
-	},
-	pathLabel: {
-		fontSize: 11,
-		fontWeight: font.weight_6,
-		color: color.textMuted,
-		textTransform: "uppercase",
-		letterSpacing: 0,
-	},
-	pathValue: {
-		fontSize: 12,
-		lineHeight: "18px",
-		color: color.textMain,
-		wordBreak: "break-word",
-	},
-	preview: {
-		display: "flex",
-		flexDirection: "column",
-		gap: 8,
-		minHeight: 120,
-		padding: 12,
-		borderRadius: radius.sm,
-		backgroundColor: color.background,
-		borderWidth: 1,
-		borderStyle: "solid",
-		borderColor: color.border,
-	},
-	previewText: {
-		margin: 0,
-		fontSize: 13,
-		lineHeight: "20px",
-		color: color.textSoft,
-		whiteSpace: "pre-wrap",
 	},
 	empty: {
 		display: "flex",
@@ -488,14 +373,5 @@ const styles = stylex.create({
 		padding: 32,
 		color: color.textMuted,
 		fontSize: 13,
-	},
-	emptyDetail: {
-		display: "flex",
-		height: "100%",
-		alignItems: "center",
-		justifyContent: "center",
-		flexDirection: "column",
-		gap: 10,
-		color: color.textMuted,
 	},
 });
