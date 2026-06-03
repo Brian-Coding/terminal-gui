@@ -91,6 +91,19 @@ export type TerminalWorkspaceAction =
 	| { type: "renameWorkspace"; groupId: string; name: string }
 	| { type: "addPane"; pane: TerminalPaneModel; groupId?: string }
 	| { type: "removePane"; groupId: string; paneId: string }
+	| {
+			type: "directorySelected";
+			groupId: string;
+			paneId: string;
+			path: string | null;
+			referencePaths?: string[];
+	  }
+	| {
+			type: "setPaneAgentKind";
+			groupId: string;
+			paneId: string;
+			agentKind: AgentKind;
+	  }
 	| { type: "ensureChatPane" };
 
 export function reduceTerminalWorkspaceState(
@@ -176,6 +189,12 @@ export function reduceTerminalWorkspaceState(
 			};
 		}
 		case "removePane":
+			return {
+				...state,
+				groups: reduceTerminalGroups(state.groups, action),
+			};
+		case "directorySelected":
+		case "setPaneAgentKind":
 			return {
 				...state,
 				groups: reduceTerminalGroups(state.groups, action),

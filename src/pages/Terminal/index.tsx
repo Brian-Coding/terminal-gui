@@ -524,27 +524,41 @@ export function TerminalPage() {
 	);
 	const handleSetPaneAgentKind = useCallback(
 		(paneId: string, agentKind: AgentKind) =>
-			withSelectedGroup((groupId) =>
+			withSelectedGroup((groupId) => {
 				groupsDispatch({
 					type: "setPaneAgentKind",
 					groupId,
 					paneId,
 					agentKind,
-				})
-			),
+				});
+				void mutateTerminalWorkspaceState(
+					{ type: "setPaneAgentKind", groupId, paneId, agentKind },
+					"set-pane-agent-kind"
+				);
+			}),
 		[withSelectedGroup]
 	);
 	const handleDirectorySelected = useCallback(
 		(paneId: string, path: string | null, referencePaths?: string[]) =>
-			withSelectedGroup((groupId) =>
+			withSelectedGroup((groupId) => {
 				groupsDispatch({
 					type: "directorySelected",
 					groupId,
 					paneId,
 					path,
 					referencePaths,
-				})
-			),
+				});
+				void mutateTerminalWorkspaceState(
+					{
+						type: "directorySelected",
+						groupId,
+						paneId,
+						path,
+						referencePaths,
+					},
+					"directory-selected"
+				);
+			}),
 		[withSelectedGroup]
 	);
 	const selectPane = useCallback(

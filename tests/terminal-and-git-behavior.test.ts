@@ -201,6 +201,97 @@ describe("terminal state and git change behavior", () => {
 		expect(cleaned[0]?.selectedPaneId).toBeNull();
 	});
 
+	test("persists directory selection through workspace actions", () => {
+		const group = createDefaultAgentChatGroup();
+		const selected = reduceTerminalWorkspaceState(
+			{
+				groups: [group],
+				selectedGroupId: group.id,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{
+				type: "directorySelected",
+				groupId: group.id,
+				paneId: group.panes[0]!.id,
+				path: "/Users/ray/Developer/reality-designers.com",
+			}
+		);
+
+		expect(selected?.groups[0]?.panes[0]).toEqual(
+			expect.objectContaining({
+				cwd: "/Users/ray/Developer/reality-designers.com",
+				pendingCwd: false,
+				title: "reality-designers.com",
+			})
+		);
+	});
+
+	test("keeps new workspace panes consistent across selection and reload", () => {
+		const initialGroup = createDefaultAgentChatGroup();
+		const initialState = {
+			groups: [initialGroup],
+			selectedGroupId: initialGroup.id,
+			themeId: "default",
+			fontSize: 13,
+			fontFamily: "SF Mono",
+			opacity: 1,
+		};
+		const workspaceState = reduceTerminalWorkspaceState(initialState, {
+			type: "addWorkspace",
+		})!;
+		const workspace = workspaceState.groups[1]!;
+		const firstPane = pane("first-pending", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const withFirstPane = reduceTerminalWorkspaceState(workspaceState, {
+			type: "addPane",
+			groupId: workspace.id,
+			pane: firstPane,
+		})!;
+		const withDirectory = reduceTerminalWorkspaceState(withFirstPane, {
+			type: "directorySelected",
+			groupId: workspace.id,
+			paneId: firstPane.id,
+			path: "/Users/ray/Developer/reality-designers.com",
+		})!;
+		const secondPane = pane("second-pending", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const withSecondPane = reduceTerminalWorkspaceState(withDirectory, {
+			type: "addPane",
+			groupId: workspace.id,
+			pane: secondPane,
+		})!;
+		const reloadedGroup = migrateGroup(withSecondPane.groups[1]!);
+
+		expect(reloadedGroup.panes).toHaveLength(2);
+		expect(reloadedGroup.panes[0]).toEqual(
+			expect.objectContaining({
+				id: firstPane.id,
+				cwd: "/Users/ray/Developer/reality-designers.com",
+				pendingCwd: false,
+				title: "reality-designers.com",
+			})
+		);
+		expect(reloadedGroup.panes[1]).toEqual(
+			expect.objectContaining({
+				id: secondPane.id,
+				pendingCwd: true,
+				title: "Codex",
+			})
+		);
+		expect(reloadedGroup.selectedPaneId).toBe(secondPane.id);
+	});
+
 	test("restores to durable workspaces instead of empty draft workspaces", () => {
 		const realPane = pane("real", {
 			agentKind: "codex",
