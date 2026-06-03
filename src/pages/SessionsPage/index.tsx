@@ -9,6 +9,8 @@ import {
 	dispatchTerminalShellChange,
 	loadCanonicalTerminalState,
 	mutateCanonicalTerminalState,
+	type GroupId,
+	type PaneId,
 	type TerminalGroupModel,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
@@ -30,14 +32,6 @@ interface LocalSessionInfo {
 	inCurrentWorkspace: boolean;
 }
 
-async function loadSessions(): Promise<LocalSessionInfo[]> {
-	const payload = await fetchJsonOr<{ sessions?: LocalSessionInfo[] }>(
-		"/api/sessions",
-		{ sessions: [] }
-	);
-	return Array.isArray(payload.sessions) ? payload.sessions : [];
-}
-
 export function SessionsPage() {
 	const [sessions, setSessions] = useState<LocalSessionInfo[]>([]);
 	const [workspaces, setWorkspaces] = useState<TerminalGroupModel[]>([]);
@@ -46,11 +40,15 @@ export function SessionsPage() {
 	const refresh = useCallback(async () => {
 		setLoading(true);
 		try {
-			const [next, terminalState] = await Promise.all([
-				loadSessions(),
+			const [sessionPayload, terminalState] = await Promise.all([
+				fetchJsonOr<{ sessions?: LocalSessionInfo[] }>("/api/sessions", {
+					sessions: [],
+				}),
 				loadCanonicalTerminalState(),
 			]);
-			setSessions(next);
+			setSessions(
+				Array.isArray(sessionPayload.sessions) ? sessionPayload.sessions : []
+			);
 			setWorkspaces(terminalState?.groups ?? []);
 		} finally {
 			setLoading(false);
@@ -72,11 +70,21 @@ export function SessionsPage() {
 		};
 	}, [refresh]);
 
-	const groupedSessions = useMemo(() => {
-		const active = sessions.filter((session) => session.inCurrentWorkspace);
-		const archived = sessions.filter((session) => !session.inCurrentWorkspace);
-		return { active, archived };
-	}, [sessions]);
+	const activeSessions = sessions.filter(
+		(session) => session.inCurrentWorkspace
+	);
+	const archivedSessions = sessions.filter(
+		(session) => !session.inCurrentWorkspace
+	);
+	const workspaceOptions = useMemo(
+		() =>
+			workspaces.map((workspace) => ({
+				id: workspace.id,
+				label: workspace.name,
+				detail: `${workspace.panes.length} panes`,
+			})),
+		[workspaces]
+	);
 
 	const restoreSession = useCallback(
 		async (session: LocalSessionInfo, targetGroupId?: string) => {
@@ -91,16 +99,18 @@ export function SessionsPage() {
 							selectedGroupId: existingGroup.id,
 							groups: state.groups.map((group) =>
 								group.id === existingGroup.id
-									? { ...group, selectedPaneId: session.paneId as never }
+									? { ...group, selectedPaneId: session.paneId as PaneId }
 									: group
 							),
 						};
 					}
 					const selectedGroupId =
-						targetGroupId ?? state.selectedGroupId ?? state.groups[0]?.id;
+						(targetGroupId as GroupId | undefined) ??
+						state.selectedGroupId ??
+						state.groups[0]?.id;
 					if (!selectedGroupId) return null;
 					const pane: TerminalPaneModel = {
-						id: session.paneId as never,
+						id: session.paneId as PaneId,
 						title:
 							session.title ||
 							(session.cwd ? basename(session.cwd) : "Archived session"),
@@ -144,14 +154,14 @@ export function SessionsPage() {
 				</div>
 				<SessionGroup
 					title="In Workspace"
-					sessions={groupedSessions.active}
-					workspaces={workspaces}
+					sessions={activeSessions}
+					workspaceOptions={workspaceOptions}
 					onOpen={restoreSession}
 				/>
 				<SessionGroup
 					title="Archived"
-					sessions={groupedSessions.archived}
-					workspaces={workspaces}
+					sessions={archivedSessions}
+					workspaceOptions={workspaceOptions}
 					onOpen={restoreSession}
 				/>
 				{!loading && sessions.length === 0 ? (
@@ -168,12 +178,12 @@ export function SessionsPage() {
 function SessionGroup({
 	title,
 	sessions,
-	selectedId,
-	onSelect,
+	workspaceOptions,
+	onOpen,
 }: {
 	title: string;
 	sessions: LocalSessionInfo[];
-	workspaces: TerminalGroupModel[];
+	workspaceOptions: Array<{ id: string; label: string; detail: string }>;
 	onOpen: (session: LocalSessionInfo, targetGroupId?: string) => void;
 }) {
 	if (sessions.length === 0) return null;
@@ -200,57 +210,31 @@ function SessionGroup({
 							{trimText(session.lastMessage ?? "No message preview", 110)}
 						</span>
 					</span>
-					<SessionAction
-						session={session}
-						workspaces={workspaces}
-						onOpen={onOpen}
-					/>
+					<div {...stylex.props(styles.actionWrap)}>
+						{session.inCurrentWorkspace ? (
+							<Button
+								type="button"
+								variant="secondary"
+								size="sm"
+								onClick={() => onOpen(session)}
+							>
+								<IconPlus size={12} />
+								<span>Open in Grid</span>
+							</Button>
+						) : (
+							<DropdownButton
+								value={null}
+								options={workspaceOptions}
+								onChange={(groupId) => onOpen(session, groupId)}
+								placeholder="Add to Grid"
+								icon={<IconPlus size={12} />}
+								minWidth={180}
+								menuPlacement="auto"
+							/>
+						)}
+					</div>
 				</div>
 			))}
-		</div>
-	);
-}
-
-function SessionAction({
-	session,
-	workspaces,
-	onOpen,
-}: {
-	session: LocalSessionInfo;
-	workspaces: TerminalGroupModel[];
-	onOpen: (session: LocalSessionInfo, targetGroupId?: string) => void;
-}) {
-	if (session.inCurrentWorkspace) {
-		return (
-			<div {...stylex.props(styles.actionWrap)}>
-				<Button
-					type="button"
-					variant="secondary"
-					size="sm"
-					onClick={() => onOpen(session)}
-				>
-					<IconPlus size={12} />
-					<span>Open in Grid</span>
-				</Button>
-			</div>
-		);
-	}
-	const options = workspaces.map((workspace) => ({
-		id: workspace.id,
-		label: workspace.name,
-		detail: `${workspace.panes.length} panes`,
-	}));
-	return (
-		<div {...stylex.props(styles.actionWrap)}>
-			<DropdownButton
-				value={null}
-				options={options}
-				onChange={(groupId) => onOpen(session, groupId)}
-				placeholder="Add to Grid"
-				icon={<IconPlus size={12} />}
-				minWidth={180}
-				menuPlacement="auto"
-			/>
 		</div>
 	);
 }
