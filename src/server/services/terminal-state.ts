@@ -43,7 +43,7 @@ export async function applyTerminalWorkspaceAction(
 	);
 	const normalized = normalizeTerminalState(next, { createDefault: true });
 	if (!normalized) return null;
-	await writeTerminalState(normalized);
+	await writeJson(TERMINAL_STATE_PATH, normalized);
 	return normalized;
 }
 

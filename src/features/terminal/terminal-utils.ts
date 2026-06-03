@@ -88,6 +88,7 @@ export type TerminalWorkspaceAction =
 	| { type: "removeWorkspace"; groupId: string }
 	| { type: "renameWorkspace"; groupId: string; name: string }
 	| { type: "addPane"; pane: TerminalPaneModel; groupId?: string }
+	| { type: "removePane"; groupId: string; paneId: string }
 	| { type: "ensureChatPane" };
 
 export function reduceTerminalWorkspaceState(
@@ -172,6 +173,11 @@ export function reduceTerminalWorkspaceState(
 				selectedGroupId,
 			};
 		}
+		case "removePane":
+			return {
+				...state,
+				groups: reduceTerminalGroups(state.groups, action),
+			};
 		case "ensureChatPane": {
 			const selectedGroupId = state.selectedGroupId ?? state.groups[0]?.id;
 			const group =

@@ -9,15 +9,12 @@ import {
 } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
 import { ProjectFileGraphView } from "../../components/graph/ProjectFileGraphView.tsx";
-import { IconButton } from "../../components/ui/IconButton.tsx";
-import { IconGitBranch, IconX } from "../../components/ui/Icons.tsx";
+import { IconGitBranch } from "../../components/ui/Icons.tsx";
 import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
 import { clearAgentChatMessages } from "../../features/chat/chat-session-store.ts";
 import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { EditorPage } from "../EditorPage/index.tsx";
-import { InlineDirectoryPicker } from "./InlineDirectoryPicker.tsx";
-import { NewSessionButtons } from "./NewSessionButtons.tsx";
 import { TerminalGrid } from "./TerminalGrid.tsx";
 import { TerminalSettingsPanel } from "./TerminalSettingsPanel.tsx";
 
@@ -26,7 +23,6 @@ import "@xterm/xterm/css/xterm.css";
 import {
 	type AgentKind,
 	cacheTerminalState,
-	DEFAULT_CHAT_AGENT_KIND,
 	DEFAULT_FONT_FAMILY,
 	DEFAULT_FONT_SIZE,
 	DEFAULT_OPACITY,
@@ -38,6 +34,7 @@ import {
 	loadTerminalLayoutMode,
 	loadTerminalState,
 	migrateGroup,
+	mutateTerminalWorkspaceState,
 	normalizeTerminalState,
 	reduceTerminalGroups,
 	saveSyncedTerminalState,
@@ -59,7 +56,7 @@ import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
 } from "../../lib/app-theme.ts";
-import { hasId, isNonEmptyString, lacksId } from "../../lib/data.ts";
+import { hasId, isNonEmptyString } from "../../lib/data.ts";
 import {
 	listenWindowEvent,
 	setupTerminalThemePanelShortcut,
@@ -81,12 +78,6 @@ function GraphEmptyState({ message }: { message: string }) {
 }
 
 const styles = stylex.create({
-	panelRoot: {
-		display: "flex",
-		height: "100%",
-		flexDirection: "column",
-		backgroundColor: color.background,
-	},
 	appRoot: {
 		display: "flex",
 		flexDirection: "column",
@@ -159,97 +150,13 @@ const styles = stylex.create({
 		color: color.textMain,
 		fontSize: "0.875rem",
 	},
-	startHeader: {
-		display: "flex",
-		flexShrink: 0,
-		alignItems: "center",
-		gap: controlSize._2,
-		borderBottomWidth: 1,
-		borderBottomStyle: "solid",
-		borderBottomColor: color.border,
-		paddingBlock: "0.375rem",
-		paddingInline: controlSize._3,
-	},
-	startTitle: {
-		color: color.textSoft,
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-	},
 	spacer: {
 		flex: 1,
 	},
-	startDock: {
-		flexShrink: 0,
-		paddingInline: controlSize._3,
-		paddingBottom: controlSize._2,
-	},
-	startButtons: {
-		display: "flex",
-		alignItems: "center",
-		gap: "0.375rem",
-		overflowX: "auto",
-		marginBottom: controlSize._1,
-		paddingInline: controlSize._1,
+	emptyWorkspace: {
+		flex: 1,
 	},
 });
-
-function AgentStartPane({
-	onStart,
-	onClose,
-}: {
-	onStart: (
-		agentKind: AgentKind,
-		path: string | null,
-		referencePaths?: string[]
-	) => void;
-	onClose?: () => void;
-}) {
-	const [agentKind, setAgentKind] = useState<AgentKind>(
-		DEFAULT_CHAT_AGENT_KIND
-	);
-	return (
-		<div {...stylex.props(styles.panelRoot)}>
-			<div
-				className={`electrobun-webkit-app-region-no-drag ${stylex.props(styles.startHeader).className ?? ""}`}
-			>
-				<span {...stylex.props(styles.startTitle)}>New Session</span>
-				<span {...stylex.props(styles.spacer)} />
-				{onClose && (
-					<IconButton
-						type="button"
-						onClick={onClose}
-						className="electrobun-webkit-app-region-no-drag"
-						variant="danger"
-						size="xs"
-						title="Close"
-					>
-						<IconX size={8} />
-					</IconButton>
-				)}
-			</div>
-			<div {...stylex.props(styles.spacer)} />
-			<div {...stylex.props(styles.startDock)}>
-				<div {...stylex.props(styles.startButtons)}>
-					<NewSessionButtons
-						selectedKind={agentKind}
-						onAddPane={(kind) => setAgentKind(kind)}
-					/>
-				</div>
-				<InlineDirectoryPicker
-					onSelect={(path) => {
-						if (path) onStart(agentKind, path);
-					}}
-					multiSelect
-					onMultiSelect={(paths) => {
-						if (paths.length > 0) {
-							onStart(agentKind, paths[0]!, paths.slice(1));
-						}
-					}}
-				/>
-			</div>
-		</div>
-	);
-}
 
 type TerminalViewState = {
 	layoutMode: TerminalLayoutMode;
@@ -586,20 +493,6 @@ export function TerminalPage() {
 			),
 		[withSelectedGroup]
 	);
-	const handleStartAgentPane = useCallback(
-		(agentKind: AgentKind, path: string | null, referencePaths?: string[]) =>
-			withSelectedGroup((groupId) =>
-				groupsDispatch({
-					type: "addPane",
-					groupId,
-					agentKind,
-					cwd: path ?? undefined,
-					pendingCwd: false,
-					referencePaths,
-				})
-			),
-		[withSelectedGroup]
-	);
 	const removePane = useCallback(
 		(paneId: string, force?: boolean) => {
 			const group =
@@ -615,6 +508,10 @@ export function TerminalPage() {
 				paneId,
 				force,
 			});
+			void mutateTerminalWorkspaceState(
+				{ type: "removePane", groupId: group.id, paneId },
+				"remove-pane"
+			);
 		},
 		[cleanupPane, groups, selectedGroupId]
 	);
@@ -657,25 +554,6 @@ export function TerminalPage() {
 			),
 		[withSelectedGroup]
 	);
-	const removeGroup = useCallback(
-		(groupId: string) => {
-			if (groups.length <= 1) return;
-			const group = groups.find(hasId.bind(null, groupId));
-			if (group) {
-				for (const p of group.panes) cleanupPane(p.id);
-			}
-			groupsDispatch({ type: "removeGroup", groupId });
-			if (selectedGroupId === groupId)
-				setSelectedGroupId(
-					groups.find(lacksId.bind(null, groupId))?.id ?? null
-				);
-		},
-		[groups, selectedGroupId, cleanupPane]
-	);
-	const closeCurrentStartPane = useCallback(() => {
-		if (!selectedGroupId || groups.length <= 1) return;
-		removeGroup(selectedGroupId);
-	}, [groups.length, removeGroup, selectedGroupId]);
 	const handleChatRef = useCallback(
 		(paneId: string, handle: AgentChatHandle | null) => {
 			if (handle) chatRefs.current.set(paneId, handle);
@@ -689,14 +567,6 @@ export function TerminalPage() {
 			.map((pane) => `${pane.id}:${pane.cwd ?? ""}`)
 			.join(",")}`;
 	}, [currentGroup]);
-	const startPane = (
-		<AgentStartPane
-			onStart={handleStartAgentPane}
-			onClose={
-				currentGroup && groups.length > 1 ? closeCurrentStartPane : undefined
-			}
-		/>
-	);
 	const terminalGrid = currentGroup ? (
 		<TerminalGrid
 			panes={currentGroup.panes}
@@ -731,7 +601,7 @@ export function TerminalPage() {
 							)}
 						>
 							{!currentGroup || currentGroup.panes.length === 0 ? (
-								startPane
+								<div {...stylex.props(styles.emptyWorkspace)} />
 							) : mainView === "editor" ? (
 								<EditorPage
 									key={editorViewKey}
