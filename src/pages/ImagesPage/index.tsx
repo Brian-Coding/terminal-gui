@@ -262,7 +262,7 @@ export function ImagesPage() {
 
 					<div {...stylex.props(styles.rows)}>
 						{loading ? (
-							<div {...stylex.props(styles.emptyState)}>Loading files...</div>
+							<div {...stylex.props(styles.emptyState)}>Loading files…</div>
 						) : visibleFiles.length === 0 ? (
 							<div {...stylex.props(styles.emptyState)}>
 								No files found. Attach an image in chat to add it here.

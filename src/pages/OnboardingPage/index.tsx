@@ -416,7 +416,7 @@ function GithubStep({
 					{loading ? (
 						<div {...stylex.props(styles.loadingState)}>
 							<IconRefreshCw size={15} {...stylex.props(styles.spinIcon)} />
-							Checking gh auth status...
+							Checking gh auth status…
 						</div>
 					) : accounts.length > 0 ? (
 						<div {...stylex.props(styles.accountList)}>
@@ -628,7 +628,7 @@ function ProjectsStep({
 						{hasGithub && reposLoading ? (
 							<div {...stylex.props(styles.loadingState)}>
 								<IconRefreshCw size={13} {...stylex.props(styles.spinIcon)} />
-								Loading repositories...
+								Loading repositories…
 							</div>
 						) : hasGithub && repos.length > 0 ? (
 							repos.map((repo) => {

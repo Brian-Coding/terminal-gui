@@ -113,7 +113,7 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 	const displaySummary =
 		latestActivity?.summary ??
 		statusToolName ??
-		(status === "responding" ? "Responding" : "Working...");
+		(status === "responding" ? "Responding" : "Working…");
 	const activityCount = activityItems.length;
 
 	return (
@@ -131,7 +131,7 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 							</span>
 						)}
 						<span {...stylex.props(styles.activitySummary)}>
-							{displaySummary || "Working..."}
+							{displaySummary || "Working…"}
 						</span>
 						{activityCount > 1 && (
 							<span {...stylex.props(styles.activityCount)}>
@@ -177,7 +177,7 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 			) : (
 				<div {...stylex.props(styles.idleStatus)}>
 					<span {...stylex.props(styles.liveDot)} />
-					<span {...stylex.props(styles.idleText)}>Working...</span>
+					<span {...stylex.props(styles.idleText)}>Working…</span>
 				</div>
 			)}
 

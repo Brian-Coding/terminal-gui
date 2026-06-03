@@ -560,7 +560,7 @@ export function ProfilePage() {
 							{agentAccountStatusesLoading &&
 							agentAccountStatuses.length === 0 ? (
 								<div {...stylex.props(styles.agentAccountLoading)}>
-									Checking local agent CLIs...
+									Checking local agent CLIs…
 								</div>
 							) : (
 								agentAccountStatuses.map((status) => (
@@ -659,7 +659,7 @@ export function ProfilePage() {
 						<Panel>
 							{loadState === "loading" ? (
 								<div {...stylex.props(styles.accountLoadingState)}>
-									Checking GitHub CLI account...
+									Checking GitHub CLI account…
 								</div>
 							) : (
 								<ProfileGithubEmptyState onConnect={connectGithub} />
@@ -716,7 +716,7 @@ export function ProfilePage() {
 							<div {...stylex.props(styles.repoList)}>
 								{reposLoading ? (
 									<div {...stylex.props(styles.loadingState)}>
-										Loading repositories...
+										Loading repositories…
 									</div>
 								) : filteredRepos.length === 0 ? (
 									<div {...stylex.props(styles.loadingState)}>

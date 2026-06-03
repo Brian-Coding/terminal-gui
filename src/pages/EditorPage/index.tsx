@@ -665,7 +665,7 @@ export function EditorPage({
 	const viewer =
 		mainViewMode === "diff" ? (
 			diffLoading ? (
-				<Placeholder label="Loading diff..." />
+				<Placeholder label="Loading diff…" />
 			) : diff && request ? (
 				<DiffViewerBoundary
 					resetKey={`${request.cwd}:${request.staged ? "staged" : "unstaged"}:${request.file}`}
@@ -690,7 +690,7 @@ export function EditorPage({
 			)
 		) : graphLoading ? (
 			<div {...stylex.props(styles.centerFull)}>
-				<p {...stylex.props(styles.placeholderText)}>Loading graph...</p>
+				<p {...stylex.props(styles.placeholderText)}>Loading graph…</p>
 			</div>
 		) : (
 			<CommitGraph

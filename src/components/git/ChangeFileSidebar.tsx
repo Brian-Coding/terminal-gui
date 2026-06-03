@@ -175,7 +175,7 @@ export function ChangeFileSidebar({
 					) : selectedCommitHash ? (
 						commitDetailsLoading ? (
 							<div {...stylex.props(styles.emptyStateLarge)}>
-								<p {...stylex.props(styles.mutedText)}>Loading...</p>
+								<p {...stylex.props(styles.mutedText)}>Loading…</p>
 							</div>
 						) : commitDetails ? (
 							<CommitDetailsPanel details={commitDetails} />
@@ -1147,7 +1147,7 @@ function CommitSection({
 				>
 					<IconGitCommit size={12} />
 					{isCommitting
-						? "Committing..."
+						? "Committing…"
 						: stagedCount
 							? `Commit ${stagedCount} file${stagedCount !== 1 ? "s" : ""}`
 							: "Commit"}

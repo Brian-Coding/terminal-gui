@@ -206,9 +206,7 @@ export function ProjectFileGraphView({
 				<div {...stylex.props(styles.canvasScroll)}>
 					{loading ? (
 						<div {...stylex.props(styles.centerState)}>
-							<p {...stylex.props(styles.centerText)}>
-								Loading project files...
-							</p>
+							<p {...stylex.props(styles.centerText)}>Loading project files…</p>
 						</div>
 					) : nodes.length === 0 ? (
 						<div {...stylex.props(styles.centerState)}>

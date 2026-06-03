@@ -663,7 +663,7 @@ export function Sidebar() {
 								onClick={addWorkspace}
 								variant="ghost"
 								size="md"
-								className="h-8 w-8"
+								className="size-8"
 								title="Add workspace"
 							>
 								<IconPlus size={14} className="shrink-0" />

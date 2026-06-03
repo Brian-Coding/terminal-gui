@@ -817,7 +817,7 @@ export function GitPage() {
 						<div {...stylex.props(styles.centerPage)}>
 							<div {...stylex.props(styles.loadingRow)}>
 								<div {...stylex.props(styles.spinner)} />
-								<span {...stylex.props(styles.loadingText)}>Loading...</span>
+								<span {...stylex.props(styles.loadingText)}>Loading…</span>
 							</div>
 						</div>
 					) : diff && diffReq ? (
@@ -830,7 +830,7 @@ export function GitPage() {
 										<div {...stylex.props(styles.loadingRow)}>
 											<div {...stylex.props(styles.spinner)} />
 											<span {...stylex.props(styles.loadingText)}>
-												Loading diff viewer...
+												Loading diff viewer…
 											</span>
 										</div>
 									</div>

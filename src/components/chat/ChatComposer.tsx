@@ -584,7 +584,7 @@ export function ChatComposer({
 									placeholder={
 										isLoading
 											? "Type to queue next message..."
-											: "Message... (/ commands, @ files)"
+											: "Message… (/ commands, @ files)"
 									}
 									rows={1}
 									aria-label="Message input"
@@ -738,9 +738,7 @@ export function ChatComposer({
 						<div {...stylex.props(styles.modalBody)}>
 							{mdPreview.loading && (
 								<div {...stylex.props(styles.modalState)}>
-									<span {...stylex.props(styles.modalStateText)}>
-										Loading...
-									</span>
+									<span {...stylex.props(styles.modalStateText)}>Loading…</span>
 								</div>
 							)}
 							{mdPreview.error && (

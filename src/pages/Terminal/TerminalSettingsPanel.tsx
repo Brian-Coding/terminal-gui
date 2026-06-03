@@ -408,7 +408,7 @@ export const TerminalSettingsContent = memo(function TerminalSettingsContent({
 						>
 							<span style={{ color: custom.cursor }}>$</span> terminal-gui start
 							<br />
-							<span style={{ opacity: 0.6 }}>Loading...</span>
+							<span style={{ opacity: 0.6 }}>Loading…</span>
 							<br />
 							<span style={{ color: custom.cursor }}>✓</span> Ready
 						</div>

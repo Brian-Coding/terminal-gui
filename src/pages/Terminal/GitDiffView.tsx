@@ -1541,7 +1541,7 @@ export const GitDiffView = memo(function GitDiffView({
 			<div {...stylex.props(diffStyles.centerState)}>
 				<div {...stylex.props(diffStyles.centerInline)}>
 					<div {...stylex.props(diffStyles.spinner)} />
-					<span {...stylex.props(diffStyles.centerText)}>Loading diff...</span>
+					<span {...stylex.props(diffStyles.centerText)}>Loading diff…</span>
 				</div>
 			</div>
 		);
