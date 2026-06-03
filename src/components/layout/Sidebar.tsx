@@ -37,7 +37,7 @@ import {
 	noop,
 	toggleBoolean,
 } from "../../lib/data.ts";
-import { fetchJsonOr, postJson } from "../../lib/fetch-json.ts";
+import { fetchJsonOr, postJson, sendJson } from "../../lib/fetch-json.ts";
 import {
 	listenWindowEvent,
 	setInputValue,
@@ -588,12 +588,17 @@ export function Sidebar() {
 	const updateAvailable = updateInfo.available && !!updateInfo.url;
 	const openUpdate = useCallback(() => {
 		setUpdateStatus("updating");
-		void postJson<{ ok?: boolean; error?: string; logPath?: string }>(
-			"/api/native/update"
-		).catch((error) => {
-			console.error("[update] failed", error);
-			setUpdateStatus("error");
-		});
+		void sendJson("/api/native/update")
+			.then((response) => {
+				if (!response.ok) {
+					throw new Error(`Update request failed: ${response.status}`);
+				}
+			})
+			.catch((error) => {
+				if (error instanceof TypeError) return;
+				console.error("[update] failed", error);
+				setUpdateStatus("error");
+			});
 	}, []);
 	const goToRoute = useCallback(
 		(path: string) => {
