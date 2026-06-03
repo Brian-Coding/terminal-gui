@@ -856,8 +856,7 @@ export function migrateGroup(
 		selectedPaneId: PaneId | null;
 	}
 ): TerminalGroupModel {
-	const panes =
-		group.panes.length > 0 ? group.panes : [createPendingAgentChatPane()];
+	const panes = group.panes;
 	const selectedPaneId = panes.some(hasId.bind(null, group.selectedPaneId))
 		? group.selectedPaneId
 		: (panes[0]?.id ?? null);

@@ -156,6 +156,8 @@ describe("terminal state and git change behavior", () => {
 		expect(next?.groups[1]?.panes).toEqual([]);
 		expect(next?.groups[1]?.selectedPaneId).toBeNull();
 		expect(next?.selectedGroupId).toBe(next?.groups[1]?.id);
+		expect(migrateGroup(next!.groups[1]!).panes).toEqual([]);
+		expect(migrateGroup(next!.groups[1]!).selectedPaneId).toBeNull();
 	});
 
 	test("removes the final pane without recreating a pending chat", () => {
