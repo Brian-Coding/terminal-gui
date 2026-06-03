@@ -337,6 +337,35 @@ function isEmptyPendingPane(pane: TerminalPaneModel): boolean {
 	);
 }
 
+function hasDurablePane(group: TerminalGroupModel): boolean {
+	return group.panes.some((pane) => pane.cwd || pane.pendingCwd === false);
+}
+
+export function prepareRestoredTerminalState(
+	state: TerminalSavedState
+): TerminalSavedState {
+	let groups = state.groups.map((group) => {
+		if (!hasDurablePane(group)) return group;
+		const panes = group.panes.filter((pane) => !isEmptyPendingPane(pane));
+		return panes.length === group.panes.length
+			? group
+			: {
+					...group,
+					panes,
+					selectedPaneId: panes.some(hasId.bind(null, group.selectedPaneId))
+						? group.selectedPaneId
+						: (panes[0]?.id ?? null),
+				};
+	});
+	const durableGroups = groups.filter(hasDurablePane);
+	if (durableGroups.length > 0) groups = durableGroups;
+	return {
+		...state,
+		groups,
+		selectedGroupId: chooseSelectedGroupId(groups, state.selectedGroupId),
+	};
+}
+
 export function loadTerminalState(): TerminalSavedState | null {
 	const parsed = readStoredJson<unknown>(TERMINAL_STORAGE_KEY, null);
 	const state = normalizeTerminalState(parsed);
@@ -349,7 +378,10 @@ export async function loadCanonicalTerminalState(): Promise<TerminalSavedState |
 		const response = await fetch("/api/terminal/state");
 		if (!response.ok) return loadTerminalState();
 		const serverState = await response.json();
-		const normalized = normalizeTerminalState(serverState);
+		const normalizedBase = normalizeTerminalState(serverState);
+		const normalized = normalizedBase
+			? prepareRestoredTerminalState(normalizedBase)
+			: null;
 		if (normalized) {
 			const previousKey = _cachedTerminalState
 				? terminalStateKey(_cachedTerminalState)
@@ -357,6 +389,9 @@ export async function loadCanonicalTerminalState(): Promise<TerminalSavedState |
 			const nextKey = terminalStateKey(normalized);
 			_cachedTerminalState = normalized;
 			writeStoredJson(TERMINAL_STORAGE_KEY, normalized);
+			if (normalizedBase && terminalStateKey(normalizedBase) !== nextKey) {
+				sendJson("/api/terminal/state", normalized).catch(noop);
+			}
 			if (previousKey !== nextKey && typeof window !== "undefined") {
 				dispatchTerminalShellChange({
 					source: "canonical",

@@ -5,6 +5,7 @@ import {
 	getPaneTitle,
 	getStatusInfo,
 	migrateGroup,
+	prepareRestoredTerminalState,
 	type GroupId,
 	type PaneId,
 	type TerminalGroupModel,
@@ -132,6 +133,49 @@ describe("terminal state and git change behavior", () => {
 			panes: [nextPane],
 			selectedPaneId: nextPane.id,
 		});
+	});
+
+	test("restores to durable workspaces instead of empty draft workspaces", () => {
+		const realPane = pane("real", {
+			agentKind: "codex",
+			paneType: "codex",
+			cwd: "/Users/ray/Developer/inferay",
+			pendingCwd: false,
+		});
+		const draftPane = pane("draft", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const restored = prepareRestoredTerminalState({
+			groups: [
+				{
+					id: "default" as GroupId,
+					name: "Default",
+					panes: [realPane],
+					selectedPaneId: realPane.id,
+					columns: 3,
+					rows: 2,
+				},
+				{
+					id: "workspace-2" as GroupId,
+					name: "Workspace 2",
+					panes: [draftPane],
+					selectedPaneId: draftPane.id,
+					columns: 3,
+					rows: 2,
+				},
+			],
+			selectedGroupId: "workspace-2" as GroupId,
+			themeId: "default",
+			fontSize: 13,
+			fontFamily: "SF Mono",
+			opacity: 1,
+		});
+
+		expect(restored.groups.map((group) => group.id)).toEqual(["default"]);
+		expect(restored.selectedGroupId).toBe("default");
 	});
 
 	/*
