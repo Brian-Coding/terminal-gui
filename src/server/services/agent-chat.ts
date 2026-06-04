@@ -62,6 +62,8 @@ type SendChatMessageInput = {
 
 type EmitChatMessage = (message: ChatServerMessage) => void;
 
+let chatQueueIdCounter = 0;
+
 function isQueuedMessageInfo(value: unknown): value is QueuedMessageInfo {
 	if (!value || typeof value !== "object") return false;
 	const candidate = value as {
@@ -78,6 +80,13 @@ function isQueuedMessageInfo(value: unknown): value is QueuedMessageInfo {
 			(Array.isArray(candidate.images) &&
 				candidate.images.every((image) => typeof image === "string")))
 	);
+}
+
+function nextChatQueueId(): string {
+	if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		return crypto.randomUUID();
+	}
+	return `${Date.now()}-${++chatQueueIdCounter}`;
 }
 
 function normalizeChatReferencePaths(paths?: string[]): string[] {
@@ -374,6 +383,23 @@ async function saveAndBroadcastQueue(
 	chatRuntime.send(session, { type: "chat:queue", paneId, queue });
 }
 
+async function enqueueChatMessage(
+	session: ChatSession,
+	paneId: string,
+	text: string,
+	displayText?: string
+) {
+	const queue = (await loadChatQueue(paneId)).filter(isQueuedMessageInfo);
+	await saveAndBroadcastQueue(session, paneId, [
+		...queue,
+		{
+			id: nextChatQueueId(),
+			text,
+			displayText: displayText || text,
+		},
+	]);
+}
+
 async function drainNextQueuedMessage(session: ChatSession, paneId: string) {
 	if (session.currentHandle) return;
 	const queue = (await loadChatQueue(paneId)).filter(isQueuedMessageInfo);
@@ -523,6 +549,11 @@ export const ChatService = {
 			agentKindChanged
 		);
 
+		if (session.currentHandle) {
+			await enqueueChatMessage(session, paneId, text, displayText);
+			return;
+		}
+
 		session.messageBuffer.pushUser(displayText || text);
 		chatRuntime.persistTranscript(session, paneId);
 		chatRuntime.send(
@@ -534,17 +565,6 @@ export const ChatService = {
 			},
 			ws
 		);
-
-		if (session.currentHandle) {
-			if (ws) {
-				chatRuntime.send(ws, {
-					type: "chat:error",
-					paneId,
-					error: `${getAgentAdapter(session.agentKind).displayName} is still responding`,
-				});
-			}
-			return;
-		}
 		session.cancelled = false;
 
 		const goalCommand = agentKind === "codex" ? parseGoalCommand(text) : null;
