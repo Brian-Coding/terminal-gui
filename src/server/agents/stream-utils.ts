@@ -18,7 +18,7 @@ export async function drainStreamToString(
 
 export function parseNdjsonLines(
 	leftover: string,
-	handler: (event: any) => void
+	handler: (event: unknown) => void
 ): string {
 	const lines = leftover.split("\n");
 	const remainder = lines.pop()!;
@@ -33,7 +33,7 @@ export function parseNdjsonLines(
 
 export function flushNdjsonLeftover(
 	leftover: string,
-	handler: (event: any) => void
+	handler: (event: unknown) => void
 ) {
 	if (!leftover.trim()) return;
 	try {

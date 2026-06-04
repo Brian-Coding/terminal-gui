@@ -290,4 +290,45 @@ describe("Claude and Codex inline edit diff parity", () => {
 			{ type: "message", message: messages[2]! },
 		]);
 	});
+
+	test("keeps edit grouping across hidden tool output messages", () => {
+		const first = {
+			file_path: "src/example.ts",
+			old_string: "one\n",
+			new_string: "1\n",
+		};
+		const second = {
+			file_path: "src/example.ts",
+			old_string: "1\n",
+			new_string: "one\n",
+		};
+		const messages: ChatMessage[] = [
+			{
+				id: "edit-1",
+				role: "tool",
+				toolName: "Edit",
+				content: JSON.stringify(first),
+			},
+			{
+				id: "read-1",
+				role: "tool",
+				toolName: "Read",
+				content: "hidden read output",
+			},
+			{
+				id: "edit-2",
+				role: "tool",
+				toolName: "Edit",
+				content: JSON.stringify(second),
+			},
+		];
+
+		expect(buildRenderItems(messages)).toEqual([
+			{
+				type: "edit-group",
+				filePath: "src/example.ts",
+				edits: [messages[0]!, messages[2]!],
+			},
+		]);
+	});
 });

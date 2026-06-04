@@ -1,267 +1,32 @@
 import type { ServerWebSocket } from "bun";
 import type { ChatAgentKind } from "../../features/agents/agents.ts";
-import { getToolBlockInitialContent } from "../../features/chat/chat-stream-events.ts";
+import type { ChatServerMessage } from "../../features/chat/agent-chat-shared.ts";
+import { isChatStreamEvent } from "../../features/chat/agent-chat-shared.ts";
 import {
 	createAgentEnv,
 	resolveAgentBinary,
 } from "../../features/terminal/terminal-command.ts";
-import type { AgentEvent } from "../agents/events.ts";
 import { getAgentAdapter, resolveAgentModel } from "../agents/registry.ts";
 import {
 	drainStreamToString,
 	flushNdjsonLeftover,
 	parseNdjsonLines,
 } from "../agents/stream-utils.ts";
-import type { AgentHandle, AgentRunContext } from "../agents/types.ts";
+import type { AgentRunContext } from "../agents/types.ts";
 import { resolveAllowedLocalPath } from "../security.ts";
 import {
-	type ChatTranscriptMessage,
-	readChatTranscript,
-	writeChatTranscript,
-} from "./chat-transcripts.ts";
+	CODEX_WORKFLOW_INSTRUCTIONS,
+	createGoalContinuationPrompt,
+	createGoalPrompt,
+	deriveGoalView,
+	GOAL_MAX_TURNS,
+	goalResultStatus,
+	parseGoalCommand,
+	stripGoalMarkers,
+} from "./chat-goals.ts";
+import { type ChatSession, chatRuntime } from "./chat-runtime.ts";
+import { readChatTranscript } from "./chat-transcripts.ts";
 import { CheckpointService } from "./checkpoint.ts";
-
-const MAX_BUFFER_MESSAGES = 500;
-const MAX_BUFFER_CHARS = 1_000_000;
-const DISCONNECTED_SESSION_TTL_MS = 5 * 60 * 1000;
-const TRANSCRIPT_PERSIST_DEBOUNCE_MS = 250;
-
-let serverMsgId = 0;
-
-class ChatMessageBuffer {
-	private messages: ChatTranscriptMessage[] = [];
-	private currentAssistantIdx = -1;
-	private currentToolIdx = -1;
-	private hasStreamed = false;
-
-	private push(
-		role: ChatTranscriptMessage["role"],
-		content: string,
-		extra?: Partial<ChatTranscriptMessage>
-	) {
-		this.messages.push({ id: `s${++serverMsgId}`, role, content, ...extra });
-		this.trim();
-	}
-
-	pushUser(text: string) {
-		this.push("user", text);
-	}
-	pushSystem(text: string) {
-		this.push("system", text);
-	}
-	pushAssistant(text: string) {
-		this.push("assistant", text);
-	}
-
-	applyEvent(event: any) {
-		if (!event?.type) return;
-
-		if (event.type === "assistant") {
-			const msg = event.message;
-			if (!msg?.content || this.hasStreamed) return;
-			for (const block of msg.content) {
-				if (block.type === "text" && block.text) {
-					if (
-						this.currentAssistantIdx >= 0 &&
-						this.currentAssistantIdx < this.messages.length
-					) {
-						this.messages[this.currentAssistantIdx]!.content = block.text;
-						this.messages[this.currentAssistantIdx]!.isStreaming =
-							!msg.stop_reason;
-					} else {
-						this.currentAssistantIdx = this.messages.length;
-						this.push("assistant", block.text, {
-							isStreaming: !msg.stop_reason,
-						});
-					}
-				} else if (block.type === "tool_use") {
-					this.currentAssistantIdx = -1;
-					this.currentToolIdx = this.messages.length;
-					const inputStr =
-						typeof block.input === "string"
-							? block.input
-							: JSON.stringify(block.input, null, 2);
-					this.push("tool", inputStr, {
-						toolName: block.name,
-						isStreaming: true,
-					});
-				}
-			}
-		} else if (event.type === "content_block_start") {
-			this.hasStreamed = true;
-			const block = event.content_block;
-			if (block?.type === "text") {
-				this.currentAssistantIdx = this.messages.length;
-				this.push("assistant", block.text || "", { isStreaming: true });
-			} else if (block?.type === "tool_use") {
-				this.currentAssistantIdx = -1;
-				this.currentToolIdx = this.messages.length;
-				this.push("tool", getToolBlockInitialContent(block), {
-					toolName: block.name,
-					isStreaming: true,
-				});
-			}
-		} else if (event.type === "content_block_delta") {
-			const delta = event.delta;
-			if (
-				delta?.type === "text_delta" &&
-				delta.text &&
-				this.currentAssistantIdx >= 0
-			) {
-				this.messages[this.currentAssistantIdx]!.content += delta.text;
-			} else if (
-				delta?.type === "input_json_delta" &&
-				delta.partial_json &&
-				this.currentToolIdx >= 0
-			) {
-				this.messages[this.currentToolIdx]!.content += delta.partial_json;
-			}
-		} else if (event.type === "content_block_stop") {
-			if (
-				this.currentAssistantIdx >= 0 &&
-				this.currentAssistantIdx < this.messages.length
-			) {
-				this.messages[this.currentAssistantIdx]!.isStreaming = false;
-				this.currentAssistantIdx = -1;
-			}
-			if (
-				this.currentToolIdx >= 0 &&
-				this.currentToolIdx < this.messages.length
-			) {
-				this.messages[this.currentToolIdx]!.isStreaming = false;
-				this.currentToolIdx = -1;
-			}
-		} else if (event.type === "result" && event.result) {
-			if (
-				this.currentAssistantIdx >= 0 &&
-				this.currentAssistantIdx < this.messages.length
-			) {
-				this.messages[this.currentAssistantIdx]!.content = event.result;
-				this.messages[this.currentAssistantIdx]!.isStreaming = false;
-				this.currentAssistantIdx = -1;
-			} else {
-				this.push("assistant", event.result);
-			}
-		}
-	}
-
-	finalize() {
-		for (const m of this.messages) m.isStreaming = false;
-		this.currentAssistantIdx = -1;
-		this.currentToolIdx = -1;
-		this.hasStreamed = false;
-		this.trim();
-	}
-
-	replaceInAssistantMessages(replacer: (content: string) => string) {
-		for (const message of this.messages) {
-			if (message.role !== "assistant") continue;
-			message.content = replacer(message.content);
-		}
-	}
-
-	getMessages(): ChatTranscriptMessage[] {
-		return this.messages;
-	}
-	get streaming(): boolean {
-		return this.currentAssistantIdx >= 0 || this.currentToolIdx >= 0;
-	}
-
-	replaceMessages(messages: ChatTranscriptMessage[]) {
-		this.messages = messages.map((message) => ({
-			...message,
-			isStreaming: false,
-		}));
-		this.currentAssistantIdx = -1;
-		this.currentToolIdx = -1;
-		this.hasStreamed = false;
-		this.trim();
-	}
-
-	private trim() {
-		if (this.messages.length > MAX_BUFFER_MESSAGES) {
-			const drop = this.messages.length - MAX_BUFFER_MESSAGES;
-			this.messages = this.messages.slice(drop);
-			this.currentAssistantIdx =
-				this.currentAssistantIdx >= drop ? this.currentAssistantIdx - drop : -1;
-			this.currentToolIdx =
-				this.currentToolIdx >= drop ? this.currentToolIdx - drop : -1;
-		}
-		let totalChars = this.messages.reduce(
-			(sum, m) => sum + m.content.length,
-			0
-		);
-		while (totalChars > MAX_BUFFER_CHARS && this.messages.length > 1) {
-			totalChars -= this.messages[0]?.content.length ?? 0;
-			this.messages.shift();
-			this.currentAssistantIdx =
-				this.currentAssistantIdx >= 1 ? this.currentAssistantIdx - 1 : -1;
-			this.currentToolIdx =
-				this.currentToolIdx >= 1 ? this.currentToolIdx - 1 : -1;
-		}
-	}
-}
-
-interface ChatSession {
-	paneId: string;
-	agentKind: ChatAgentKind;
-	model?: string;
-	reasoningLevel?: string;
-	sessionId: string | null;
-	clients: Set<ServerWebSocket<any>>;
-	currentHandle: AgentHandle | null;
-	cwd: string;
-	referencePaths: string[];
-	messageBuffer: ChatMessageBuffer;
-	cleanupTimer: ReturnType<typeof setTimeout> | null;
-	transcriptPersistTimer: ReturnType<typeof setTimeout> | null;
-	cancelled: boolean;
-	goal: GoalState | null;
-	agentEvents: AgentEvent[];
-}
-
-interface GoalState {
-	objective: string;
-	status: "active" | "paused";
-	turns: number;
-	startedAt: number;
-}
-
-interface GoalActivityInfo {
-	id: string;
-	type: "status" | "tool" | "result" | "system" | "error";
-	label: string;
-	detail: string | null;
-	state: "running" | "complete" | "paused" | "error";
-}
-
-export interface AgentGoalInfo {
-	paneId: string;
-	agentKind: ChatAgentKind;
-	cwd: string;
-	sessionId: string | null;
-	isRunning: boolean;
-	clientCount: number;
-	objective: string;
-	status: "active" | "paused";
-	turns: number;
-	startedAt: number;
-	elapsedMs: number;
-	recentMessages: Array<{
-		role: "assistant" | "system";
-		content: string;
-	}>;
-	brief: {
-		phase: string;
-		currentStep: string;
-		nextAction: string;
-		blocker: string | null;
-		lastResult: string | null;
-	};
-	activity: GoalActivityInfo[];
-	files: string[];
-	checks: string[];
-}
 
 interface AgentSessionInfo {
 	paneId: string;
@@ -274,91 +39,29 @@ interface AgentSessionInfo {
 	messageCount: number;
 }
 
-const _g = globalThis as any;
-if (!_g.__inferay_chatSessions)
-	_g.__inferay_chatSessions = new Map<string, ChatSession>();
-const sessions: Map<string, ChatSession> = _g.__inferay_chatSessions;
+type SendChatMessageInput = {
+	agentKind?: ChatAgentKind;
+	clientSessionId?: string | null;
+	cwd?: string;
+	model?: string;
+	paneId: string;
+	reasoningLevel?: string;
+	referencePaths?: string[];
+	text: string;
+	ws: ServerWebSocket<any>;
+};
 
-function persistChatTranscript(session: ChatSession, paneId: string): void {
-	if (session.transcriptPersistTimer) {
-		clearTimeout(session.transcriptPersistTimer);
-		session.transcriptPersistTimer = null;
-	}
-	writeChatTranscript(paneId, session.messageBuffer.getMessages()).catch(
-		(error) => {
-			console.error("[ChatService] Failed to persist chat transcript:", error);
-		}
-	);
-}
+type EmitChatMessage = (message: ChatServerMessage) => void;
 
-function scheduleChatTranscriptPersist(
-	session: ChatSession,
-	paneId: string
-): void {
-	if (session.transcriptPersistTimer) return;
-	session.transcriptPersistTimer = setTimeout(() => {
-		session.transcriptPersistTimer = null;
-		persistChatTranscript(session, paneId);
-	}, TRANSCRIPT_PERSIST_DEBOUNCE_MS);
-}
-
-function sendTo(ws: ServerWebSocket<any>, msg: object) {
-	if (ws.readyState === 1) ws.send(JSON.stringify(msg));
-}
-
-function broadcast(session: ChatSession, msg: object) {
-	const json = JSON.stringify(msg);
-	for (const ws of session.clients) if (ws.readyState === 1) ws.send(json);
-}
-
-function broadcastExcept(
-	session: ChatSession,
-	exclude: ServerWebSocket<any>,
-	msg: object
-) {
-	const json = JSON.stringify(msg);
-	for (const ws of session.clients)
-		if (ws !== exclude && ws.readyState === 1) ws.send(json);
-}
-
-function clearCleanupTimer(session: ChatSession) {
-	if (session.cleanupTimer) {
-		clearTimeout(session.cleanupTimer);
-		session.cleanupTimer = null;
-	}
-}
-
-function scheduleSessionCleanup(session: ChatSession) {
-	clearCleanupTimer(session);
-	if (session.currentHandle || session.clients.size > 0) return;
-	session.cleanupTimer = setTimeout(() => {
-		const current = sessions.get(session.paneId);
-		if (!current || current.currentHandle || current.clients.size > 0) return;
-		sessions.delete(session.paneId);
-	}, DISCONNECTED_SESSION_TTL_MS);
-}
-
-function updateSessionId(
-	session: ChatSession,
-	paneId: string,
-	nextSessionId: string | null
-) {
-	if (!nextSessionId || session.sessionId === nextSessionId) return;
-	session.sessionId = nextSessionId;
-	broadcast(session, {
-		type: "chat:session",
-		paneId,
-		sessionId: nextSessionId,
-	});
-}
-
-function normalizeReferencePaths(paths?: string[]): string[] {
+function normalizeChatReferencePaths(paths?: string[]): string[] {
 	if (!Array.isArray(paths)) return [];
 	const seen = new Set<string>();
 	const normalized: string[] = [];
 	for (const path of paths) {
 		if (typeof path !== "string") continue;
-		const resolved = resolveAllowedLocalPath(path.trim());
+		const trimmed = path.trim();
+		if (!trimmed) continue;
+		const resolved = resolveAllowedLocalPath(trimmed);
 		if (!resolved || seen.has(resolved)) continue;
 		seen.add(resolved);
 		normalized.push(resolved);
@@ -366,43 +69,185 @@ function normalizeReferencePaths(paths?: string[]): string[] {
 	return normalized;
 }
 
-function normalizeCwd(cwd?: string): string {
+function normalizeChatCwd(cwd?: string): string {
 	return (cwd ? resolveAllowedLocalPath(cwd) : null) ?? process.cwd();
 }
 
-async function finalizeCheckpoint(
-	session: ChatSession,
+async function createChatCheckpoint(
 	paneId: string,
-	checkpointId: string | null
-) {
-	if (!checkpointId) return;
+	cwd: string,
+	text: string,
+	emit: EmitChatMessage
+): Promise<string | null> {
 	try {
-		const cpMeta = await CheckpointService.finalizeCheckpoint(checkpointId);
-		if (cpMeta && cpMeta.changedFileCount > 0) {
-			broadcast(session, {
-				type: "checkpoint:finalized",
-				paneId,
-				checkpointId,
-				changedFileCount: cpMeta.changedFileCount,
-				changedFiles: cpMeta.changedFiles,
-			});
-		}
-	} catch (e) {
-		console.error("[Checkpoint] Failed to finalize:", e);
+		const checkpointId = await CheckpointService.createCheckpoint(
+			paneId,
+			cwd,
+			text
+		);
+		emit({ type: "checkpoint:created", paneId, checkpointId });
+		return checkpointId;
+	} catch (error) {
+		console.error("[Checkpoint] Failed to create:", error);
+		return null;
 	}
 }
 
-function finalizeChatTurn(session: ChatSession, paneId: string) {
-	session.messageBuffer.finalize();
-	persistChatTranscript(session, paneId);
-	broadcast(session, {
-		type: "chat:sync",
+async function finalizeChatCheckpoint(
+	session: ChatSession,
+	paneId: string,
+	checkpointId: string | null,
+	emit: EmitChatMessage
+): Promise<number> {
+	if (!checkpointId) return 0;
+	try {
+		const cpMeta = await CheckpointService.finalizeCheckpoint(checkpointId);
+		if (!cpMeta || cpMeta.changedFileCount === 0) return 0;
+		emit({
+			type: "checkpoint:finalized",
+			paneId,
+			checkpointId,
+			changedFileCount: cpMeta.changedFileCount,
+			changedFiles: cpMeta.changedFiles,
+		});
+		const existingEditPaths = new Set<string>();
+		for (const message of session.messageBuffer.getMessages()) {
+			if (message.role !== "tool" || message.toolName !== "Edit") continue;
+			try {
+				const parsed = JSON.parse(message.content) as { file_path?: unknown };
+				if (typeof parsed.file_path === "string") {
+					existingEditPaths.add(parsed.file_path);
+				}
+			} catch {}
+		}
+		for (const diff of await CheckpointService.getInlineDiffs(checkpointId)) {
+			if (existingEditPaths.has(diff.path)) continue;
+			const startEvent = {
+				type: "content_block_start" as const,
+				content_block: {
+					type: "tool_use" as const,
+					name: "Edit",
+					input: {
+						file_path: diff.path,
+						old_string: diff.oldString,
+						new_string: diff.newString,
+					},
+				},
+			};
+			const stopEvent = { type: "content_block_stop" as const };
+			session.messageBuffer.applyEvent(startEvent);
+			emit({ type: "chat:event", paneId, event: startEvent });
+			session.messageBuffer.applyEvent(stopEvent);
+			emit({ type: "chat:event", paneId, event: stopEvent });
+		}
+		return cpMeta.changedFileCount;
+	} catch (error) {
+		console.error("[Checkpoint] Failed to finalize:", error);
+		return 0;
+	}
+}
+
+function ensureVisibleTurnCompletion(
+	session: ChatSession,
+	paneId: string,
+	changedFileCount: number,
+	emit: EmitChatMessage
+) {
+	const messages = session.messageBuffer.getMessages();
+	const last = messages[messages.length - 1];
+	if (last?.role === "assistant" && last.content.trim()) return;
+	if (changedFileCount <= 0 && last?.role !== "tool") return;
+	const text =
+		changedFileCount > 0
+			? `Updated ${changedFileCount} file${changedFileCount === 1 ? "" : "s"}.`
+			: "Finished.";
+	const event = { type: "result" as const, result: text };
+	session.messageBuffer.applyEvent(event);
+	emit({ type: "chat:event", paneId, event });
+}
+
+async function runBtwChatMessage(
+	paneId: string,
+	text: string,
+	cwd: string | undefined,
+	emit: EmitChatMessage
+) {
+	const effectiveCwd = normalizeChatCwd(cwd);
+	const claudeCmd = resolveAgentBinary("claude");
+	let fullText = "";
+
+	emit({ type: "chat:btw:start", paneId, question: text });
+
+	try {
+		const proc = Bun.spawn(
+			[
+				claudeCmd,
+				"-p",
+				text,
+				"--dangerously-skip-permissions",
+				"--output-format",
+				"stream-json",
+				"--verbose",
+			],
+			{
+				stdout: "pipe",
+				stderr: "pipe",
+				cwd: effectiveCwd,
+				env: createAgentEnv("claude"),
+			}
+		);
+		const stderrPromise = drainStreamToString(
+			proc.stderr as ReadableStream<Uint8Array>
+		);
+		const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+		const decoder = new TextDecoder();
+		let leftover = "";
+
+		const handleBtwEvent = (event: unknown) => {
+			if (!isChatStreamEvent(event)) return;
+			if (
+				event.type === "content_block_delta" &&
+				event.delta?.type === "text_delta" &&
+				typeof event.delta.text === "string"
+			) {
+				fullText += event.delta.text;
+				emit({ type: "chat:btw:delta", paneId, text: event.delta.text });
+			} else if (
+				event.type === "content_block_start" &&
+				event.content_block?.type === "text" &&
+				typeof event.content_block.text === "string" &&
+				event.content_block.text
+			) {
+				fullText += event.content_block.text;
+				emit({
+					type: "chat:btw:delta",
+					paneId,
+					text: event.content_block.text,
+				});
+			} else if (event.type === "result" && event.result && !fullText) {
+				fullText = event.result;
+			}
+		};
+
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			leftover += decoder.decode(value, { stream: true });
+			leftover = parseNdjsonLines(leftover, handleBtwEvent);
+		}
+		flushNdjsonLeftover(leftover, handleBtwEvent);
+		await proc.exited;
+		const stderrText = (await stderrPromise).trim();
+		if (!fullText && stderrText) fullText = stderrText;
+	} catch (err) {
+		if (!fullText) fullText = err instanceof Error ? err.message : "(error)";
+	}
+
+	emit({
+		type: "chat:btw:done",
 		paneId,
-		messages: session.messageBuffer.getMessages(),
-		isStreaming: false,
+		answer: fullText || "(no response)",
 	});
-	broadcast(session, { type: "chat:done", paneId });
-	scheduleSessionCleanup(session);
 }
 
 async function runAgent(
@@ -426,27 +271,34 @@ async function runAgent(
 		getSessionId: () => session.sessionId,
 		isCancelled: () => session.cancelled,
 		updateSessionId: (nextSessionId) =>
-			updateSessionId(session, paneId, nextSessionId),
+			chatRuntime.updateSessionId(session, nextSessionId),
 		emitChatEvent: (event) => {
-			broadcast(session, { type: "chat:event", paneId, event });
+			chatRuntime.send(session, { type: "chat:event", paneId, event });
 			session.messageBuffer.applyEvent(event);
-			scheduleChatTranscriptPersist(session, paneId);
+			chatRuntime.scheduleTranscriptPersist(session, paneId);
 		},
 		emitAgentEvent: (event) => {
 			session.agentEvents.push(event);
 			if (session.agentEvents.length > 500) {
 				session.agentEvents = session.agentEvents.slice(-500);
 			}
-			broadcast(session, { type: "chat:agent-event", paneId, event });
+			chatRuntime.send(session, {
+				type: "chat:agent-event",
+				paneId,
+				event,
+			});
 		},
 		emitStatus: (status, isLoading = true) =>
-			broadcast(session, { type: "chat:status", paneId, status, isLoading }),
+			sendChatStatus(session, paneId, status, isLoading),
 		emitActivity: (activity) =>
-			broadcast(session, { type: "chat:activity", paneId, activity }),
+			chatRuntime.send(session, {
+				type: "chat:activity",
+				paneId,
+				activity,
+			}),
 		emitSystemMessage: (message) => {
-			session.messageBuffer.pushSystem(message);
-			persistChatTranscript(session, paneId);
-			broadcast(session, { type: "chat:system", paneId, message });
+			emitSystemMessage(session, paneId, message);
+			chatRuntime.persistTranscript(session, paneId);
 		},
 	};
 	const state = adapter.createState(ctx);
@@ -457,63 +309,8 @@ async function runAgent(
 		return await handle.run();
 	} finally {
 		session.currentHandle = null;
-		if (emitDone) finalizeChatTurn(session, paneId);
+		if (emitDone) chatRuntime.finalizeTurn(session);
 	}
-}
-
-const GOAL_MAX_TURNS = 20;
-const GOAL_COMPLETE_MARKER = "[[GOAL_COMPLETE]]";
-const GOAL_NEEDS_INPUT_MARKER = "[[GOAL_NEEDS_INPUT]]";
-const CODEX_WORKFLOW_INSTRUCTIONS = `<inferay-workflow-instructions>
-Do not run formatters with write mode as a routine chat-completion step. In this project, do not run \`bunx biome check --write ...\` unless the user explicitly asks for Biome formatting.
-Do not run \`bun run build:renderer\` at the end of every chat. Run builds/tests only when the user requests verification or when the change genuinely needs that specific check.
-If formatting is needed, prefer the project's intended formatting or commit-hook flow and keep formatting-only churn out of unrelated edits.
-</inferay-workflow-instructions>`;
-
-function parseGoalCommand(
-	text: string
-):
-	| { action: "start"; objective: string }
-	| { action: "pause" | "resume" | "clear" | "status" }
-	| null {
-	const match = text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/i);
-	if (!match) return null;
-	const args = (match[1] ?? "").trim();
-	const subcommand = args.toLowerCase();
-	if (subcommand === "pause") return { action: "pause" };
-	if (subcommand === "resume") return { action: "resume" };
-	if (subcommand === "clear" || subcommand === "stop")
-		return { action: "clear" };
-	if (subcommand === "status" || !args) return { action: "status" };
-	return { action: "start", objective: args };
-}
-
-function createGoalPrompt(objective: string) {
-	return `Start pursuing this goal until it is genuinely complete:\n\n${objective}\n\nWork autonomously. When the goal is fully achieved, include ${GOAL_COMPLETE_MARKER} in your final response. If you are blocked and need user input, include ${GOAL_NEEDS_INPUT_MARKER}.`;
-}
-
-function createGoalContinuationPrompt(goal: GoalState) {
-	return `<goal-continuation>
-Objective: ${goal.objective}
-Turns used: ${goal.turns}
-Elapsed milliseconds: ${Date.now() - goal.startedAt}
-
-Continue working toward the objective. Do not ask for confirmation unless you are blocked. When the goal is fully achieved, include ${GOAL_COMPLETE_MARKER} in your final response. If you need user input to proceed, include ${GOAL_NEEDS_INPUT_MARKER}.
-</goal-continuation>`;
-}
-
-function goalResultStatus(text?: string): "complete" | "paused" | "active" {
-	if (!text) return "active";
-	if (text.includes(GOAL_COMPLETE_MARKER)) return "complete";
-	if (text.includes(GOAL_NEEDS_INPUT_MARKER)) return "paused";
-	return "active";
-}
-
-function stripGoalMarkers(text: string): string {
-	return text
-		.replaceAll(GOAL_COMPLETE_MARKER, "")
-		.replaceAll(GOAL_NEEDS_INPUT_MARKER, "")
-		.trim();
 }
 
 function getLastAssistantMessage(result: Awaited<ReturnType<typeof runAgent>>) {
@@ -522,167 +319,62 @@ function getLastAssistantMessage(result: Awaited<ReturnType<typeof runAgent>>) {
 		: undefined;
 }
 
-function firstUsefulLine(text: string, max = 140): string {
-	const line =
-		text
-			.split("\n")
-			.map((item) => item.trim())
-			.find(Boolean) ?? "";
-	return line.length > max ? `${line.slice(0, max - 3)}...` : line;
+function emitSystemMessage(
+	session: ChatSession,
+	paneId: string,
+	message: string
+) {
+	session.messageBuffer.pushSystem(message);
+	chatRuntime.send(session, { type: "chat:system", paneId, message });
 }
 
-function collectStrings(value: unknown, keys: string[], output: Set<string>) {
-	if (!value || typeof value !== "object") return;
-	const payload = value as Record<string, unknown>;
-	for (const key of keys) {
-		const item = payload[key];
-		if (typeof item === "string" && item.trim()) output.add(item.trim());
-	}
-	const changes = payload.changes ?? payload.files;
-	if (Array.isArray(changes)) {
-		for (const change of changes) {
-			if (typeof change === "string" && change.trim()) {
-				output.add(change.trim());
-			} else if (change && typeof change === "object") {
-				collectStrings(change, keys, output);
-			}
-		}
-	}
+function sendChatStatus(
+	target: ServerWebSocket<any> | ChatSession,
+	paneId: string,
+	status: string,
+	isLoading: boolean
+) {
+	chatRuntime.send(target, { type: "chat:status", paneId, status, isLoading });
 }
 
-function deriveGoalView(session: ChatSession) {
-	const messages = session.messageBuffer.getMessages();
-	const recentMessages = messages
-		.filter(
-			(message) =>
-				(message.role === "assistant" || message.role === "system") &&
-				message.content.trim()
-		)
-		.slice(-8)
-		.map((message) => ({
-			role: message.role as "assistant" | "system",
-			content: message.content,
-		}));
-	const latestAssistant = [...messages]
-		.reverse()
-		.find((message) => message.role === "assistant" && message.content.trim());
-	const latestSystem = [...messages]
-		.reverse()
-		.find((message) => message.role === "system" && message.content.trim());
-	const latestEvent = [...session.agentEvents]
-		.reverse()
-		.find((event) => event.type !== "text-delta" && event.type !== "raw");
-	const files = new Set<string>();
-	const checks = new Set<string>();
-	const activity: GoalActivityInfo[] = session.agentEvents
-		.map((event, index) => {
-			if (event.type === "status") {
-				return {
-					id: `status-${index}`,
-					type: "status" as const,
-					label: event.label ?? event.status,
-					detail: null,
-					state:
-						event.status === "error"
-							? ("error" as const)
-							: event.status === "idle"
-								? ("complete" as const)
-								: ("running" as const),
-				};
-			}
-			if (event.type === "tool-call-start") {
-				collectStrings(event.input, ["path", "file", "file_path"], files);
-				if (event.toolName === "exec" || event.toolName === "bash") {
-					if (event.summary) checks.add(event.summary);
-				}
-				return {
-					id: event.toolCallId,
-					type: "tool" as const,
-					label: event.toolName,
-					detail: event.summary ?? null,
-					state: "running" as const,
-				};
-			}
-			if (event.type === "tool-call-end") {
-				return {
-					id: `${event.toolCallId}-end`,
-					type: "tool" as const,
-					label: event.error ? "Tool failed" : "Tool finished",
-					detail: event.error ?? null,
-					state: event.error ? ("error" as const) : ("complete" as const),
-				};
-			}
-			if (event.type === "result") {
-				return {
-					id: `result-${index}`,
-					type: "result" as const,
-					label: "Result",
-					detail: firstUsefulLine(event.text),
-					state: "complete" as const,
-				};
-			}
-			if (event.type === "error") {
-				return {
-					id: `error-${index}`,
-					type: "error" as const,
-					label: "Error",
-					detail: event.message,
-					state: "error" as const,
-				};
-			}
-			return null;
-		})
-		.filter((event): event is NonNullable<typeof event> => !!event)
-		.slice(-30);
-	if (latestSystem?.content) {
-		activity.push({
-			id: `system-${activity.length}`,
-			type: "system",
-			label: "System",
-			detail: firstUsefulLine(latestSystem.content),
-			state: session.goal?.status === "paused" ? "paused" : "complete",
-		});
-	}
-	const currentStep =
-		latestEvent?.type === "tool-call-start"
-			? `${latestEvent.toolName}${latestEvent.summary ? `: ${latestEvent.summary}` : ""}`
-			: latestEvent?.type === "status"
-				? (latestEvent.label ?? latestEvent.status)
-				: session.currentHandle
-					? "Working"
-					: session.goal?.status === "paused"
-						? "Paused"
-						: "Waiting";
-	const blocker =
-		session.goal?.status === "paused"
-			? latestSystem
-				? firstUsefulLine(latestSystem.content)
-				: "Paused"
-			: null;
-	return {
-		recentMessages,
-		brief: {
-			phase: session.currentHandle
-				? "Running"
-				: session.goal?.status === "paused"
-					? "Paused"
-					: "Active",
-			currentStep,
-			nextAction:
-				session.goal?.status === "paused"
-					? "Resume when ready"
-					: session.currentHandle
-						? "Continue current turn"
-						: "Continue goal loop",
-			blocker,
-			lastResult: latestAssistant
-				? firstUsefulLine(latestAssistant.content)
-				: null,
-		},
-		activity,
-		files: [...files].slice(-12),
-		checks: [...checks].slice(-8),
-	};
+function createSystemPrefix(
+	session: ChatSession,
+	includeWorkspace: boolean,
+	includePriorContext: boolean
+) {
+	const workspace =
+		includeWorkspace && !session.sessionId
+			? `<workspace-context>\n${[
+					"You are working in a multi-directory workspace.",
+					session.cwd
+						? `Primary working directory (use this as the execution root unless the user says otherwise): ${session.cwd}`
+						: null,
+					session.referencePaths.length
+						? `Additional reference directories available in this workspace:\n${session.referencePaths.map((path) => `- ${path}`).join("\n")}`
+						: null,
+					session.referencePaths.length
+						? "The additional directories are supporting context. Read and reference them when relevant, but treat the primary working directory as the default root."
+						: null,
+				]
+					.filter(Boolean)
+					.join("\n\n")}\n</workspace-context>`
+			: "";
+	const contextLines = includePriorContext
+		? session.messageBuffer
+				.getMessages()
+				.slice(-20)
+				.flatMap((message) =>
+					message.role === "user"
+						? [`User: ${message.content.slice(0, 500)}`]
+						: message.role === "assistant" && message.content
+							? [`Assistant: ${message.content.slice(0, 500)}`]
+							: []
+				)
+		: [];
+	const prior = contextLines.length
+		? `<prior-conversation-context>\nThe following is a summary of the prior conversation in this chat session (from a different model). Use it as context for the request below.\n\n${contextLines.join("\n\n")}\n</prior-conversation-context>`
+		: "";
+	return [workspace, prior].filter(Boolean).join("\n\n");
 }
 
 async function handleGoalCommand(
@@ -697,28 +389,20 @@ async function handleGoalCommand(
 			turns: 0,
 			startedAt: Date.now(),
 		};
-		session.messageBuffer.pushSystem(`Goal started: ${command.objective}`);
-		broadcast(session, {
-			type: "chat:system",
-			paneId,
-			message: `Goal started: ${command.objective}`,
-		});
+		emitSystemMessage(session, paneId, `Goal started: ${command.objective}`);
 		return createGoalPrompt(command.objective);
 	}
 
 	if (command.action === "pause") {
 		if (session.goal) session.goal.status = "paused";
 		const message = session.goal ? "Goal paused" : "No active goal";
-		session.messageBuffer.pushSystem(message);
-		broadcast(session, { type: "chat:system", paneId, message });
+		emitSystemMessage(session, paneId, message);
 		return null;
 	}
 
 	if (command.action === "resume") {
 		if (!session.goal) {
-			const message = "No goal to resume";
-			session.messageBuffer.pushSystem(message);
-			broadcast(session, { type: "chat:system", paneId, message });
+			emitSystemMessage(session, paneId, "No goal to resume");
 			return null;
 		}
 		session.goal.status = "active";
@@ -727,64 +411,44 @@ async function handleGoalCommand(
 
 	if (command.action === "clear") {
 		session.goal = null;
-		const message = "Goal cleared";
-		session.messageBuffer.pushSystem(message);
-		broadcast(session, { type: "chat:system", paneId, message });
+		emitSystemMessage(session, paneId, "Goal cleared");
 		return null;
 	}
 
 	const message = session.goal
 		? `Goal ${session.goal.status}: ${session.goal.objective} (${session.goal.turns} turns)`
 		: "No active goal";
-	session.messageBuffer.pushSystem(message);
-	broadcast(session, { type: "chat:system", paneId, message });
+	emitSystemMessage(session, paneId, message);
 	return null;
 }
 
 export const ChatService = {
-	async sendMessage(
-		paneId: string,
-		text: string,
-		ws: ServerWebSocket<any>,
-		cwd?: string,
-		referencePaths?: string[],
-		clientSessionId?: string | null,
-		agentKind: ChatAgentKind = "claude",
-		model?: string,
-		reasoningLevel?: string,
-		systemPrefix?: string
-	) {
-		const nextReferencePaths = normalizeReferencePaths(referencePaths);
-		const nextCwd = normalizeCwd(cwd);
-		let session = sessions.get(paneId);
-		if (!session) {
-			const messageBuffer = new ChatMessageBuffer();
-			const transcript = await readChatTranscript(paneId);
-			if (transcript?.length) {
-				messageBuffer.replaceMessages(transcript);
-			}
-			session = {
-				paneId,
-				agentKind,
-				model,
-				reasoningLevel,
-				sessionId: clientSessionId || null,
-				clients: new Set([ws]),
-				currentHandle: null,
-				cwd: nextCwd,
-				referencePaths: nextReferencePaths,
-				messageBuffer,
-				cleanupTimer: null,
-				transcriptPersistTimer: null,
-				cancelled: false,
-				goal: null,
-				agentEvents: [],
-			};
-			sessions.set(paneId, session);
-		}
+	async sendMessage({
+		agentKind = "claude",
+		clientSessionId,
+		cwd,
+		model,
+		paneId,
+		reasoningLevel,
+		referencePaths,
+		text,
+		ws,
+	}: SendChatMessageInput) {
+		const nextReferencePaths = normalizeChatReferencePaths(referencePaths);
+		const nextCwd = normalizeChatCwd(cwd);
+		const session = await chatRuntime.ensureSession(
+			paneId,
+			ws,
+			agentKind,
+			nextCwd,
+			nextReferencePaths,
+			clientSessionId || null,
+			model,
+			reasoningLevel
+		);
 		session.referencePaths ??= [];
-		clearCleanupTimer(session);
-		if (session.agentKind !== agentKind) {
+		const agentKindChanged = session.agentKind !== agentKind;
+		if (agentKindChanged) {
 			session.sessionId = null; // clear when switching agent kinds
 		}
 		session.agentKind = agentKind;
@@ -794,14 +458,27 @@ export const ChatService = {
 		if (cwd) session.cwd = nextCwd;
 		if (referencePaths) session.referencePaths = nextReferencePaths;
 		if (!session.sessionId && clientSessionId)
-			updateSessionId(session, paneId, clientSessionId);
+			chatRuntime.updateSessionId(session, clientSessionId);
+		const systemPrefix = createSystemPrefix(
+			session,
+			!!cwd || nextReferencePaths.length > 0,
+			agentKindChanged
+		);
 
 		session.messageBuffer.pushUser(text);
-		persistChatTranscript(session, paneId);
-		broadcastExcept(session, ws, { type: "chat:user_message", paneId, text });
+		chatRuntime.persistTranscript(session, paneId);
+		chatRuntime.send(
+			session,
+			{
+				type: "chat:user_message",
+				paneId,
+				text,
+			},
+			ws
+		);
 
 		if (session.currentHandle) {
-			sendTo(ws, {
+			chatRuntime.send(ws, {
 				type: "chat:error",
 				paneId,
 				error: `${getAgentAdapter(session.agentKind).displayName} is still responding`,
@@ -815,7 +492,7 @@ export const ChatService = {
 		if (goalCommand) {
 			const goalPrompt = await handleGoalCommand(session, paneId, goalCommand);
 			if (!goalPrompt) {
-				finalizeChatTurn(session, paneId);
+				chatRuntime.finalizeTurn(session);
 				return;
 			}
 			prompt = goalPrompt;
@@ -824,21 +501,17 @@ export const ChatService = {
 			prompt = `${systemPrefix}\n\n${prompt}`;
 		}
 
-		let checkpointId: string | null = null;
-		try {
-			checkpointId = await CheckpointService.createCheckpoint(
-				paneId,
-				session.cwd,
-				text
-			);
-			broadcast(session, { type: "checkpoint:created", paneId, checkpointId });
-		} catch (e) {
-			console.error("[Checkpoint] Failed to create:", e);
-		}
+		const emit = chatRuntime.send.bind(chatRuntime, session);
+		const checkpointId = await createChatCheckpoint(
+			paneId,
+			session.cwd,
+			text,
+			emit
+		);
 
 		try {
 			const isGoalRun = session.goal?.status === "active";
-			let result = await runAgent(session, paneId, prompt, !isGoalRun);
+			let result = await runAgent(session, paneId, prompt, false);
 			if (isGoalRun && session.goal?.status === "active") {
 				session.goal.turns += 1;
 				let resultStatus = goalResultStatus(getLastAssistantMessage(result));
@@ -858,34 +531,44 @@ export const ChatService = {
 					session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
 					const message = `Goal achieved after ${session.goal.turns} turns`;
 					session.goal = null;
-					session.messageBuffer.pushSystem(message);
-					broadcast(session, { type: "chat:system", paneId, message });
+					emitSystemMessage(session, paneId, message);
 				} else if (session.goal && resultStatus === "paused") {
 					session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
 					session.goal.status = "paused";
 					const message =
 						"Goal paused because Codex needs input. Reply with the missing detail or use /goal resume.";
-					session.messageBuffer.pushSystem(message);
-					broadcast(session, { type: "chat:system", paneId, message });
+					emitSystemMessage(session, paneId, message);
 				} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
 					session.goal.status = "paused";
-					const message = `Goal paused after ${GOAL_MAX_TURNS} turns`;
-					session.messageBuffer.pushSystem(message);
-					broadcast(session, { type: "chat:system", paneId, message });
+					emitSystemMessage(
+						session,
+						paneId,
+						`Goal paused after ${GOAL_MAX_TURNS} turns`
+					);
 				}
-				finalizeChatTurn(session, paneId);
 			}
-			await finalizeCheckpoint(session, paneId, checkpointId);
+			const changedFileCount = await finalizeChatCheckpoint(
+				session,
+				paneId,
+				checkpointId,
+				emit
+			);
+			ensureVisibleTurnCompletion(session, paneId, changedFileCount, emit);
+			chatRuntime.finalizeTurn(session);
 		} catch (e) {
 			session.currentHandle = null;
 			const errMsg =
 				e instanceof Error ? e.message : `Failed to run ${session.agentKind}`;
-			session.messageBuffer.pushSystem(errMsg);
+			emitSystemMessage(session, paneId, errMsg);
 			session.messageBuffer.finalize();
-			persistChatTranscript(session, paneId);
-			broadcast(session, { type: "chat:error", paneId, error: errMsg });
-			await finalizeCheckpoint(session, paneId, checkpointId);
-			scheduleSessionCleanup(session);
+			chatRuntime.persistTranscript(session, paneId);
+			chatRuntime.send(session, {
+				type: "chat:error",
+				paneId,
+				error: errMsg,
+			});
+			await finalizeChatCheckpoint(session, paneId, checkpointId, emit);
+			chatRuntime.scheduleCleanup(session);
 		}
 	},
 
@@ -895,92 +578,13 @@ export const ChatService = {
 		ws: ServerWebSocket<any>,
 		cwd?: string
 	) {
-		const effectiveCwd = normalizeCwd(cwd);
-		const claudeCmd = resolveAgentBinary("claude");
-
-		sendTo(ws, { type: "chat:btw:start", paneId, question: text });
-
-		let fullText = "";
-
-		try {
-			const proc = Bun.spawn(
-				[
-					claudeCmd,
-					"-p",
-					text,
-					"--dangerously-skip-permissions",
-					"--output-format",
-					"stream-json",
-					"--verbose",
-				],
-				{
-					stdout: "pipe",
-					stderr: "pipe",
-					cwd: effectiveCwd,
-					env: createAgentEnv("claude"),
-				}
-			);
-			const stderrPromise = drainStreamToString(
-				proc.stderr as ReadableStream<Uint8Array>
-			);
-			const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-			const decoder = new TextDecoder();
-			let leftover = "";
-
-			const handleBtwEvent = (event: any) => {
-				if (
-					event.type === "content_block_delta" &&
-					event.delta?.type === "text_delta"
-				) {
-					fullText += event.delta.text;
-					sendTo(ws, {
-						type: "chat:btw:delta",
-						paneId,
-						text: event.delta.text,
-					});
-				} else if (
-					event.type === "content_block_start" &&
-					event.content_block?.type === "text" &&
-					event.content_block.text
-				) {
-					fullText += event.content_block.text;
-					sendTo(ws, {
-						type: "chat:btw:delta",
-						paneId,
-						text: event.content_block.text,
-					});
-				} else if (event.type === "result" && event.result && !fullText) {
-					fullText = event.result;
-				}
-			};
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				leftover += decoder.decode(value, { stream: true });
-				leftover = parseNdjsonLines(leftover, handleBtwEvent);
-			}
-			flushNdjsonLeftover(leftover, handleBtwEvent);
-			await proc.exited;
-			const stderrText = (await stderrPromise).trim();
-			if (!fullText && stderrText) {
-				fullText = stderrText;
-			}
-		} catch (err: any) {
-			if (!fullText) {
-				fullText = err.message || "(error)";
-			}
-		}
-
-		sendTo(ws, {
-			type: "chat:btw:done",
-			paneId,
-			answer: fullText || "(no response)",
-		});
+		await runBtwChatMessage(paneId, text, cwd, (message) =>
+			chatRuntime.send(ws, message)
+		);
 	},
 
 	stopGeneration(paneId: string) {
-		const session = sessions.get(paneId);
+		const session = chatRuntime.getSession(paneId);
 		if (session) {
 			session.cancelled = true;
 			session.goal = null;
@@ -990,11 +594,15 @@ export const ChatService = {
 				session.currentHandle.stop();
 			} catch {}
 		}
-		if (session) persistChatTranscript(session, paneId);
+		if (session) {
+			session.currentHandle = null;
+			chatRuntime.finalizeTurn(session);
+			sendChatStatus(session, paneId, "idle", false);
+		}
 	},
 
 	destroySession(paneId: string) {
-		const session = sessions.get(paneId);
+		const session = chatRuntime.getSession(paneId);
 		if (session) {
 			session.cancelled = true;
 			session.goal = null;
@@ -1005,60 +613,61 @@ export const ChatService = {
 			} catch {}
 		}
 		if (session) {
-			clearCleanupTimer(session);
-			persistChatTranscript(session, paneId);
+			chatRuntime.clearCleanupTimer(session);
+			chatRuntime.persistTranscript(session, paneId);
 		}
-		sessions.delete(paneId);
+		chatRuntime.deleteSession(paneId);
 	},
 
 	cleanupWs(ws: ServerWebSocket<any>) {
-		for (const session of sessions.values()) {
+		for (const session of chatRuntime.values()) {
 			session.clients.delete(ws);
-			scheduleSessionCleanup(session);
+			chatRuntime.scheduleCleanup(session);
 		}
 	},
 
 	async reassignWs(paneId: string, ws: ServerWebSocket<any>) {
-		const session = sessions.get(paneId);
+		const session = chatRuntime.getSession(paneId);
 		if (!session) {
 			const transcript = await readChatTranscript(paneId);
-			if (transcript?.length) {
-				sendTo(ws, {
-					type: "chat:sync",
-					paneId,
-					messages: transcript,
-					isStreaming: false,
-				});
-			}
+			chatRuntime.send(ws, {
+				type: "chat:sync",
+				paneId,
+				messages: transcript ?? [],
+				isStreaming: false,
+			});
+			sendChatStatus(ws, paneId, "idle", false);
 			return;
 		}
-		clearCleanupTimer(session);
+		chatRuntime.clearCleanupTimer(session);
 		session.clients.add(ws);
 		if (session.sessionId)
-			sendTo(ws, {
+			chatRuntime.send(ws, {
 				type: "chat:session",
 				paneId,
 				sessionId: session.sessionId,
 			});
 		const messages = session.messageBuffer.getMessages();
-		if (messages.length > 0)
-			sendTo(ws, {
-				type: "chat:sync",
-				paneId,
-				messages,
-				isStreaming: session.messageBuffer.streaming,
-			});
-		if (session.currentHandle)
-			sendTo(ws, {
-				type: "chat:status",
-				paneId,
-				status: session.messageBuffer.streaming ? "responding" : "thinking",
-				isLoading: true,
-			});
+		chatRuntime.send(ws, {
+			type: "chat:sync",
+			paneId,
+			messages,
+			isStreaming: session.messageBuffer.streaming,
+		});
+		sendChatStatus(
+			ws,
+			paneId,
+			session.currentHandle
+				? session.messageBuffer.streaming
+					? "responding"
+					: "thinking"
+				: "idle",
+			!!session.currentHandle
+		);
 	},
 
 	listSessions(): AgentSessionInfo[] {
-		return Array.from(sessions.values())
+		return Array.from(chatRuntime.values())
 			.filter((s) => s.currentHandle || s.clients.size > 0)
 			.map((s) => ({
 				paneId: s.paneId,
@@ -1072,9 +681,9 @@ export const ChatService = {
 			}));
 	},
 
-	listGoals(): AgentGoalInfo[] {
+	listGoals() {
 		const now = Date.now();
-		return Array.from(sessions.values())
+		return Array.from(chatRuntime.values())
 			.filter((session) => !!session.goal)
 			.map((session) => {
 				const view = deriveGoalView(session);
@@ -1096,7 +705,7 @@ export const ChatService = {
 	},
 
 	destroyAll() {
-		for (const [_, session] of sessions) {
+		for (const session of chatRuntime.values()) {
 			session.cancelled = true;
 			session.goal = null;
 			if (session.currentHandle) {
@@ -1104,8 +713,8 @@ export const ChatService = {
 					session.currentHandle.kill();
 				} catch {}
 			}
-			clearCleanupTimer(session);
+			chatRuntime.clearCleanupTimer(session);
 		}
-		sessions.clear();
+		chatRuntime.clear();
 	},
 };

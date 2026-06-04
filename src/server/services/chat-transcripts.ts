@@ -11,24 +11,36 @@ export interface ChatTranscriptMessage {
 	isStreaming?: boolean;
 }
 
+const transcriptCache = new Map<string, ChatTranscriptMessage[] | null>();
+
+function cloneTranscript(
+	messages: ChatTranscriptMessage[] | null
+): ChatTranscriptMessage[] | null {
+	return messages?.map((message) => ({ ...message })) ?? null;
+}
+
 export async function readChatTranscript(
 	paneId: string
 ): Promise<ChatTranscriptMessage[] | null> {
+	if (transcriptCache.has(paneId)) {
+		return cloneTranscript(transcriptCache.get(paneId) ?? null);
+	}
 	const transcript = await readJson<unknown>(
 		userDataPath(CHAT_TRANSCRIPTS_DIR, `${paneId}.json`),
 		null
 	);
-	return isChatTranscript(transcript) ? transcript : null;
+	const messages = isChatTranscript(transcript) ? transcript : null;
+	transcriptCache.set(paneId, cloneTranscript(messages));
+	return cloneTranscript(messages);
 }
 
 export async function writeChatTranscript(
 	paneId: string,
 	messages: ChatTranscriptMessage[]
 ): Promise<void> {
-	await writeJson(
-		userDataPath(CHAT_TRANSCRIPTS_DIR, `${paneId}.json`),
-		prepareTranscriptForStorage(messages)
-	);
+	const stored = prepareTranscriptForStorage(messages);
+	transcriptCache.set(paneId, cloneTranscript(stored));
+	await writeJson(userDataPath(CHAT_TRANSCRIPTS_DIR, `${paneId}.json`), stored);
 }
 
 export function prepareTranscriptForStorage(

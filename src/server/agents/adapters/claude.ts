@@ -1,3 +1,4 @@
+import { isChatStreamEvent } from "../../../features/chat/agent-chat-shared.ts";
 import {
 	createAgentEnv,
 	resolveAgentBinary,
@@ -11,15 +12,17 @@ import {
 } from "../stream-utils.ts";
 import type { AgentAdapter, AgentHandle, AgentRunContext } from "../types.ts";
 
-function emitClaudeAgentEvent(event: any, ctx: AgentRunContext) {
+function emitClaudeAgentEvent(event: unknown, ctx: AgentRunContext) {
 	const normalized = normalizeClaudeEvent(event);
 	if (normalized) ctx.emitAgentEvent(normalized);
 }
 
-function normalizeClaudeEvent(event: any): AgentEvent | null {
-	if (!event?.type) return null;
-	if (event.type === "content_block_start") {
-		const block = event.content_block;
+function normalizeClaudeEvent(event: unknown): AgentEvent | null {
+	if (!event || typeof event !== "object") return null;
+	const data = event as Record<string, any>;
+	if (!data.type) return null;
+	if (data.type === "content_block_start") {
+		const block = data.content_block;
 		if (
 			block?.type === "text" &&
 			typeof block.text === "string" &&
@@ -32,15 +35,15 @@ function normalizeClaudeEvent(event: any): AgentEvent | null {
 			const input = block.input ?? {};
 			return {
 				type: "tool-call-start",
-				toolCallId: String(event.index ?? block.id ?? `${toolName}:latest`),
+				toolCallId: String(data.index ?? block.id ?? `${toolName}:latest`),
 				toolName,
 				input,
 				summary: summarizeToolInput(toolName, input),
 			};
 		}
 	}
-	if (event.type === "content_block_delta") {
-		const delta = event.delta;
+	if (data.type === "content_block_delta") {
+		const delta = data.delta;
 		if (delta?.type === "text_delta" && typeof delta.text === "string") {
 			return { type: "text-delta", text: delta.text };
 		}
@@ -56,22 +59,22 @@ function normalizeClaudeEvent(event: any): AgentEvent | null {
 		) {
 			return {
 				type: "tool-call-delta",
-				toolCallId: String(event.index ?? "latest"),
+				toolCallId: String(data.index ?? "latest"),
 				delta: delta.partial_json,
 			};
 		}
 	}
-	if (event.type === "result" && typeof event.result === "string") {
-		return { type: "result", text: event.result };
+	if (data.type === "result" && typeof data.result === "string") {
+		return { type: "result", text: data.result };
 	}
-	if (event.type === "error" && typeof event.message === "string") {
-		return { type: "error", message: event.message };
+	if (data.type === "error" && typeof data.message === "string") {
+		return { type: "error", message: data.message };
 	}
-	if (event.type === "system" && event.subtype === "init") {
+	if (data.type === "system" && data.subtype === "init") {
 		return {
 			type: "raw",
 			provider: "claude",
-			eventType: event.type,
+			eventType: data.type,
 			event,
 		};
 	}
@@ -94,22 +97,31 @@ export const claudeAdapter: AgentAdapter<undefined> = {
 			async run() {
 				try {
 					let lastAssistantMessage = "";
-					const handleEvent = (event: any) => {
-						if (event?.session_id) {
-							const isNewSession = ctx.getSessionId() !== event.session_id;
-							ctx.updateSessionId(event.session_id);
+					const handleEvent = (event: unknown) => {
+						const sessionId =
+							event && typeof event === "object"
+								? (event as { session_id?: unknown }).session_id
+								: undefined;
+						if (typeof sessionId === "string") {
+							const isNewSession = ctx.getSessionId() !== sessionId;
+							ctx.updateSessionId(sessionId);
 							if (isNewSession) {
 								ctx.emitAgentEvent({
 									type: "session",
-									providerSessionId: event.session_id,
+									providerSessionId: sessionId,
 								});
 							}
 						}
-						if (event?.type === "result" && typeof event.result === "string") {
-							lastAssistantMessage = event.result;
+						if (
+							event &&
+							typeof event === "object" &&
+							(event as { type?: unknown }).type === "result" &&
+							typeof (event as { result?: unknown }).result === "string"
+						) {
+							lastAssistantMessage = (event as { result: string }).result;
 						}
 						emitClaudeAgentEvent(event, ctx);
-						ctx.emitChatEvent(event);
+						if (isChatStreamEvent(event)) ctx.emitChatEvent(event);
 					};
 					const args = [
 						resolveAgentBinary("claude"),

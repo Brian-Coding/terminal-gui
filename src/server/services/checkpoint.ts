@@ -25,6 +25,12 @@ interface Checkpoint {
 	reverted: boolean;
 }
 
+export interface CheckpointInlineDiff {
+	path: string;
+	oldString: string;
+	newString: string;
+}
+
 interface CheckpointMeta {
 	id: string;
 	paneId: string;
@@ -92,7 +98,8 @@ function isBinary(filePath: string): boolean {
 
 async function runGit(
 	args: string[],
-	cwd: string
+	cwd: string,
+	trimStdout = true
 ): Promise<{ code: number; stdout: string }> {
 	try {
 		const proc = Bun.spawn(["git", ...args], {
@@ -100,8 +107,10 @@ async function runGit(
 			stdout: "pipe",
 			stderr: "pipe",
 		});
-		const stdout = (await new Response(proc.stdout).text()).trim();
-		return { code: await proc.exited, stdout };
+		const stdoutText = await new Response(proc.stdout).text();
+		const code = await proc.exited;
+		const stdout = trimStdout ? stdoutText.trim() : stdoutText;
+		return { code, stdout };
 	} catch {
 		return { code: 1, stdout: "" };
 	}
@@ -163,7 +172,11 @@ async function storeBlob(gitRoot: string, content: string): Promise<string> {
 }
 
 async function readBlob(gitRoot: string, sha: string): Promise<string | null> {
-	const { code, stdout } = await runGit(["cat-file", "-p", sha], gitRoot);
+	const { code, stdout } = await runGit(
+		["cat-file", "-p", sha],
+		gitRoot,
+		false
+	);
 	return code === 0 ? stdout : null;
 }
 
@@ -182,8 +195,21 @@ async function gitShowFile(
 	commitSha: string,
 	relativePath: string
 ): Promise<string | null> {
-	const r = await runGit(["show", `${commitSha}:${relativePath}`], gitRoot);
+	const r = await runGit(
+		["show", `${commitSha}:${relativePath}`],
+		gitRoot,
+		false
+	);
 	return r.code === 0 ? r.stdout : null;
+}
+
+async function gitSnapshotBlob(
+	gitRoot: string,
+	commitSha: string | null,
+	relativePath: string
+): Promise<string | null> {
+	const content = await gitShowFile(gitRoot, commitSha ?? "HEAD", relativePath);
+	return content !== null ? await storeBlob(gitRoot, content) : null;
 }
 
 async function walkDir(
@@ -209,7 +235,7 @@ async function captureGitSnapshot(
 	const args = ["status", "--porcelain"];
 	if (cwdRelative) args.push("--", cwdRelative);
 
-	const { stdout: output } = await runGit(args, gitRoot);
+	const { stdout: output } = await runGit(args, gitRoot, false);
 	const snapshot: Record<string, string | null> = {};
 
 	for (const { status, path } of parsePorcelain(output)) {
@@ -325,12 +351,15 @@ export const CheckpointService = {
 		]);
 		const changedFiles: FileSnapshot[] = [];
 		for (const path of allPaths) {
-			const before = cp.beforeSnapshot[path] ?? null;
+			const hasBefore = path in cp.beforeSnapshot;
+			const before = hasBefore
+				? (cp.beforeSnapshot[path] ?? null)
+				: cp.gitRoot
+					? await gitSnapshotBlob(cp.gitRoot, cp.headSha, path)
+					: null;
 			const after = afterSnapshot[path] ?? null;
-			if (
-				before !== after ||
-				path in cp.beforeSnapshot !== path in afterSnapshot
-			) {
+			const hasAfter = path in afterSnapshot;
+			if (before !== after || hasBefore !== hasAfter) {
 				changedFiles.push({
 					relativePath: path,
 					blobBefore: before,
@@ -399,6 +428,25 @@ export const CheckpointService = {
 	getCheckpointMeta(checkpointId: string): CheckpointMeta | null {
 		const cp = findCheckpoint(checkpointId);
 		return cp ? toMeta(cp) : null;
+	},
+
+	async getInlineDiffs(checkpointId: string): Promise<CheckpointInlineDiff[]> {
+		const cp = findCheckpoint(checkpointId);
+		if (!cp) return [];
+		const diffs: CheckpointInlineDiff[] = [];
+		for (const file of cp.changedFiles) {
+			if (file.blobBefore === null || file.blobAfter === null) continue;
+			const before = await resolveContent(cp, file.blobBefore);
+			const after = await resolveContent(cp, file.blobAfter);
+			if (before === null || after === null || before === after) continue;
+			if (before.length + after.length > MAX_FILE_SIZE) continue;
+			diffs.push({
+				path: file.relativePath,
+				oldString: before,
+				newString: after,
+			});
+		}
+		return diffs;
 	},
 
 	async save(): Promise<void> {

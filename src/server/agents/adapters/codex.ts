@@ -27,68 +27,102 @@ interface CodexRunState {
 	hasFinalAssistantMessage: boolean;
 	completedFromEvent: boolean;
 	lastAssistantMessage: string;
+	lastChatBlockRole: "assistant" | "tool" | null;
 	currentToolId: string | null;
 	fileSnapshots: Map<string, string | null>;
+	fileWatchers: Map<string, ReturnType<typeof setInterval>>;
 	activePatchPaths: string[];
 	commandOutputs: Map<string, string>;
 }
 
 const MAX_INLINE_DIFF_CHARS = 80_000;
 
-function extractText(value: any): string {
+function asRecord(value: unknown): Record<string, unknown> | null {
+	return value && typeof value === "object"
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+function stringField(
+	record: Record<string, unknown> | null,
+	key: string
+): string {
+	const value = record?.[key];
+	return typeof value === "string" ? value : "";
+}
+
+function firstString(record: Record<string, unknown> | null, keys: string[]) {
+	for (const key of keys) {
+		const value = stringField(record, key);
+		if (value) return value;
+	}
+	return "";
+}
+
+function arrayField(
+	record: Record<string, unknown> | null,
+	key: string
+): unknown[] {
+	const value = record?.[key];
+	return Array.isArray(value) ? value : [];
+}
+
+function extractText(value: unknown): string {
 	if (!value) return "";
 	if (typeof value === "string") return value;
-	if (typeof value.text === "string") return value.text;
-	if (typeof value.message === "string") return value.message;
-	if (typeof value.content === "string") return value.content;
-	if (typeof value.delta === "string") return value.delta;
-	if (typeof value.last_agent_message === "string")
-		return value.last_agent_message;
-	if (typeof value.output_text === "string") return value.output_text;
-	if (Array.isArray(value.content)) {
-		return value.content
-			.map((item: any) => extractText(item))
+	const record = asRecord(value);
+	if (!record) return "";
+	const text = firstString(record, [
+		"text",
+		"message",
+		"content",
+		"delta",
+		"last_agent_message",
+		"output_text",
+	]);
+	if (text) return text;
+	const content = record.content;
+	if (Array.isArray(content)) {
+		return content
+			.map((item) => extractText(item))
 			.filter(Boolean)
 			.join("");
 	}
 	return "";
 }
 
-function summarizeToolEvent(toolName: string, payload: any): string {
-	if (!payload) return toolName;
-	if (typeof payload.command === "string" && payload.command) {
-		return trimSummary(payload.command, 48);
+function summarizeToolEvent(toolName: string, payload: unknown): string {
+	const record = asRecord(payload);
+	if (!record) return toolName;
+	for (const key of ["command", "cmd", "query"]) {
+		const value = stringField(record, key);
+		if (value) return trimSummary(value, 48);
 	}
-	if (typeof payload.cmd === "string" && payload.cmd) {
-		return trimSummary(payload.cmd, 48);
+	for (const key of ["path", "file"]) {
+		const value = stringField(record, key);
+		if (value) return basename(value);
 	}
-	if (typeof payload.query === "string" && payload.query) {
-		return trimSummary(payload.query, 48);
-	}
-	if (typeof payload.path === "string" && payload.path) {
-		return basename(payload.path);
-	}
-	if (typeof payload.file === "string" && payload.file) {
-		return basename(payload.file);
-	}
-	if (Array.isArray(payload.files) && payload.files.length > 0) {
-		const first = String(payload.files[0] ?? "");
-		return payload.files.length === 1
+	const files = arrayField(record, "files");
+	if (files.length > 0) {
+		const first = String(files[0] ?? "");
+		return files.length === 1
 			? basename(first)
-			: `${basename(first)} +${payload.files.length - 1}`;
+			: `${basename(first)} +${files.length - 1}`;
 	}
-	if (Array.isArray(payload.changes) && payload.changes.length > 0) {
-		const first = payload.changes[0];
+	const changes = arrayField(record, "changes");
+	if (changes.length > 0) {
+		const first = changes[0];
+		const firstRecord = asRecord(first);
 		const firstFile =
 			typeof first === "string"
 				? first
-				: (first?.file_path ?? first?.path ?? first?.file ?? "");
+				: firstString(firstRecord, ["file_path", "path", "file"]);
 		if (firstFile) {
-			return payload.changes.length === 1
+			return changes.length === 1
 				? basename(firstFile)
-				: `${basename(firstFile)} +${payload.changes.length - 1}`;
+				: `${basename(firstFile)} +${changes.length - 1}`;
 		}
-		return `${payload.changes.length} changes`;
+		return `${changes.length} changes`;
 	}
 	return toolName;
 }
@@ -162,7 +196,7 @@ function getDisplayPath(ctx: AgentRunContext, absolutePath: string): string {
 
 function readSnapshot(path: string): string | null {
 	try {
-		if (!existsSync(path)) return "";
+		if (!existsSync(path)) return null;
 		const stat = statSync(path);
 		if (!stat.isFile() || stat.size > MAX_INLINE_DIFF_CHARS) return null;
 		return readFileSync(path, "utf8");
@@ -171,27 +205,26 @@ function readSnapshot(path: string): string | null {
 	}
 }
 
-function getFileChangePaths(ctx: AgentRunContext, item: any): string[] {
+function getFileChangePaths(ctx: AgentRunContext, item: unknown): string[] {
+	const record = asRecord(item);
 	const candidates: unknown[] = [];
-	if (Array.isArray(item?.changes)) {
-		for (const change of item.changes) {
-			candidates.push(
-				typeof change === "string"
-					? change
-					: (change?.path ?? change?.file_path ?? change?.file)
-			);
+	for (const change of arrayField(record, "changes")) {
+		if (typeof change === "string") {
+			candidates.push(change);
+		} else {
+			const changeRecord = asRecord(change);
+			candidates.push(firstString(changeRecord, ["path", "file_path", "file"]));
 		}
 	}
-	if (Array.isArray(item?.files)) {
-		for (const file of item.files) {
-			candidates.push(
-				typeof file === "string"
-					? file
-					: (file?.path ?? file?.file_path ?? file?.file)
-			);
+	for (const file of arrayField(record, "files")) {
+		if (typeof file === "string") {
+			candidates.push(file);
+		} else {
+			const fileRecord = asRecord(file);
+			candidates.push(firstString(fileRecord, ["path", "file_path", "file"]));
 		}
 	}
-	candidates.push(item?.path, item?.file_path, item?.file);
+	candidates.push(firstString(record, ["path", "file_path", "file"]));
 	const paths = candidates
 		.map((candidate) => resolveChangedPath(ctx, candidate))
 		.filter((path: string | null): path is string => Boolean(path));
@@ -201,7 +234,7 @@ function getFileChangePaths(ctx: AgentRunContext, item: any): string[] {
 function handleCodexEvent(
 	ctx: AgentRunContext,
 	state: CodexRunState,
-	event: any
+	event: unknown
 ) {
 	const closeTool = () => {
 		if (!state.toolOpen) return;
@@ -229,6 +262,7 @@ function handleCodexEvent(
 		});
 		state.assistantOpen = true;
 		state.sawAssistantStream = true;
+		state.lastChatBlockRole = "assistant";
 	};
 	const startTool = (name: string, input: unknown = {}) => {
 		closeAssistant();
@@ -247,6 +281,7 @@ function handleCodexEvent(
 		});
 		state.toolOpen = true;
 		state.currentToolId = toolCallId;
+		state.lastChatBlockRole = "tool";
 	};
 	const toolDelta = (textDelta: string) => {
 		if (!state.toolOpen || !textDelta) return;
@@ -270,6 +305,8 @@ function handleCodexEvent(
 			delta: { type: "text_delta", text: textDelta },
 		});
 		ctx.emitAgentEvent({ type: "text-delta", text: textDelta });
+		state.lastAssistantMessage += textDelta;
+		state.hasFinalAssistantMessage = true;
 	};
 	const emitEditDiff = (
 		absolutePath: string,
@@ -286,27 +323,48 @@ function handleCodexEvent(
 		startTool("Edit", input);
 		closeTool();
 	};
+	const emitLiveDiffForPath = (path: string, keepWatching: boolean) => {
+		const before = state.fileSnapshots.get(path);
+		const after = readSnapshot(path);
+		if (before !== null && before !== undefined && after !== null) {
+			if (before !== after) {
+				emitEditDiff(path, before, after);
+				state.fileSnapshots.set(path, after);
+			}
+		}
+		if (!keepWatching) {
+			const watcher = state.fileWatchers.get(path);
+			if (watcher) clearInterval(watcher);
+			state.fileWatchers.delete(path);
+			state.fileSnapshots.delete(path);
+		}
+	};
+	const watchPaths = (paths: readonly string[]) => {
+		for (const path of paths) {
+			if (state.fileWatchers.has(path)) continue;
+			const watcher = setInterval(() => {
+				emitLiveDiffForPath(path, true);
+			}, 250);
+			state.fileWatchers.set(path, watcher);
+		}
+	};
 	const snapshotPaths = (paths: readonly string[]) => {
 		for (const path of paths) {
 			state.fileSnapshots.set(path, readSnapshot(path));
 		}
+		watchPaths(paths);
 	};
 	const emitDiffsForPaths = (paths: readonly string[]) => {
 		for (const path of paths) {
-			const before = state.fileSnapshots.get(path);
-			const after = readSnapshot(path);
-			state.fileSnapshots.delete(path);
-			if (before !== null && before !== undefined && after !== null) {
-				emitEditDiff(path, before, after);
-			}
+			emitLiveDiffForPath(path, false);
 		}
 	};
-	const emitCommandOutputDelta = (item: any) => {
-		if (typeof item?.aggregated_output !== "string" || !item.aggregated_output)
-			return;
-		const itemId = typeof item.id === "string" ? item.id : "latest";
+	const emitCommandOutputDelta = (item: unknown) => {
+		const itemRecord = asRecord(item);
+		const nextOutput = stringField(itemRecord, "aggregated_output");
+		if (!nextOutput) return;
+		const itemId = stringField(itemRecord, "id") || "latest";
 		const previousOutput = state.commandOutputs.get(itemId) ?? "";
-		const nextOutput = item.aggregated_output;
 		const delta = nextOutput.startsWith(previousOutput)
 			? nextOutput.slice(previousOutput.length)
 			: nextOutput;
@@ -314,22 +372,26 @@ function handleCodexEvent(
 		state.commandOutputs.set(itemId, nextOutput);
 	};
 
-	const eventType = String(event?.type ?? "");
+	const data = asRecord(event);
+	if (!data) return;
+	const eventType = stringField(data, "type");
 	const eventText = extractText(event);
-	const item = event?.item;
+	const item = data.item;
+	const itemRecord = asRecord(item);
 
-	if (event?.type === "thread.started" && event.thread_id) {
-		ctx.updateSessionId(event.thread_id);
-		ctx.emitAgentEvent({ type: "session", providerSessionId: event.thread_id });
-	} else if (event?.type === "turn.started") {
+	if (eventType === "thread.started" && stringField(data, "thread_id")) {
+		const threadId = stringField(data, "thread_id");
+		ctx.updateSessionId(threadId);
+		ctx.emitAgentEvent({ type: "session", providerSessionId: threadId });
+	} else if (eventType === "turn.started") {
 		ctx.emitStatus("thinking", true);
 		ctx.emitAgentEvent({ type: "status", status: "thinking" });
 	} else if (
-		event?.type === "item.started" &&
-		item?.type === "command_execution"
+		eventType === "item.started" &&
+		itemRecord?.type === "command_execution"
 	) {
 		const payload = {
-			command: item.command ?? "",
+			command: stringField(itemRecord, "command"),
 			cwd: ctx.cwd,
 		};
 		ctx.emitStatus("tool:exec", true);
@@ -338,28 +400,34 @@ function handleCodexEvent(
 			summary: summarizeToolEvent("exec", payload),
 			isStreaming: true,
 		});
-		if (typeof item.id === "string") {
-			state.commandOutputs.set(item.id, item.aggregated_output ?? "");
+		const itemId = stringField(itemRecord, "id");
+		if (itemId) {
+			state.commandOutputs.set(
+				itemId,
+				stringField(itemRecord, "aggregated_output")
+			);
 		}
 		startTool("exec", payload);
 	} else if (
-		event?.type === "item.updated" &&
-		item?.type === "command_execution"
+		eventType === "item.updated" &&
+		itemRecord?.type === "command_execution"
 	) {
 		emitCommandOutputDelta(item);
 	} else if (
-		event?.type === "item.completed" &&
-		item?.type === "command_execution"
+		eventType === "item.completed" &&
+		itemRecord?.type === "command_execution"
 	) {
 		emitCommandOutputDelta(item);
-		if (typeof item.id === "string") {
-			state.commandOutputs.delete(item.id);
-		}
+		const itemId = stringField(itemRecord, "id");
+		if (itemId) state.commandOutputs.delete(itemId);
 		closeTool();
-	} else if (event?.type === "item.started" && item?.type === "file_change") {
+	} else if (
+		eventType === "item.started" &&
+		itemRecord?.type === "file_change"
+	) {
 		const paths = getFileChangePaths(ctx, item);
 		snapshotPaths(paths);
-		const payload = { changes: item.changes ?? paths };
+		const payload = { changes: itemRecord.changes ?? paths };
 		ctx.emitStatus("tool:patch", true);
 		ctx.emitActivity({
 			toolName: "patch",
@@ -367,34 +435,35 @@ function handleCodexEvent(
 			isStreaming: true,
 		});
 		startTool("patch", payload);
-	} else if (event?.type === "item.completed" && item?.type === "file_change") {
+	} else if (
+		eventType === "item.completed" &&
+		itemRecord?.type === "file_change"
+	) {
 		const paths = getFileChangePaths(ctx, item);
 		closeTool();
 		emitDiffsForPaths(paths);
 	} else if (
-		event?.type === "item.completed" &&
-		item?.type === "agent_message"
+		eventType === "item.completed" &&
+		itemRecord?.type === "agent_message"
 	) {
-		const text = typeof item.text === "string" ? item.text : extractText(item);
+		const text = stringField(itemRecord, "text") || extractText(item);
 		if (text) {
 			assistantDelta(text);
 			closeAssistant();
 			state.lastAssistantMessage = text;
 			state.hasFinalAssistantMessage = true;
 		}
-	} else if (event?.type === "agent_message_delta") {
-		assistantDelta(event.delta ?? event.text ?? event.content ?? "");
+	} else if (eventType === "agent_message_delta") {
+		assistantDelta(firstString(data, ["delta", "text", "content"]));
 		ctx.emitStatus("responding", true);
 		ctx.emitAgentEvent({ type: "status", status: "responding" });
-	} else if (event?.type === "agent_message") {
-		const content = event.message ?? event.content ?? event.text ?? "";
-		if (typeof content === "string" && content) {
-			assistantDelta(content);
-		}
-	} else if (event?.type === "exec_command_begin") {
+	} else if (eventType === "agent_message") {
+		const content = firstString(data, ["message", "content", "text"]);
+		if (content) assistantDelta(content);
+	} else if (eventType === "exec_command_begin") {
 		const payload = {
-			command: event.parsed_cmd ?? event.command ?? event.cmd ?? "",
-			cwd: event.cwd ?? ctx.cwd,
+			command: firstString(data, ["parsed_cmd", "command", "cmd"]),
+			cwd: stringField(data, "cwd") || ctx.cwd,
 		};
 		ctx.emitStatus("tool:exec", true);
 		ctx.emitActivity({
@@ -403,19 +472,26 @@ function handleCodexEvent(
 			isStreaming: true,
 		});
 		startTool("exec", payload);
-	} else if (event?.type === "exec_command_output_delta") {
-		const chunk =
-			typeof event.chunk === "string"
-				? Buffer.from(event.chunk, "base64").toString("utf8")
-				: "";
+	} else if (eventType === "exec_command_output_delta") {
+		const encodedChunk = stringField(data, "chunk");
+		const chunk = encodedChunk
+			? Buffer.from(encodedChunk, "base64").toString("utf8")
+			: "";
 		toolDelta(chunk);
-	} else if (event?.type === "exec_command_end") {
+	} else if (eventType === "exec_command_end") {
 		closeTool();
-	} else if (event?.type === "patch_apply_begin") {
+	} else if (eventType === "patch_apply_begin") {
 		const paths = getFileChangePaths(ctx, event);
 		state.activePatchPaths = paths;
 		snapshotPaths(paths);
-		const payload = { changes: event.changes ?? event.files ?? paths };
+		const payload = {
+			changes:
+				arrayField(data, "changes").length > 0
+					? arrayField(data, "changes")
+					: arrayField(data, "files").length > 0
+						? arrayField(data, "files")
+						: paths,
+		};
 		ctx.emitStatus("tool:patch", true);
 		ctx.emitActivity({
 			toolName: "patch",
@@ -423,13 +499,13 @@ function handleCodexEvent(
 			isStreaming: true,
 		});
 		startTool("patch", payload);
-	} else if (event?.type === "patch_apply_end") {
+	} else if (eventType === "patch_apply_end") {
 		closeTool();
 		const paths = getFileChangePaths(ctx, event);
 		emitDiffsForPaths(paths.length > 0 ? paths : state.activePatchPaths);
 		state.activePatchPaths = [];
-	} else if (event?.type === "web_search_begin") {
-		const payload = { query: event.query ?? "" };
+	} else if (eventType === "web_search_begin") {
+		const payload = { query: stringField(data, "query") };
 		ctx.emitStatus("tool:web_search", true);
 		ctx.emitActivity({
 			toolName: "web_search",
@@ -437,12 +513,17 @@ function handleCodexEvent(
 			isStreaming: true,
 		});
 		startTool("web_search", payload);
-	} else if (event?.type === "web_search_end") {
-		if (event.query) toolDelta(event.query);
+	} else if (eventType === "web_search_end") {
+		const query = stringField(data, "query");
+		if (query) toolDelta(query);
 		closeTool();
-	} else if (event?.type === "mcp_tool_call_begin") {
-		const toolName = event.invocation?.tool ?? event.tool ?? "mcp_tool";
-		const payload = event.invocation?.arguments ?? event.arguments ?? {};
+	} else if (eventType === "mcp_tool_call_begin") {
+		const invocation = asRecord(data.invocation);
+		const toolName =
+			firstString(invocation, ["tool"]) ||
+			stringField(data, "tool") ||
+			"mcp_tool";
+		const payload = invocation?.arguments ?? data.arguments ?? {};
 		ctx.emitStatus(`tool:${toolName}`, true);
 		ctx.emitActivity({
 			toolName,
@@ -450,35 +531,30 @@ function handleCodexEvent(
 			isStreaming: true,
 		});
 		startTool(toolName, payload);
-	} else if (event?.type === "mcp_tool_call_end") {
+	} else if (eventType === "mcp_tool_call_end") {
 		closeTool();
 	} else if (
-		event?.type === "item.completed" &&
-		event.item?.type === "error" &&
-		event.item.message
+		eventType === "item.completed" &&
+		itemRecord?.type === "error" &&
+		stringField(itemRecord, "message")
 	) {
-		ctx.emitAgentEvent({ type: "error", message: event.item.message });
-		ctx.emitSystemMessage(event.item.message);
-	} else if (
-		event?.type === "item.completed" &&
-		event.item &&
-		extractText(event.item)
-	) {
-		const itemText = extractText(event.item);
+		const message = stringField(itemRecord, "message");
+		ctx.emitAgentEvent({ type: "error", message });
+		ctx.emitSystemMessage(message);
+	} else if (eventType === "item.completed" && item && extractText(item)) {
+		const itemText = extractText(item);
 		if (!state.sawAssistantStream && itemText) {
 			ctx.emitChatEvent({ type: "result", result: itemText });
 			ctx.emitAgentEvent({ type: "result", text: itemText });
 			state.hasFinalAssistantMessage = true;
 		}
-	} else if (event?.type === "error" && event.message) {
-		ctx.emitAgentEvent({ type: "error", message: event.message });
-		ctx.emitSystemMessage(event.message);
-	} else if (event?.type === "task_complete") {
+	} else if (eventType === "error" && stringField(data, "message")) {
+		const message = stringField(data, "message");
+		ctx.emitAgentEvent({ type: "error", message });
+		ctx.emitSystemMessage(message);
+	} else if (eventType === "task_complete") {
 		state.completedFromEvent = true;
-		const finalText =
-			typeof event.last_agent_message === "string"
-				? event.last_agent_message
-				: "";
+		const finalText = stringField(data, "last_agent_message");
 		if (finalText) {
 			state.lastAssistantMessage = finalText;
 		}
@@ -520,8 +596,10 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 			hasFinalAssistantMessage: false,
 			completedFromEvent: false,
 			lastAssistantMessage: "",
+			lastChatBlockRole: null,
 			currentToolId: null,
 			fileSnapshots: new Map(),
+			fileWatchers: new Map(),
 			activePatchPaths: [],
 			commandOutputs: new Map(),
 		};
@@ -584,13 +662,13 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				const decoder = new TextDecoder();
 				let leftover = "";
 				let completionStopRequested = false;
-				const handleStdoutEvent = (event: any) => {
+				const handleStdoutEvent = (event: unknown) => {
+					const eventRecord = asRecord(event);
+					const payload = asRecord(eventRecord?.payload);
 					handleCodexEvent(
 						ctx,
 						state,
-						event?.type === "event_msg" && event.payload?.type
-							? event.payload
-							: event
+						eventRecord?.type === "event_msg" && payload?.type ? payload : event
 					);
 				};
 
@@ -610,6 +688,9 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				if (proc.pid) PidTracker.untrackPid(proc.pid);
 				proc = null;
 				const stderrText = (await stderrPromise).trim();
+				for (const watcher of state.fileWatchers.values())
+					clearInterval(watcher);
+				state.fileWatchers.clear();
 
 				// Finalize
 				if (state.toolOpen || state.assistantOpen) {
@@ -637,14 +718,16 @@ export const codexAdapter: AgentAdapter<CodexRunState> = {
 				}
 				if (
 					assistantText &&
-					!state.sawAssistantStream &&
-					!state.hasFinalAssistantMessage
+					(!state.hasFinalAssistantMessage ||
+						state.lastChatBlockRole !== "assistant")
 				) {
 					ctx.emitChatEvent({
 						type: "result",
 						result: assistantText,
 					});
 					ctx.emitAgentEvent({ type: "result", text: assistantText });
+					state.hasFinalAssistantMessage = true;
+					state.lastChatBlockRole = "assistant";
 				} else if (
 					exitCode !== 0 &&
 					stderrText &&

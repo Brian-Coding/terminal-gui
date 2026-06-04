@@ -26,7 +26,7 @@ function isAuthorizedLocalRequest(req: Request): boolean {
 	return token === LOCAL_AUTH_TOKEN;
 }
 
-export function isLoopbackHost(value: string | null): boolean {
+function isLoopbackHost(value: string | null): boolean {
 	if (!value) return true;
 	const raw = value.toLowerCase();
 	const host = raw.startsWith("[")

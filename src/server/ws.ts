@@ -33,6 +33,8 @@ export const websocketHandler = {
 			const msg = JSON.parse(
 				typeof message === "string" ? message : message.toString()
 			);
+			if (!msg || typeof msg !== "object" || typeof msg.type !== "string")
+				return;
 
 			// Script output subscriptions
 			if (msg.type === "subscribe" && msg.runId) {
@@ -83,18 +85,17 @@ export const websocketHandler = {
 
 			// Chat protocol
 			else if (msg.type === "chat:send") {
-				ChatService.sendMessage(
-					msg.paneId,
-					msg.text,
+				ChatService.sendMessage({
+					agentKind: msg.agentKind ?? "claude",
+					clientSessionId: msg.sessionId,
+					cwd: msg.cwd,
+					model: msg.model,
+					paneId: msg.paneId,
+					reasoningLevel: msg.reasoningLevel,
+					referencePaths: msg.referencePaths,
+					text: msg.text,
 					ws,
-					msg.cwd,
-					msg.referencePaths,
-					msg.sessionId,
-					msg.agentKind ?? "claude",
-					msg.model,
-					msg.reasoningLevel,
-					msg.systemPrefix
-				);
+				});
 			} else if (msg.type === "chat:reconnect") {
 				ChatService.reassignWs(msg.paneId, ws);
 			} else if (msg.type === "chat:btw") {

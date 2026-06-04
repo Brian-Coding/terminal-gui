@@ -83,7 +83,7 @@ export function mergePrompts(bundled: Prompt[], local: Prompt[]): Prompt[] {
 	return [...builtIns, ...custom];
 }
 
-export async function loadPrompts(): Promise<Prompt[]> {
+async function loadPrompts(): Promise<Prompt[]> {
 	const [bundled, local] = await Promise.all([
 		loadBundledPrompts(),
 		loadLocalPrompts(),
@@ -108,7 +108,7 @@ function withPromptsWrite<T>(fn: () => Promise<T>): Promise<T> {
 	return next;
 }
 
-export function promptError(
+function promptError(
 	status: number,
 	error: string
 ): PromptServiceResult<never> {
