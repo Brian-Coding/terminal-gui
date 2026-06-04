@@ -1,13 +1,36 @@
-import type { ChatMessagePart } from "../../features/chat/agent-chat-shared.ts";
+import {
+	type ChatMessage,
+	nextId,
+	trimMessages,
+} from "../../features/chat/agent-chat-shared.ts";
 import { hasRole } from "../../lib/data.ts";
 
-export type ChatStateMessage = {
-	id: string;
-	role: "user" | "assistant" | "tool" | "system" | "btw";
-	content: string;
-	parts?: ChatMessagePart[];
-	isStreaming?: boolean;
-};
+type ChatStateMessage = Pick<
+	ChatMessage,
+	"id" | "role" | "content" | "parts" | "isStreaming"
+>;
+
+export function dedupeChatMessagesById<T extends { id: string }>(
+	messages: T[]
+): T[] {
+	let hasDuplicate = false;
+	const seen = new Set<string>();
+	for (const message of messages) {
+		if (seen.has(message.id)) {
+			hasDuplicate = true;
+			break;
+		}
+		seen.add(message.id);
+	}
+	if (!hasDuplicate) return messages;
+
+	const byId = new Map<string, T>();
+	for (const message of messages) {
+		if (byId.has(message.id)) byId.delete(message.id);
+		byId.set(message.id, message);
+	}
+	return [...byId.values()];
+}
 
 export function patchMessageById(
 	messages: ChatStateMessage[],
@@ -39,8 +62,14 @@ export function appendMessageContent(
 ): ChatStateMessage[] {
 	return patchMessageById(messages, id, (message) => ({
 		content: message.content + content,
-		parts: [{ type: "text", content: message.content + content }],
 	}));
+}
+
+export function appendSystemMessage(
+	messages: ChatStateMessage[],
+	content: string
+): ChatStateMessage[] {
+	return trimMessages([...messages, { id: nextId(), role: "system", content }]);
 }
 
 export function mergeSyncedMessages(
@@ -48,7 +77,10 @@ export function mergeSyncedMessages(
 	serverMessages: ChatStateMessage[]
 ): ChatStateMessage[] {
 	const localUserMsgs = localMessages.filter(hasRole.bind(null, "user"));
-	const serverUserMsgs = serverMessages.filter(hasRole.bind(null, "user"));
+	const uniqueServerMessages = dedupeChatMessagesById(serverMessages);
+	const serverUserMsgs = uniqueServerMessages.filter(
+		hasRole.bind(null, "user")
+	);
 	const displayTextMap = new Map<number, string>();
 
 	for (let i = 0; i < serverUserMsgs.length && i < localUserMsgs.length; i++) {
@@ -58,10 +90,14 @@ export function mergeSyncedMessages(
 	}
 
 	let userIdx = 0;
-	return serverMessages.map((message) => {
+	const merged = uniqueServerMessages.map((message) => {
 		if (message.role !== "user") return message;
 		const displayText = displayTextMap.get(userIdx);
 		userIdx++;
 		return displayText ? { ...message, content: displayText } : message;
 	});
+	if (localUserMsgs.length <= serverUserMsgs.length) return merged;
+
+	const trailingLocalUsers = localUserMsgs.slice(serverUserMsgs.length);
+	return trimMessages([...merged, ...trailingLocalUsers]);
 }

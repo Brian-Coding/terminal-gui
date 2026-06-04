@@ -1,13 +1,12 @@
 import * as stylex from "@stylexjs/stylex";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import React, {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
 	useMemo,
-	useRef,
 	useState,
 } from "react";
+import type { CheckpointInfo } from "../../features/chat/agent-chat-shared.ts";
 import {
 	color,
 	controlSize,
@@ -26,21 +25,14 @@ import { GroupedEditDiff, MiniEditDiff } from "./ChatEditDiff.tsx";
 import { AskUserQuestionCard, Markdown } from "./ChatRichContent.tsx";
 import {
 	buildRenderItems,
+	getEditToolPayload,
+	getToolOutputSummary,
 	type RenderChatMessage,
 	type RenderItem,
 } from "./chat-message-render-utils.ts";
 import { renderTextPills } from "./chat-token-decorators.tsx";
 
-export type ChatMessage = RenderChatMessage;
-
-type CheckpointInfo = {
-	id: string;
-	timestamp: number;
-	changedFileCount: number;
-	changedFiles: { path: string; action: "created" | "modified" | "deleted" }[];
-	reverted: boolean;
-	afterMessageId: string | null;
-};
+type ChatMessage = RenderChatMessage;
 
 export type ChatVirtualizerControls = {
 	scrollToEnd: (behavior?: ScrollBehavior) => void;
@@ -52,112 +44,56 @@ type ChatRenderRow =
 	| RenderItem
 	| { type: "thinking"; key: string; startTime: number };
 
-function estimateRowSize(row: ChatRenderRow | undefined): number {
-	if (!row) return 80;
-	if (row.type === "thinking") return 48;
-	if (row.type === "edit-group") return 260;
-
-	const message = row.message;
-	if (message.role === "tool") {
-		return message.toolName === "Edit" ? 260 : 56;
-	}
-	if (message.role === "assistant" || message.role === "btw") {
-		return Math.min(
-			460,
-			Math.max(72, 52 + Math.ceil(message.content.length / 90) * 18)
-		);
-	}
-	if (message.role === "system") return 48;
-	return Math.min(
-		220,
-		Math.max(56, 44 + Math.ceil(message.content.length / 120) * 16)
-	);
-}
-
 function getRowKey(row: ChatRenderRow | undefined, index: number) {
 	if (!row) return `row-${index}`;
 	if (row.type === "thinking") return row.key;
 	if (row.type === "edit-group") {
-		return `edit-group:${row.filePath}:${row.edits.map((edit) => edit.id).join(":")}`;
+		return `edit-group:${index}:${row.filePath}:${row.edits.map((edit) => edit.id).join(":")}`;
 	}
-	return row.message.id;
+	return `${row.message.id}:${index}`;
 }
 
 function ToolOutputHighlight({ content }: { content: string }) {
-	try {
-		if (content.trim().startsWith("{")) {
-			const parsed = JSON.parse(content);
-			const fileName = parsed.file_path
-				? parsed.file_path.split("/").pop() || parsed.file_path
-				: undefined;
-			if (parsed.file_path && parsed.new_string !== undefined) {
-				return (
-					<>
-						<span {...stylex.props(styles.toolMuted)}>{fileName}</span>
-						{"\n"}
-						<span {...stylex.props(styles.toolAccent)}>
-							{parsed.new_string}
-						</span>
-					</>
-				);
-			}
-			if (parsed.command)
-				return (
-					<span {...stylex.props(styles.toolAccent)}>$ {parsed.command}</span>
-				);
-			if (parsed.pattern)
-				return (
-					<span {...stylex.props(styles.toolAccent)}>/{parsed.pattern}/</span>
-				);
-			if (parsed.file_path && parsed.content) {
-				const preview =
-					parsed.content.length > 300
-						? `${parsed.content.slice(0, 300)}...`
-						: parsed.content;
-				return (
-					<>
-						<span {...stylex.props(styles.toolMuted)}>{fileName}</span>
-						{"\n"}
-						<span {...stylex.props(styles.toolAccent)}>{preview}</span>
-					</>
-				);
-			}
-			if (parsed.file_path)
-				return <span {...stylex.props(styles.toolAccent)}>{fileName}</span>;
-			if (parsed.glob || parsed.include) {
-				return (
-					<span {...stylex.props(styles.toolAccent)}>
-						{parsed.glob || parsed.include}
-					</span>
-				);
-			}
-			if (parsed.url) {
-				return (
-					<a
-						href={parsed.url}
-						target="_blank"
-						rel="noopener noreferrer"
-						{...stylex.props(styles.toolLink)}
-					>
-						{parsed.url}
-					</a>
-				);
-			}
-			if (parsed.query)
-				return <span {...stylex.props(styles.toolAccent)}>{parsed.query}</span>;
-		}
-	} catch {}
-	return <>{content}</>;
+	const summary = getToolOutputSummary(content);
+	if (summary.type === "edit" || summary.type === "file-content") {
+		return (
+			<>
+				<span {...stylex.props(styles.toolMuted)}>{summary.fileName}</span>
+				{"\n"}
+				<span {...stylex.props(styles.toolAccent)}>{summary.value}</span>
+			</>
+		);
+	}
+	if (summary.type === "command") {
+		return <span {...stylex.props(styles.toolAccent)}>$ {summary.value}</span>;
+	}
+	if (summary.type === "pattern") {
+		return <span {...stylex.props(styles.toolAccent)}>/{summary.value}/</span>;
+	}
+	if (summary.type === "accent") {
+		return <span {...stylex.props(styles.toolAccent)}>{summary.value}</span>;
+	}
+	if (summary.type === "url") {
+		return (
+			<a
+				href={summary.value}
+				target="_blank"
+				rel="noopener noreferrer"
+				{...stylex.props(styles.toolLink)}
+			>
+				{summary.value}
+			</a>
+		);
+	}
+	return <>{summary.value}</>;
 }
 
 function CheckpointMarker({
 	checkpoint,
 	onRevert,
-	disabled,
 }: {
 	checkpoint: CheckpointInfo;
 	onRevert: (id: string) => void;
-	disabled?: boolean;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	return (
@@ -199,7 +135,6 @@ function CheckpointMarker({
 					<button
 						type="button"
 						onClick={() => onRevert(checkpoint.id)}
-						disabled={disabled}
 						{...stylex.props(styles.undoButton)}
 					>
 						Undo
@@ -255,6 +190,13 @@ const Bubble = React.memo(function Bubble({
 	slashCommandNames: readonly string[];
 }) {
 	const [copied, setCopied] = useState(false);
+	const editPayload = useMemo(
+		() =>
+			msg.role === "tool" && msg.toolName === "Edit" && msg.content
+				? getEditToolPayload(msg.content)
+				: null,
+		[msg.content, msg.role, msg.toolName]
+	);
 	const handleCopyMessage = useCallback(() => {
 		if (!msg.content) return;
 		navigator.clipboard
@@ -340,7 +282,11 @@ const Bubble = React.memo(function Bubble({
 				</div>
 				<div {...stylex.props(styles.btwBody)}>
 					{msg.content ? (
-						<Markdown text={msg.content} onMdFileClick={onMdFileClick} />
+						<Markdown
+							text={msg.content}
+							onMdFileClick={onMdFileClick}
+							streaming={msg.isStreaming}
+						/>
 					) : msg.isStreaming ? (
 						<div {...stylex.props(styles.btwDots)}>
 							<span {...stylex.props(styles.smallDot)} />
@@ -363,24 +309,15 @@ const Bubble = React.memo(function Bubble({
 				/>
 			);
 		}
-		if (msg.toolName === "Edit" && msg.content) {
-			try {
-				const parsed = JSON.parse(msg.content);
-				if (
-					parsed.file_path &&
-					parsed.old_string !== undefined &&
-					parsed.new_string !== undefined
-				) {
-					return (
-						<MiniEditDiff
-							oldStr={parsed.old_string}
-							newStr={parsed.new_string}
-							filePath={parsed.file_path}
-							isStreaming={msg.isStreaming}
-						/>
-					);
-				}
-			} catch {}
+		if (editPayload) {
+			return (
+				<MiniEditDiff
+					oldStr={editPayload.oldString}
+					newStr={editPayload.newString}
+					filePath={editPayload.filePath}
+					isStreaming={msg.isStreaming}
+				/>
+			);
 		}
 		return (
 			<div>
@@ -406,7 +343,11 @@ const Bubble = React.memo(function Bubble({
 
 	return (
 		<div {...stylex.props(styles.assistantMessage)}>
-			<Markdown text={msg.content} onMdFileClick={onMdFileClick} />
+			<Markdown
+				text={msg.content}
+				onMdFileClick={onMdFileClick}
+				streaming={msg.isStreaming}
+			/>
 			{!msg.isStreaming && msg.content.trim() ? (
 				<div {...stylex.props(styles.messageActionRow)}>
 					<button
@@ -428,7 +369,7 @@ const Bubble = React.memo(function Bubble({
 	);
 });
 
-export function ChatMessageList({
+export const ChatMessageList = React.memo(function ChatMessageList({
 	messages,
 	scrollElementRef,
 	onVirtualizerReady,
@@ -458,64 +399,57 @@ export function ChatMessageList({
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
 	const renderRows = useMemo<ChatRenderRow[]>(() => {
 		if (!isLoading || !startTime) return renderItems;
-		return [
-			...renderItems,
-			{ type: "thinking", key: `thinking-${startTime}`, startTime },
-		];
+		return [...renderItems, { type: "thinking", key: "thinking", startTime }];
 	}, [isLoading, renderItems, startTime]);
-	const virtualizer = useVirtualizer({
-		count: renderRows.length,
-		getScrollElement: () => scrollElementRef.current,
-		estimateSize: (index) => estimateRowSize(renderRows[index]),
-		getItemKey: (index) => getRowKey(renderRows[index], index),
-		anchorTo: "end",
-		followOnAppend: true,
-		scrollEndThreshold: 80,
-		overscan: 6,
-		gap: 8,
-		paddingStart: 8,
-		paddingEnd: 32,
-		useFlushSync: false,
-	});
-	const didInitialScrollRef = useRef(false);
+	const checkpointsByMessageId = useMemo(() => {
+		const byMessageId = new Map<string, CheckpointInfo>();
+		for (const checkpoint of checkpoints) {
+			if (checkpoint.afterMessageId) {
+				byMessageId.set(checkpoint.afterMessageId, checkpoint);
+			}
+		}
+		return byMessageId;
+	}, [checkpoints]);
 
 	useEffect(() => {
 		onVirtualizerReady?.({
 			scrollToEnd: (behavior = "smooth") => {
-				virtualizer.scrollToEnd({ behavior });
+				const el = scrollElementRef.current;
+				if (!el) return;
+				el.scrollTo({ top: el.scrollHeight, behavior });
 			},
-			isAtEnd: () => virtualizer.isAtEnd(80),
-			getDistanceFromEnd: () => virtualizer.getDistanceFromEnd(),
+			isAtEnd: () => {
+				const el = scrollElementRef.current;
+				if (!el) return true;
+				return el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+			},
+			getDistanceFromEnd: () => {
+				const el = scrollElementRef.current;
+				if (!el) return 0;
+				return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
+			},
 		});
 		return () => onVirtualizerReady?.(null);
-	}, [onVirtualizerReady, virtualizer]);
+	}, [onVirtualizerReady, scrollElementRef]);
 
 	useLayoutEffect(() => {
-		if (didInitialScrollRef.current || renderRows.length === 0) return;
-		didInitialScrollRef.current = true;
+		if (renderRows.length === 0) return;
 		const raf = requestAnimationFrame(() => {
-			virtualizer.scrollToEnd({ behavior: "auto" });
+			const el = scrollElementRef.current;
+			if (el) el.scrollTop = el.scrollHeight;
 		});
 		return () => cancelAnimationFrame(raf);
-	}, [renderRows.length, virtualizer]);
+	}, [renderRows.length, scrollElementRef]);
 
-	const virtualItems = virtualizer.getVirtualItems();
 	return (
-		<div
-			{...stylex.props(styles.messageList)}
-			style={{ height: virtualizer.getTotalSize() }}
-		>
-			{virtualItems.map((virtualItem) => {
-				const item = renderRows[virtualItem.index];
+		<div {...stylex.props(styles.messageList)}>
+			{renderRows.map((item, index) => {
 				if (!item) return null;
 				if (item.type === "thinking") {
 					return (
 						<div
-							key={virtualItem.key}
-							ref={virtualizer.measureElement}
-							data-index={virtualItem.index}
-							{...stylex.props(styles.virtualRow)}
-							style={{ transform: `translateY(${virtualItem.start}px)` }}
+							key={getRowKey(item, index)}
+							{...stylex.props(styles.messageRow)}
 						>
 							<ThinkingIndicator startTime={item.startTime} />
 						</div>
@@ -524,24 +458,22 @@ export function ChatMessageList({
 				if (item.type === "edit-group") {
 					return (
 						<div
-							key={virtualItem.key}
-							ref={virtualizer.measureElement}
-							data-index={virtualItem.index}
-							{...stylex.props(styles.virtualRow)}
-							style={{ transform: `translateY(${virtualItem.start}px)` }}
+							key={getRowKey(item, index)}
+							{...stylex.props(styles.messageRow)}
 						>
 							<GroupedEditDiff filePath={item.filePath} edits={item.edits} />
 						</div>
 					);
 				}
 				const msg = item.message;
+				const checkpoint =
+					msg.role === "assistant" && !msg.isStreaming
+						? checkpointsByMessageId.get(msg.id)
+						: undefined;
 				return (
 					<div
-						key={virtualItem.key}
-						ref={virtualizer.measureElement}
-						data-index={virtualItem.index}
-						{...stylex.props(styles.virtualRow)}
-						style={{ transform: `translateY(${virtualItem.start}px)` }}
+						key={getRowKey(item, index)}
+						{...stylex.props(styles.messageRow)}
 					>
 						<Bubble
 							msg={msg}
@@ -551,25 +483,18 @@ export function ChatMessageList({
 							onMdFileClick={onMdFileClick}
 							slashCommandNames={slashCommandNames}
 						/>
-						{msg.role === "assistant" &&
-							!msg.isStreaming &&
-							(() => {
-								const cp = checkpoints.find((c) => c.afterMessageId === msg.id);
-								if (!cp) return null;
-								return (
-									<CheckpointMarker
-										checkpoint={cp}
-										onRevert={revertCheckpoint}
-										disabled={isLoading}
-									/>
-								);
-							})()}
+						{checkpoint && (
+							<CheckpointMarker
+								checkpoint={checkpoint}
+								onRevert={revertCheckpoint}
+							/>
+						)}
 					</div>
 				);
 			})}
 		</div>
 	);
-}
+});
 
 const styles = stylex.create({
 	toolMuted: {
@@ -870,17 +795,18 @@ const styles = stylex.create({
 		color: color.success,
 	},
 	messageList: {
+		boxSizing: "border-box",
+		display: "flex",
+		flexDirection: "column",
+		gap: controlSize._2,
 		minHeight: "100%",
 		minWidth: 0,
-		position: "relative",
+		paddingBlock: `${controlSize._4} ${controlSize._8}`,
+		paddingInline: controlSize._5,
 		width: "100%",
 	},
-	virtualRow: {
+	messageRow: {
 		boxSizing: "border-box",
-		left: 0,
-		paddingInline: controlSize._3,
-		position: "absolute",
-		top: 0,
 		width: "100%",
 	},
 });

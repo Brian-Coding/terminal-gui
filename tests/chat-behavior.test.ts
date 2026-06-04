@@ -98,6 +98,38 @@ describe("chat data behavior", () => {
 		]);
 	});
 
+	test("preserves optimistic queued user messages missing from a stale sync", () => {
+		const localMessages = [
+			message("server-1", "first"),
+			message("server-a", "assistant reply", "assistant"),
+			message("local-queued", "queued follow-up"),
+		];
+		const serverMessages = [
+			message("server-1", "first"),
+			message("server-a", "assistant reply", "assistant"),
+		];
+
+		expect(mergeSyncedMessages(localMessages, serverMessages)).toEqual([
+			message("server-1", "first"),
+			message("server-a", "assistant reply", "assistant"),
+			message("local-queued", "queued follow-up"),
+		]);
+	});
+
+	test("deduplicates repeated server message ids during sync", () => {
+		const serverMessages = [
+			message("s1", "older assistant", "assistant"),
+			message("s2", "user prompt"),
+			message("s1", "newer assistant", "assistant"),
+			message("s2", "user prompt"),
+		];
+
+		expect(mergeSyncedMessages([], serverMessages)).toEqual([
+			message("s1", "newer assistant", "assistant"),
+			message("s2", "user prompt"),
+		]);
+	});
+
 	/*
 	 * This protects durable chat restore. A response can be streaming while the
 	 * app is open, but the transcript saved to disk should reopen as settled

@@ -5,6 +5,7 @@ import {
 	useSyntaxHighlightTheme,
 } from "../../hooks/useShikiHighlighter.ts";
 import { contentOf } from "../../lib/data.ts";
+import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { IconChevronRight, IconFilePlus } from "../ui/Icons.tsx";
 import {
@@ -15,9 +16,11 @@ import {
 	type LineTextSegment,
 	summarizeDiff,
 } from "./chat-edit-diff-utils.ts";
+import { getEditToolPayload } from "./chat-message-render-utils.ts";
 
 type EditMessage = {
 	content: string;
+	isStreaming?: boolean;
 };
 
 function EditDiffCard({
@@ -41,7 +44,7 @@ function EditDiffCard({
 	const { highlighted, isReady } = useShikiSnippet(
 		allLines,
 		fileName,
-		true,
+		!isStreaming,
 		syntaxTheme
 	);
 	const [isExpanded, setIsExpanded] = useState(true);
@@ -103,13 +106,18 @@ function EditDiffCard({
 			</button>
 			{isExpanded && (
 				<div
+					role="button"
+					tabIndex={0}
 					{...stylex.props(
 						styles.body,
 						isScrollActive && styles.bodyScrollActive
 					)}
 					onClick={() => setIsScrollActive(true)}
+					onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
+						null,
+						setIsScrollActive.bind(null, true)
+					)}
 					onMouseLeave={() => setIsScrollActive(false)}
-					tabIndex={0}
 					title={
 						isScrollActive
 							? "Diff scrolling active"
@@ -496,23 +504,19 @@ export function GroupedEditDiff({
 	edits: EditMessage[];
 }) {
 	const fileName = filePath.split("/").pop() || filePath;
+	const isStreaming = edits.some((edit) => edit.isStreaming);
 	const { hunks, stats, allLines, totalHidden } = useMemo(() => {
 		const parsedEdits: { old_string: string; new_string: string }[] = [];
 
 		for (const edit of edits) {
 			if (!edit.content) continue;
-			try {
-				const parsed = JSON.parse(edit.content);
-				if (
-					parsed.old_string !== undefined &&
-					parsed.new_string !== undefined
-				) {
-					parsedEdits.push({
-						old_string: parsed.old_string,
-						new_string: parsed.new_string,
-					});
-				}
-			} catch {}
+			const parsed = getEditToolPayload(edit.content);
+			if (parsed) {
+				parsedEdits.push({
+					old_string: parsed.oldString,
+					new_string: parsed.newString,
+				});
+			}
 		}
 
 		const result = applyEditsSequentially(parsedEdits);
@@ -539,6 +543,7 @@ export function GroupedEditDiff({
 			stats={stats}
 			allLines={allLines}
 			totalHidden={totalHidden}
+			isStreaming={isStreaming}
 		/>
 	);
 }

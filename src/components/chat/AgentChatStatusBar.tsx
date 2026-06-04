@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
+import type { ToolActivity } from "../../features/chat/agent-chat-shared.ts";
 import {
 	color,
 	controlSize,
@@ -18,16 +19,9 @@ import {
 	IconTerminal,
 	IconWrench,
 } from "../ui/Icons.tsx";
-import type { ChatMessage } from "../../features/chat/agent-chat-shared.ts";
-import {
-	extractToolActivities,
-	getStatusToolName,
-	normalizeToolName,
-	type ToolActivity,
-} from "./chat-agent-utils.ts";
+import { getStatusToolName, normalizeToolName } from "./chat-agent-utils.ts";
 
 interface AgentChatStatusBarProps {
-	messages: ChatMessage[];
 	liveActivities?: ToolActivity[];
 	isLoading: boolean;
 	status: string;
@@ -59,7 +53,6 @@ function ToolStatusIcon({ toolName }: { toolName: string }) {
 }
 
 export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
-	messages,
 	liveActivities = [],
 	isLoading,
 	status,
@@ -74,10 +67,6 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 			summary: string;
 		}>
 	>([]);
-	const toolActivities = useMemo(
-		() => extractToolActivities(messages),
-		[messages]
-	);
 	const statusToolName = getStatusToolName(status);
 
 	useEffect(() => {
@@ -102,11 +91,7 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 
 	if (!isLoading) return null;
 	const activityItems =
-		liveActivities.length > 0
-			? liveActivities
-			: toolActivities.length > 0
-				? toolActivities
-				: statusActivities;
+		liveActivities.length > 0 ? liveActivities : statusActivities;
 	const latestActivity = activityItems[activityItems.length - 1];
 	const hasActivity = activityItems.length > 0 || statusToolName || isLoading;
 	const displayToolName = latestActivity?.toolName ?? statusToolName;

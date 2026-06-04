@@ -1,0 +1,214 @@
+import { expect, mock, test } from "bun:test";
+import { JSDOM } from "jsdom";
+import { useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import type { ChatMessage } from "../src/features/chat/agent-chat-shared.ts";
+
+const sendMock = mock(() => {});
+
+mock.module("../src/lib/websocket.ts", () => ({
+	wsClient: {
+		onMessage: mock(() => () => {}),
+		send: sendMock,
+	},
+}));
+
+function setupDom() {
+	const dom = new JSDOM('<div id="root"></div>', {
+		pretendToBeVisual: true,
+		url: "http://localhost/#/terminal",
+	});
+	Object.defineProperty(globalThis, "window", {
+		configurable: true,
+		value: dom.window,
+	});
+	Object.defineProperty(globalThis, "document", {
+		configurable: true,
+		value: dom.window.document,
+	});
+	Object.defineProperty(globalThis, "localStorage", {
+		configurable: true,
+		value: dom.window.localStorage,
+	});
+	Object.defineProperty(globalThis, "crypto", {
+		configurable: true,
+		value: dom.window.crypto,
+	});
+	const rootElement = dom.window.document.getElementById("root");
+	if (!rootElement) throw new Error("Missing root element");
+	return { root: createRoot(rootElement), rootElement };
+}
+
+function tick(ms = 0) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test("hidden chat input actions defer pending sends until visible", async () => {
+	sendMock.mockClear();
+	const { root, rootElement } = setupDom();
+	const { clearPendingSend, loadPendingSend, savePendingSend } =
+		await import("../src/features/chat/chat-session-store.ts");
+	const { useChatInputActions } =
+		await import("../src/components/chat/useChatInputActions.ts");
+	const paneId = "pane-hidden-pending-send";
+	clearPendingSend(paneId);
+	savePendingSend(paneId, "deferred hello");
+	try {
+		function Harness({ enabled }: { enabled: boolean }) {
+			const [messages, setMessages] = useState<ChatMessage[]>([]);
+			const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+			useChatInputActions({
+				agentKind: "codex",
+				allCommands: [],
+				attachedImages: [],
+				cancelSpeechListening: () => {},
+				clearAttachedImages: () => {},
+				clearCheckpoints: () => {},
+				composerOnly: false,
+				consumePendingWorkspace: () => undefined,
+				cwd: "/tmp/project",
+				effectiveSelectedModel: "gpt-5",
+				enabled,
+				fileMenu: {
+					show: false,
+					selectedIdx: 0,
+					query: "",
+					atIndex: -1,
+					position: null,
+				},
+				fileResults: [],
+				filteredCommands: [],
+				incrementUsage: () => Promise.resolve(),
+				input: "",
+				isLoading: false,
+				paneId,
+				queueMessage: () => {},
+				selectCommand: () => {},
+				selectFile: () => {},
+				selectedReasoningLevel: "medium",
+				setFileMenu: () => {},
+				setInput: () => {},
+				setLoadingState: () => {},
+				setMessages,
+				setSlashMenu: () => {},
+				showCommands: false,
+				slashMenu: {
+					show: false,
+					selectedIdx: 0,
+					query: "",
+					slashIndex: -1,
+				},
+				shiftQueuedMessage: () => null,
+				textareaRef,
+			});
+			return (
+				<div
+					data-messages={messages.map((message) => message.content).join("|")}
+				/>
+			);
+		}
+
+		root.render(<Harness enabled={false} />);
+		await tick(20);
+		expect(sendMock).toHaveBeenCalledTimes(0);
+		expect(loadPendingSend(paneId)).toBe("deferred hello");
+		expect(rootElement.firstElementChild?.getAttribute("data-messages")).toBe(
+			""
+		);
+
+		root.render(<Harness enabled={true} />);
+		await tick(20);
+		expect(sendMock).toHaveBeenCalledTimes(1);
+		expect(loadPendingSend(paneId)).toBe("");
+		expect(rootElement.firstElementChild?.getAttribute("data-messages")).toBe(
+			"deferred hello"
+		);
+	} finally {
+		root.unmount();
+		clearPendingSend(paneId);
+	}
+});
+
+test("loading chat queues the live textarea value when React input is stale", async () => {
+	const { root, rootElement } = setupDom();
+	const { useChatInputActions } =
+		await import("../src/components/chat/useChatInputActions.ts");
+	try {
+		let handleEnter: ((event: React.KeyboardEvent) => void) | null = null;
+		function Harness() {
+			const [input, setInput] = useState("");
+			const [queued, setQueued] = useState(["first"]);
+			const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+			const { handleKeyDown } = useChatInputActions({
+				agentKind: "codex",
+				allCommands: [],
+				attachedImages: [],
+				cancelSpeechListening: () => {},
+				clearAttachedImages: () => {},
+				clearCheckpoints: () => {},
+				composerOnly: false,
+				consumePendingWorkspace: () => undefined,
+				cwd: "/tmp/project",
+				effectiveSelectedModel: "gpt-5",
+				fileMenu: {
+					show: false,
+					selectedIdx: 0,
+					query: "",
+					atIndex: -1,
+					position: null,
+				},
+				fileResults: [],
+				filteredCommands: [],
+				incrementUsage: () => Promise.resolve(),
+				input,
+				isLoading: true,
+				paneId: "pane-live-textarea-queue",
+				queueMessage: (text) => setQueued((prev) => [...prev, text]),
+				selectCommand: () => {},
+				selectFile: () => {},
+				selectedReasoningLevel: "medium",
+				setFileMenu: () => {},
+				setInput,
+				setLoadingState: () => {},
+				setMessages: () => {},
+				setSlashMenu: () => {},
+				showCommands: false,
+				slashMenu: {
+					show: false,
+					selectedIdx: 0,
+					query: "",
+					slashIndex: -1,
+				},
+				shiftQueuedMessage: () => null,
+				textareaRef,
+			});
+			handleEnter = handleKeyDown;
+			return (
+				<textarea
+					ref={textareaRef}
+					value={input}
+					onChange={(event) => setInput(event.currentTarget.value)}
+					data-queue={queued.join("|")}
+				/>
+			);
+		}
+
+		root.render(<Harness />);
+		await tick(20);
+		const textarea =
+			rootElement.firstElementChild as HTMLTextAreaElement | null;
+		if (!textarea) throw new Error("Missing textarea");
+		textarea.value = "second";
+		handleEnter?.({
+			key: "Enter",
+			preventDefault: () => {},
+			shiftKey: false,
+		} as React.KeyboardEvent);
+		await tick(20);
+
+		expect(textarea.getAttribute("data-queue")).toBe("first|second");
+		expect(textarea.value).toBe("");
+	} finally {
+		root.unmount();
+	}
+});

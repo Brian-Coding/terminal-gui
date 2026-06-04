@@ -1,19 +1,15 @@
-import { basename, trimText as trimSummary } from "../../lib/format.ts";
+import type {
+	ChatLoadingState,
+	ChatMessage,
+	ToolActivity,
+} from "../../features/chat/agent-chat-shared.ts";
+import { trimText as trimSummary } from "../../lib/format.ts";
+import { getToolOutputSummary } from "./chat-message-render-utils.ts";
 
-export type ChatToolMessage = {
-	id: string;
-	role: "user" | "assistant" | "tool" | "system" | "btw";
-	content: string;
-	toolName?: string;
-	isStreaming?: boolean;
-};
-
-export type ToolActivity = {
-	id: string;
-	toolName: string;
-	isStreaming: boolean;
-	summary: string;
-};
+type ChatToolMessage = Pick<
+	ChatMessage,
+	"id" | "role" | "content" | "toolName" | "isStreaming"
+>;
 
 export function normalizeToolName(toolName: string): string {
 	const name = toolName.trim().toLowerCase();
@@ -59,82 +55,17 @@ export function markRespondingState<S extends { status: string }>(state: S): S {
 	return { ...state, status: "responding" };
 }
 
-export function clearLiveActivities<S extends { liveActivities: unknown[] }>(
-	state: S
-): S {
+export function clearLiveActivities<
+	S extends { liveActivities: ToolActivity[] },
+>(state: S): S {
 	return { ...state, liveActivities: [] };
 }
-
-type ChatLoadingState = {
-	isLoading: boolean;
-	status: string;
-	startTime: number | null;
-};
 
 export function markToolState(
 	toolName: string,
 	state: ChatLoadingState
 ): ChatLoadingState {
 	return { ...state, status: `tool:${toolName}` };
-}
-
-function extractToolSummary(content: string): string {
-	if (!content) return "";
-	try {
-		const parsed = JSON.parse(content);
-		if (parsed.file_path) {
-			return basename(parsed.file_path);
-		}
-		if (parsed.path) {
-			return basename(parsed.path);
-		}
-		if (parsed.file) {
-			return basename(parsed.file);
-		}
-		if (Array.isArray(parsed.files) && parsed.files.length > 0) {
-			const first = String(parsed.files[0] ?? "");
-			return parsed.files.length === 1
-				? basename(first)
-				: `${basename(first)} +${parsed.files.length - 1}`;
-		}
-		if (Array.isArray(parsed.changes) && parsed.changes.length > 0) {
-			const first = parsed.changes[0];
-			const firstFile =
-				typeof first === "string"
-					? first
-					: (first?.file_path ?? first?.path ?? first?.file ?? "");
-			if (firstFile) {
-				return parsed.changes.length === 1
-					? basename(firstFile)
-					: `${basename(firstFile)} +${parsed.changes.length - 1}`;
-			}
-			return `${parsed.changes.length} changes`;
-		}
-		if (parsed.command) {
-			return trimSummary(parsed.command);
-		}
-		if (parsed.cmd) {
-			return trimSummary(parsed.cmd);
-		}
-		if (parsed.pattern) return `/${parsed.pattern.slice(0, 30)}/`;
-		if (parsed.query) return parsed.query.slice(0, 40);
-		if (parsed.invocation?.tool) {
-			return normalizeToolName(parsed.invocation.tool);
-		}
-		if (parsed.tool) {
-			return normalizeToolName(parsed.tool);
-		}
-		if (parsed.url) {
-			try {
-				return new URL(parsed.url).hostname;
-			} catch {
-				return parsed.url.slice(0, 40);
-			}
-		}
-		if (parsed.skill) return `/${parsed.skill}`;
-		if (parsed.prompt) return parsed.prompt.slice(0, 40);
-	} catch {}
-	return "";
 }
 
 export function extractToolActivities(
@@ -144,12 +75,18 @@ export function extractToolActivities(
 	for (const msg of messages) {
 		if (msg.role !== "tool" || !msg.toolName) continue;
 		const toolName = normalizeToolName(msg.toolName);
-		const summary = extractToolSummary(msg.content) || toolName;
+		const outputSummary = getToolOutputSummary(msg.content);
+		const summary =
+			outputSummary.type === "edit" || outputSummary.type === "file-content"
+				? outputSummary.fileName
+				: outputSummary.type === "url"
+					? trimSummary(outputSummary.value)
+					: trimSummary(String(outputSummary.value || toolName));
 		activities.push({
 			id: msg.id,
 			toolName,
 			isStreaming: msg.isStreaming ?? false,
-			summary,
+			summary: summary || toolName,
 		});
 	}
 	return activities;

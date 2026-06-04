@@ -9,6 +9,11 @@ import {
 	radius,
 } from "../../tokens.stylex.ts";
 import { IconCheck, IconCopy, IconHelpCircle, IconSend } from "../ui/Icons.tsx";
+import {
+	formatAskUserAnswer,
+	hasAskUserSelections,
+	parseAskUserQuestions,
+} from "./chat-message-render-utils.ts";
 import { parseInlineTokens, parseMarkdownBlocks } from "./chat-text.ts";
 
 function findParentScrollContainer(
@@ -56,7 +61,38 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 	);
 }
 
-function Inline({
+const STREAMING_MARKDOWN_PARSE_THRESHOLD = 1200;
+
+function hasBalancedCodeFences(text: string): boolean {
+	let count = 0;
+	for (const line of text.split("\n")) {
+		if (line.trimStart().startsWith("```")) count++;
+	}
+	return count % 2 === 0;
+}
+
+function splitStreamingMarkdown(text: string): {
+	parsedText: string;
+	tailText: string;
+} {
+	if (text.length < STREAMING_MARKDOWN_PARSE_THRESHOLD) {
+		return { parsedText: text, tailText: "" };
+	}
+	let splitAt = text.lastIndexOf("\n\n");
+	while (splitAt > 0) {
+		const parsedText = text.slice(0, splitAt).trimEnd();
+		if (parsedText && hasBalancedCodeFences(parsedText)) {
+			return {
+				parsedText,
+				tailText: text.slice(splitAt).trimStart(),
+			};
+		}
+		splitAt = text.lastIndexOf("\n\n", splitAt - 1);
+	}
+	return { parsedText: "", tailText: text };
+}
+
+const Inline = React.memo(function Inline({
 	text,
 	onMdFileClick,
 }: {
@@ -131,16 +167,21 @@ function Inline({
 			})}
 		</>
 	);
-}
+});
 
-export function Markdown({
+export const Markdown = React.memo(function Markdown({
 	text,
 	onMdFileClick,
+	streaming = false,
 }: {
 	text: string;
 	onMdFileClick?: (path: string) => void;
+	streaming?: boolean;
 }) {
-	const blocks = useMemo(() => parseMarkdownBlocks(text), [text]);
+	const { parsedText, tailText } = streaming
+		? splitStreamingMarkdown(text)
+		: { parsedText: text, tailText: "" };
+	const blocks = useMemo(() => parseMarkdownBlocks(parsedText), [parsedText]);
 	const handleTableWheel = useCallback(
 		(event: React.WheelEvent<HTMLDivElement>) => {
 			if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || event.shiftKey) {
@@ -235,9 +276,14 @@ export function Markdown({
 					</p>
 				);
 			})}
+			{tailText && (
+				<p {...stylex.props(styles.paragraph, styles.streamingText)}>
+					{tailText}
+				</p>
+			)}
 		</div>
 	);
-}
+});
 
 const styles = stylex.create({
 	copyButton: {
@@ -384,6 +430,9 @@ const styles = stylex.create({
 	},
 	paragraph: {
 		margin: 0,
+	},
+	streamingText: {
+		whiteSpace: "pre-wrap",
 	},
 	rawToolPre: {
 		backgroundColor: color.backgroundRaised,
@@ -532,19 +581,7 @@ export function AskUserQuestionCard({
 	isStreaming?: boolean;
 	onSendMessage?: (text: string) => void;
 }) {
-	const parsed = useMemo(() => {
-		try {
-			const data = JSON.parse(content);
-			if (data.questions && Array.isArray(data.questions))
-				return data.questions as Array<{
-					question: string;
-					header?: string;
-					options?: Array<{ label: string; description?: string }>;
-					multiSelect?: boolean;
-				}>;
-		} catch {}
-		return null;
-	}, [content]);
+	const parsed = useMemo(() => parseAskUserQuestions(content), [content]);
 	const [selections, setSelections] = useState<Map<number, Set<number>>>(
 		new Map()
 	);
@@ -575,28 +612,13 @@ export function AskUserQuestionCard({
 
 	const hasSelections = useMemo(() => {
 		if (!parsed) return false;
-		return parsed.every((_, qi) => {
-			const sel = selections.get(qi);
-			return sel && sel.size > 0;
-		});
+		return hasAskUserSelections(parsed, selections);
 	}, [parsed, selections]);
 
 	const handleSubmit = useCallback(() => {
 		if (!parsed || !onSendMessage || submitted) return;
 		setSubmitted(true);
-		const parts: string[] = [];
-		for (let qi = 0; qi < parsed.length; qi++) {
-			const q = parsed[qi]!;
-			const sel = selections.get(qi);
-			if (!sel || sel.size === 0) continue;
-			const labels = Array.from(sel)
-				.sort()
-				.map((oi) => q.options?.[oi]?.label)
-				.filter(Boolean);
-			if (q.header) parts.push(`**${q.header}**: ${labels.join(", ")}`);
-			else parts.push(labels.join(", "));
-		}
-		onSendMessage(parts.join("\n"));
+		onSendMessage(formatAskUserAnswer(parsed, selections));
 	}, [onSendMessage, parsed, selections, submitted]);
 
 	if (!parsed) {

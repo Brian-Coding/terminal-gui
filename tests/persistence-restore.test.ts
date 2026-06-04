@@ -282,6 +282,7 @@ describe("app persistence restore flow", () => {
 				expect(lastMessage.isStreaming).toBe(false);
 
 				const rendered = await renderCompiledAppSnapshot(origin, partialCookie);
+				expect(rendered.mainView).toBe("chat");
 				expect(rendered.text).toContain("Persistence Beta");
 				expect(rendered.text).toContain("site");
 			} finally {
@@ -338,19 +339,49 @@ async function hydrateRendererStorageSnapshot(
 	const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 		url: `${origin}/#/terminal`,
 	});
-	const previousWindow = globalThis.window;
-	const previousDocument = globalThis.document;
-	const previousLocalStorage = globalThis.localStorage;
-	const previousNavigator = globalThis.navigator;
-	const previousCustomEvent = globalThis.CustomEvent;
-	const previousEvent = globalThis.Event;
+	const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+	const previousDocument = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"document"
+	);
+	const previousLocalStorage = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"localStorage"
+	);
+	const previousNavigator = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"navigator"
+	);
+	const previousCustomEvent = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"CustomEvent"
+	);
+	const previousEvent = Object.getOwnPropertyDescriptor(globalThis, "Event");
 	try {
-		globalThis.window = dom.window as any;
-		globalThis.document = dom.window.document;
-		globalThis.localStorage = dom.window.localStorage;
-		globalThis.navigator = dom.window.navigator;
-		globalThis.CustomEvent = dom.window.CustomEvent;
-		globalThis.Event = dom.window.Event;
+		Object.defineProperty(globalThis, "window", {
+			configurable: true,
+			value: dom.window,
+		});
+		Object.defineProperty(globalThis, "document", {
+			configurable: true,
+			value: dom.window.document,
+		});
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: dom.window.localStorage,
+		});
+		Object.defineProperty(globalThis, "navigator", {
+			configurable: true,
+			value: dom.window.navigator,
+		});
+		Object.defineProperty(globalThis, "CustomEvent", {
+			configurable: true,
+			value: dom.window.CustomEvent,
+		});
+		Object.defineProperty(globalThis, "Event", {
+			configurable: true,
+			value: dom.window.Event,
+		});
 		dom.window.localStorage.setItem(
 			"inferay-terminal-state",
 			JSON.stringify({
@@ -405,19 +436,31 @@ async function hydrateRendererStorageSnapshot(
 		return loadTerminalState();
 	} finally {
 		globalThis.fetch = originalFetch;
-		globalThis.window = previousWindow;
-		globalThis.document = previousDocument;
-		globalThis.localStorage = previousLocalStorage;
-		globalThis.navigator = previousNavigator;
-		globalThis.CustomEvent = previousCustomEvent;
-		globalThis.Event = previousEvent;
+		if (previousWindow)
+			Object.defineProperty(globalThis, "window", previousWindow);
+		else delete (globalThis as { window?: unknown }).window;
+		if (previousDocument)
+			Object.defineProperty(globalThis, "document", previousDocument);
+		else delete (globalThis as { document?: unknown }).document;
+		if (previousLocalStorage)
+			Object.defineProperty(globalThis, "localStorage", previousLocalStorage);
+		else delete (globalThis as { localStorage?: unknown }).localStorage;
+		if (previousNavigator)
+			Object.defineProperty(globalThis, "navigator", previousNavigator);
+		else delete (globalThis as { navigator?: unknown }).navigator;
+		if (previousCustomEvent)
+			Object.defineProperty(globalThis, "CustomEvent", previousCustomEvent);
+		else delete (globalThis as { CustomEvent?: unknown }).CustomEvent;
+		if (previousEvent)
+			Object.defineProperty(globalThis, "Event", previousEvent);
+		else delete (globalThis as { Event?: unknown }).Event;
 	}
 }
 
 async function renderCompiledAppSnapshot(
 	origin: string,
 	cookie: string
-): Promise<{ text: string }> {
+): Promise<{ mainView: string | null; text: string }> {
 	const mainPath = join(process.cwd(), "dist", "main.js");
 	if (!existsSync(mainPath)) {
 		await runRendererBuild();
@@ -455,6 +498,7 @@ async function renderCompiledAppSnapshot(
 			fontFamily: "SF Mono",
 			opacity: 1,
 		}));
+		dom.window.localStorage.setItem("terminal-main-view", "editor");
 		Object.assign(globalThis, {
 			window: dom.window,
 			document: dom.window.document,
@@ -506,7 +550,10 @@ async function renderCompiledAppSnapshot(
 		};
 		await import(mainUrl + "?persistence=" + Date.now() + "-" + Math.random());
 		await new Promise((resolve) => setTimeout(resolve, 6000));
-		console.log(JSON.stringify({ text: dom.window.document.body.textContent ?? "" }));
+		console.log(JSON.stringify({
+			mainView: dom.window.localStorage.getItem("terminal-main-view"),
+			text: dom.window.document.body.textContent ?? "",
+		}));
 		process.exit(0);
 		function createDomRect(width, height) {
 			return { bottom: height, height, left: 0, right: width, top: 0, width, x: 0, y: 0, toJSON() { return this; } };

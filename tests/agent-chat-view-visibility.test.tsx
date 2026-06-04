@@ -1,0 +1,181 @@
+import { expect, mock, test } from "bun:test";
+import { JSDOM } from "jsdom";
+import { createRoot } from "react-dom/client";
+
+mock.module("@stylexjs/stylex", () => ({
+	create: <T extends Record<string, unknown>>(styles: T) => styles,
+	createTheme: (_vars: unknown, values: unknown) => values,
+	defineVars: <T extends Record<string, string>>(values: T) => values,
+	keyframes: () => "test-keyframes",
+	props: (
+		...styles: Array<Record<string, unknown> | false | null | undefined>
+	) => ({
+		className: styles
+			.filter(Boolean)
+			.map((_, index) => `sx-${index}`)
+			.join(" "),
+	}),
+}));
+
+mock.module("../src/lib/websocket.ts", () => ({
+	wsClient: {
+		onMessage: mock(() => () => {}),
+		onReconnect: mock(() => () => {}),
+		send: mock(() => {}),
+		subscribe: mock(() => () => {}),
+	},
+}));
+
+mock.module("../src/components/chat/ChatMessageList.tsx", () => ({
+	ChatMessageList: ({ messages }: { messages: Array<{ content: string }> }) => (
+		<div data-testid="message-list">
+			{messages.map((message) => message.content).join("|")}
+		</div>
+	),
+}));
+
+class TestResizeObserver {
+	observe(): void {}
+	unobserve(): void {}
+	disconnect(): void {}
+}
+
+function setupDom() {
+	const dom = new JSDOM('<div id="root"></div>', {
+		pretendToBeVisual: true,
+		url: "http://localhost/#/terminal",
+	});
+	const raf = (callback: FrameRequestCallback) =>
+		setTimeout(() => callback(Date.now()), 0) as unknown as number;
+	const caf = (handle: number) => clearTimeout(handle);
+	Object.defineProperty(globalThis, "window", {
+		configurable: true,
+		value: dom.window,
+	});
+	Object.defineProperty(globalThis, "document", {
+		configurable: true,
+		value: dom.window.document,
+	});
+	Object.defineProperty(globalThis, "localStorage", {
+		configurable: true,
+		value: dom.window.localStorage,
+	});
+	Object.defineProperty(globalThis, "navigator", {
+		configurable: true,
+		value: dom.window.navigator,
+	});
+	Object.defineProperty(globalThis, "HTMLElement", {
+		configurable: true,
+		value: dom.window.HTMLElement,
+	});
+	Object.defineProperty(globalThis, "SVGElement", {
+		configurable: true,
+		value: dom.window.SVGElement,
+	});
+	Object.defineProperty(globalThis, "DOMException", {
+		configurable: true,
+		value: dom.window.DOMException,
+	});
+	Object.defineProperty(globalThis, "ResizeObserver", {
+		configurable: true,
+		value: TestResizeObserver,
+	});
+	Object.defineProperty(globalThis, "requestAnimationFrame", {
+		configurable: true,
+		value: raf,
+	});
+	Object.defineProperty(globalThis, "cancelAnimationFrame", {
+		configurable: true,
+		value: caf,
+	});
+	Object.assign(dom.window, {
+		ResizeObserver: TestResizeObserver,
+		requestAnimationFrame: raf,
+		cancelAnimationFrame: caf,
+	});
+	Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", {
+		configurable: true,
+		get() {
+			return 720;
+		},
+	});
+	Object.defineProperty(dom.window.HTMLElement.prototype, "clientWidth", {
+		configurable: true,
+		get() {
+			return 960;
+		},
+	});
+	dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+		return {
+			bottom: 720,
+			height: 720,
+			left: 0,
+			right: 960,
+			top: 0,
+			width: 960,
+			x: 0,
+			y: 0,
+			toJSON: () => {},
+		};
+	};
+	const rootElement = dom.window.document.getElementById("root");
+	if (!rootElement) throw new Error("Missing root element");
+	return { root: createRoot(rootElement), rootElement };
+}
+
+function tick(ms = 20) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test("hidden chat panes defer transcript hydration until visible", async () => {
+	const previousFetch = globalThis.fetch;
+	globalThis.fetch = mock((input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url.includes("/api/prompts")) return Promise.resolve(Response.json([]));
+		if (url.includes("/api/chat-queues/")) {
+			return Promise.resolve(Response.json({ queue: [] }));
+		}
+		return Promise.resolve(Response.json({ ok: true }));
+	}) as typeof fetch;
+	const { root, rootElement } = setupDom();
+	try {
+		const { saveStoredMessages } =
+			await import("../src/features/chat/chat-session-store.ts");
+		const { AgentChatView } =
+			await import("../src/components/chat/AgentChatView.tsx");
+		saveStoredMessages("pane-deferred-visible-load", [
+			{ id: "m1", role: "assistant", content: "old transcript" },
+		]);
+
+		root.render(
+			<AgentChatView
+				paneId="pane-deferred-visible-load"
+				cwd="/tmp/project"
+				gitBranch="main"
+				agentKind="codex"
+				isVisible={false}
+			/>
+		);
+		await tick();
+		saveStoredMessages("pane-deferred-visible-load", [
+			{ id: "m1", role: "assistant", content: "new transcript" },
+		]);
+
+		root.render(
+			<AgentChatView
+				paneId="pane-deferred-visible-load"
+				cwd="/tmp/project"
+				gitBranch="main"
+				agentKind="codex"
+				isVisible
+			/>
+		);
+		await tick(50);
+
+		expect(rootElement.textContent).toContain("new transcript");
+		expect(rootElement.textContent).not.toContain("old transcript");
+	} finally {
+		root.unmount();
+		globalThis.fetch = previousFetch;
+	}
+});

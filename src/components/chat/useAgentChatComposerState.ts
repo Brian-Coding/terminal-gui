@@ -1,5 +1,9 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+	AttachedImageInfo,
+	QueuedMessageInfo,
+} from "../../features/chat/agent-chat-shared.ts";
 import {
 	loadFileBackedQueue,
 	loadStoredQueue,
@@ -11,19 +15,6 @@ import { hasPath, lacksId } from "../../lib/data.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 
-interface QueuedMessage {
-	id: string;
-	text: string;
-	displayText: string;
-	images?: string[];
-}
-
-interface AttachedImageState {
-	name: string;
-	path: string;
-	previewUrl: string;
-}
-
 interface MarkdownPreviewState {
 	show: boolean;
 	path: string;
@@ -31,6 +22,10 @@ interface MarkdownPreviewState {
 	loading: boolean;
 	error: string | null;
 }
+
+type FilePreviewMessage =
+	| { type: "file:content"; content: string }
+	| { type: "file:error"; error?: string };
 
 let queueIdCounter = 0;
 
@@ -40,26 +35,68 @@ function nextQueueId(): string {
 		: `${Date.now()}-${++queueIdCounter}`;
 }
 
-function queuedMessagesScore(queue: QueuedMessage[]): number {
-	return queue.reduce(
-		(score, item) => score + 1 + item.text.length + item.displayText.length,
-		0
+function isFilePreviewMessage(msg: unknown): msg is FilePreviewMessage {
+	if (!msg || typeof msg !== "object") return false;
+	const type = (msg as { type?: unknown }).type;
+	if (type === "file:content") {
+		return typeof (msg as { content?: unknown }).content === "string";
+	}
+	return (
+		type === "file:error" &&
+		((msg as { error?: unknown }).error === undefined ||
+			typeof (msg as { error?: unknown }).error === "string")
 	);
 }
 
-export function useAgentChatComposerState(paneId: string) {
+function areQueuedMessagesEqual(
+	prev: QueuedMessageInfo[],
+	next: QueuedMessageInfo[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.id !== b.id ||
+			a.text !== b.text ||
+			a.displayText !== b.displayText ||
+			(a.images?.length ?? 0) !== (b.images?.length ?? 0)
+		) {
+			return false;
+		}
+		const imagesA = a.images ?? [];
+		const imagesB = b.images ?? [];
+		for (let j = 0; j < imagesA.length; j++) {
+			if (imagesA[j] !== imagesB[j]) return false;
+		}
+	}
+	return true;
+}
+
+function parseQueuedMessages(
+	value: string | null | undefined
+): QueuedMessageInfo[] {
+	if (!value) return [];
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) ? (parsed as QueuedMessageInfo[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+export function useAgentChatComposerState(paneId: string, enabled = true) {
 	const [isDragOver, setIsDragOver] = useState(false);
-	const [attachedImages, setAttachedImages] = useState<AttachedImageState[]>(
-		[]
-	);
+	const [attachedImages, setAttachedImages] = useState<AttachedImageInfo[]>([]);
 	const attachedImagesRef = useRef(attachedImages);
 	attachedImagesRef.current = attachedImages;
-	const queueRef = useRef<QueuedMessage[]>(
-		loadStoredQueue<QueuedMessage>(paneId)
+	const queueRef = useRef<QueuedMessageInfo[]>(
+		loadStoredQueue<QueuedMessageInfo>(paneId)
 	);
-	const [queuedMessages, setQueuedMessagesState] = useState<QueuedMessage[]>(
-		() => queueRef.current
-	);
+	const queueRevisionRef = useRef(0);
+	const [queuedMessages, setQueuedMessagesState] = useState<
+		QueuedMessageInfo[]
+	>(() => queueRef.current);
 	const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
 	const [editingQueueText, setEditingQueueText] = useState("");
 	const [mdPreview, setMdPreview] = useState<MarkdownPreviewState>({
@@ -82,48 +119,59 @@ export function useAgentChatComposerState(paneId: string) {
 	}, []);
 
 	useEffect(() => {
+		if (!enabled) return;
 		let active = true;
-		const next = loadStoredQueue<QueuedMessage>(paneId);
-		queueRef.current = next;
-		setQueuedMessagesState(next);
-		void loadFileBackedQueue<QueuedMessage>(paneId).then((fileBackedQueue) => {
-			if (!active) return;
-			if (
-				queuedMessagesScore(fileBackedQueue) <=
-				queuedMessagesScore(queueRef.current)
-			) {
-				return;
+		const next = loadStoredQueue<QueuedMessageInfo>(paneId);
+		const shouldApplyStoredQueue =
+			queueRef.current.length === 0 ||
+			next.length > 0 ||
+			areQueuedMessagesEqual(queueRef.current, next);
+		if (shouldApplyStoredQueue) {
+			queueRef.current = next;
+			setQueuedMessagesState(next);
+		}
+		const revisionAtLoad = queueRevisionRef.current;
+		void loadFileBackedQueue<QueuedMessageInfo>(paneId).then(
+			(fileBackedQueue) => {
+				if (!active || fileBackedQueue === null) return;
+				if (queueRevisionRef.current !== revisionAtLoad) return;
+				if (areQueuedMessagesEqual(queueRef.current, fileBackedQueue)) return;
+				queueRevisionRef.current++;
+				queueRef.current = fileBackedQueue;
+				setQueuedMessagesState(fileBackedQueue);
+				saveStoredQueue(paneId, fileBackedQueue);
 			}
-			queueRef.current = fileBackedQueue;
-			setQueuedMessagesState(fileBackedQueue);
-			saveStoredQueue(paneId, fileBackedQueue);
-		});
+		);
 		return () => {
 			active = false;
 		};
-	}, [paneId]);
+	}, [enabled, paneId]);
 
 	useEffect(() => {
-		const handleMessage = (msg: Record<string, unknown>) => {
-			if (msg.type === "file:content" && mdPreview.loading) {
+		if (!enabled || !mdPreview.loading) return;
+		const handleMessage = (msg: unknown) => {
+			if (!isFilePreviewMessage(msg)) return;
+			if (msg.type === "file:content") {
 				setMdPreview((prev) => ({
 					...prev,
-					content: msg.content as string,
+					content: msg.content,
 					loading: false,
 				}));
-			} else if (msg.type === "file:error" && mdPreview.loading) {
+			} else if (msg.type === "file:error") {
 				setMdPreview((prev) => ({
 					...prev,
-					error: (msg.error as string) || "Failed to read file",
+					error: msg.error || "Failed to read file",
 					loading: false,
 				}));
 			}
 		};
 		return wsClient.onMessage(handleMessage);
-	}, [mdPreview.loading]);
+	}, [enabled, mdPreview.loading]);
 
 	const setQueuedMessages = useCallback(
-		(messages: QueuedMessage[]) => {
+		(messages: QueuedMessageInfo[]) => {
+			if (areQueuedMessagesEqual(queueRef.current, messages)) return;
+			queueRevisionRef.current++;
 			queueRef.current = messages;
 			setQueuedMessagesState(messages);
 			saveStoredQueue(paneId, messages);
@@ -131,19 +179,20 @@ export function useAgentChatComposerState(paneId: string) {
 		[paneId]
 	);
 
-	useEffect(
-		() =>
-			listenWindowEvent(CLIENT_STORAGE_CHANGED_EVENT, (event) => {
-				const detail = (
-					event as CustomEvent<{ key?: string; value?: string | null }>
-				).detail;
-				if (detail?.key !== `${CHAT_QUEUE_KEY_PREFIX}${paneId}`) return;
-				const next = loadStoredQueue<QueuedMessage>(paneId);
-				queueRef.current = next;
-				setQueuedMessagesState(next);
-			}),
-		[paneId]
-	);
+	useEffect(() => {
+		if (!enabled) return;
+		return listenWindowEvent(CLIENT_STORAGE_CHANGED_EVENT, (event) => {
+			const detail = (
+				event as CustomEvent<{ key?: string; value?: string | null }>
+			).detail;
+			if (detail?.key !== `${CHAT_QUEUE_KEY_PREFIX}${paneId}`) return;
+			const next = parseQueuedMessages(detail.value);
+			if (areQueuedMessagesEqual(queueRef.current, next)) return;
+			queueRevisionRef.current++;
+			queueRef.current = next;
+			setQueuedMessagesState(next);
+		});
+	}, [enabled, paneId]);
 
 	const queueMessage = useCallback(
 		(text: string, displayText: string, images?: string[]) => {
@@ -168,13 +217,20 @@ export function useAgentChatComposerState(paneId: string) {
 
 	const removeQueuedMessage = useCallback(
 		(id: string) => {
+			if (!queueRef.current.some((item) => item.id === id)) return;
 			setQueuedMessages(queueRef.current.filter(lacksId.bind(null, id)));
+			if (editingQueueId === id) {
+				setEditingQueueId(null);
+				setEditingQueueText("");
+			}
 		},
-		[setQueuedMessages]
+		[editingQueueId, setQueuedMessages]
 	);
 
 	const updateQueuedMessage = useCallback(
 		(id: string, text: string) => {
+			const existing = queueRef.current.find((item) => item.id === id);
+			if (!existing || existing.text === text) return;
 			setQueuedMessages(
 				queueRef.current.map((item) =>
 					item.id === id ? { ...item, text, displayText: text } : item
@@ -182,6 +238,25 @@ export function useAgentChatComposerState(paneId: string) {
 			);
 		},
 		[setQueuedMessages]
+	);
+
+	const startQueuedMessageEdit = useCallback((id: string, text: string) => {
+		setEditingQueueId(id);
+		setEditingQueueText(text);
+	}, []);
+
+	const cancelQueuedMessageEdit = useCallback(() => {
+		setEditingQueueId(null);
+		setEditingQueueText("");
+	}, []);
+
+	const saveQueuedMessageEdit = useCallback(
+		(id: string) => {
+			const trimmed = editingQueueText.trim();
+			if (trimmed) updateQueuedMessage(id, trimmed);
+			cancelQueuedMessageEdit();
+		},
+		[cancelQueuedMessageEdit, editingQueueText, updateQueuedMessage]
 	);
 
 	const attachImage = useCallback(async (file: File) => {
@@ -206,13 +281,15 @@ export function useAgentChatComposerState(paneId: string) {
 	const removeAttachedImage = useCallback((path: string) => {
 		setAttachedImages((prev) => {
 			const target = prev.find(hasPath.bind(null, path));
-			if (target) URL.revokeObjectURL(target.previewUrl);
+			if (!target) return prev;
+			URL.revokeObjectURL(target.previewUrl);
 			return prev.filter((item) => item.path !== path);
 		});
 	}, []);
 
 	const clearAttachedImages = useCallback(() => {
 		setAttachedImages((prev) => {
+			if (prev.length === 0) return prev;
 			for (const img of prev) URL.revokeObjectURL(img.previewUrl);
 			return [];
 		});
@@ -256,17 +333,17 @@ export function useAgentChatComposerState(paneId: string) {
 		isDragOver,
 		setIsDragOver,
 		attachedImages,
-		queueRef,
 		queuedMessages,
-		setQueuedMessages,
 		queueMessage,
 		shiftQueuedMessage,
 		removeQueuedMessage,
 		updateQueuedMessage,
 		editingQueueId,
-		setEditingQueueId,
 		editingQueueText,
 		setEditingQueueText,
+		startQueuedMessageEdit,
+		cancelQueuedMessageEdit,
+		saveQueuedMessageEdit,
 		mdPreview,
 		setMdPreview,
 		handleMdFileClick,

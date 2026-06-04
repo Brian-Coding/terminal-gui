@@ -1,15 +1,20 @@
 import * as stylex from "@stylexjs/stylex";
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import {
 	CODEX_REASONING_LEVELS,
 	getAgentDefinition,
 } from "../../features/agents/agents.ts";
+import type {
+	AttachedImageInfo,
+	QueuedMessageInfo,
+	SlashCommand,
+} from "../../features/chat/agent-chat-shared.ts";
 import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
 import { hasId } from "../../lib/data.ts";
-import { setInputValue, stopPropagation } from "../../lib/react-events.ts";
+import { setInputValue } from "../../lib/react-events.ts";
 import {
 	color,
 	colorValues,
@@ -32,13 +37,13 @@ import {
 	IconTrash,
 	IconX,
 } from "../ui/Icons.tsx";
-import type {
-	AttachedImageInfo,
-	QueuedMessageInfo,
-	SlashCommand,
-} from "../../features/chat/agent-chat-shared.ts";
 import { Markdown } from "./ChatRichContent.tsx";
 import { renderInputHighlights } from "./chat-token-decorators.tsx";
+import type {
+	FileMenuState,
+	FileSearchResult,
+	SlashMenuState,
+} from "./useAgentChatMenus.ts";
 
 type AgentOption = {
 	id: AgentKind;
@@ -46,7 +51,6 @@ type AgentOption = {
 	icon: React.ReactNode;
 };
 
-const HIGHLIGHT_CHAR_LIMIT = 6000;
 const CLOSED_MD_PREVIEW = {
 	show: false,
 	path: "",
@@ -55,7 +59,187 @@ const CLOSED_MD_PREVIEW = {
 	error: null,
 };
 
-export function ChatComposer({
+const FileMenuRow = memo(function FileMenuRow({
+	file,
+	index,
+	selected,
+	selectFile,
+	setFileMenu,
+}: {
+	file: FileSearchResult;
+	index: number;
+	selected: boolean;
+	selectFile: (idx: number) => void;
+	setFileMenu: React.Dispatch<React.SetStateAction<FileMenuState>>;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => selectFile(index)}
+			onMouseEnter={() =>
+				setFileMenu((prev) =>
+					prev.selectedIdx === index ? prev : { ...prev, selectedIdx: index }
+				)
+			}
+			{...stylex.props(
+				styles.fileMenuRow,
+				selected && styles.fileMenuRowActive
+			)}
+		>
+			<span {...stylex.props(styles.fileMenuIcon)}>
+				{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
+			</span>
+			<span {...stylex.props(styles.fileMenuName)}>{file.name}</span>
+			<span {...stylex.props(styles.fileMenuPath)}>{file.path}</span>
+		</button>
+	);
+});
+
+const CommandMenuRow = memo(function CommandMenuRow({
+	command,
+	index,
+	selected,
+	selectCommand,
+	setSlashMenu,
+}: {
+	command: SlashCommand;
+	index: number;
+	selected: boolean;
+	selectCommand: (idx: number) => void;
+	setSlashMenu: React.Dispatch<React.SetStateAction<SlashMenuState>>;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => selectCommand(index)}
+			onMouseEnter={() =>
+				setSlashMenu((prev) =>
+					prev.selectedIdx === index ? prev : { ...prev, selectedIdx: index }
+				)
+			}
+			{...stylex.props(styles.commandRow, selected && styles.commandRowActive)}
+		>
+			<span {...stylex.props(styles.commandTitleLine)}>
+				<span
+					{...stylex.props(
+						styles.commandName,
+						selected && styles.commandNameActive
+					)}
+				>
+					/{command.name}
+				</span>
+				{command.isLocalCommand && (
+					<span {...stylex.props(styles.commandBadge)}>Native</span>
+				)}
+			</span>
+			<span {...stylex.props(styles.commandDescription)}>
+				{command.description}
+			</span>
+		</button>
+	);
+});
+
+const QueuedMessageRow = memo(function QueuedMessageRow({
+	index,
+	message,
+	isEditing,
+	editingQueueText,
+	setEditingQueueText,
+	startQueuedMessageEdit,
+	cancelQueuedMessageEdit,
+	saveQueuedMessageEdit,
+	removeQueuedMessage,
+}: {
+	index: number;
+	message: QueuedMessageInfo;
+	isEditing: boolean;
+	editingQueueText: string;
+	setEditingQueueText: (text: string) => void;
+	startQueuedMessageEdit: (id: string, text: string) => void;
+	cancelQueuedMessageEdit: () => void;
+	saveQueuedMessageEdit: (id: string) => void;
+	removeQueuedMessage: (id: string) => void;
+}) {
+	const editInputRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		if (isEditing) editInputRef.current?.focus();
+	}, [isEditing]);
+	return (
+		<div {...stylex.props(styles.queueRow)}>
+			<span {...stylex.props(styles.queueIndex)}>{index + 1}</span>
+			{isEditing ? (
+				<div {...stylex.props(styles.queueEditRow)}>
+					<input
+						ref={editInputRef}
+						type="text"
+						value={editingQueueText}
+						onChange={setInputValue.bind(null, setEditingQueueText)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") {
+								saveQueuedMessageEdit(message.id);
+							} else if (e.key === "Escape") {
+								cancelQueuedMessageEdit();
+							}
+						}}
+						{...stylex.props(styles.queueEditInput)}
+					/>
+					<IconButton
+						type="button"
+						onClick={() => saveQueuedMessageEdit(message.id)}
+						variant="ghost"
+						size="xs"
+						className={stylex.props(styles.saveButton).className}
+						title="Save"
+					>
+						<IconCheck size={11} />
+					</IconButton>
+					<IconButton
+						type="button"
+						onClick={cancelQueuedMessageEdit}
+						variant="ghost"
+						size="xs"
+						title="Cancel"
+					>
+						<IconX size={11} />
+					</IconButton>
+				</div>
+			) : (
+				<>
+					{message.images && message.images.length > 0 && (
+						<img
+							src={`/api/file?path=${encodeURIComponent(message.images[0]!)}`}
+							alt=""
+							{...stylex.props(styles.queueImage)}
+						/>
+					)}
+					<span {...stylex.props(styles.queueText)}>{message.displayText}</span>
+					<div {...stylex.props(styles.queueActions)}>
+						<IconButton
+							type="button"
+							onClick={() => startQueuedMessageEdit(message.id, message.text)}
+							variant="ghost"
+							size="xs"
+							title="Edit"
+						>
+							<IconPencil size={11} />
+						</IconButton>
+						<IconButton
+							type="button"
+							onClick={() => removeQueuedMessage(message.id)}
+							variant="danger"
+							size="xs"
+							title="Remove from queue"
+						>
+							<IconTrash size={11} />
+						</IconButton>
+					</div>
+				</>
+			)}
+		</div>
+	);
+});
+
+export const ChatComposer = memo(function ChatComposer({
 	showInput,
 	agentKind,
 	agentKindOptions,
@@ -72,11 +256,12 @@ export function ChatComposer({
 	attachImage,
 	queuedMessages,
 	editingQueueId,
-	setEditingQueueId,
 	editingQueueText,
 	setEditingQueueText,
-	queueRef,
-	setQueuedMessages,
+	startQueuedMessageEdit,
+	cancelQueuedMessageEdit,
+	saveQueuedMessageEdit,
+	removeQueuedMessage,
 	fileMenu,
 	setFileMenu,
 	fileResults,
@@ -97,7 +282,6 @@ export function ChatComposer({
 	mdPreview,
 	setMdPreview,
 	onMdFileClick,
-	statusBar,
 	voiceInput,
 }: {
 	showInput: boolean;
@@ -116,37 +300,18 @@ export function ChatComposer({
 	attachImage: (file: File) => Promise<void>;
 	queuedMessages: QueuedMessageInfo[];
 	editingQueueId: string | null;
-	setEditingQueueId: (id: string | null) => void;
 	editingQueueText: string;
 	setEditingQueueText: (text: string) => void;
-	queueRef: React.RefObject<QueuedMessageInfo[]>;
-	setQueuedMessages: (messages: QueuedMessageInfo[]) => void;
-	fileMenu: { show: boolean; selectedIdx: number; query: string };
-	setFileMenu: React.Dispatch<
-		React.SetStateAction<{
-			show: boolean;
-			selectedIdx: number;
-			query: string;
-			atIndex: number;
-			position: {
-				top: number;
-				left: number;
-				width: number;
-				maxHeight: number;
-			} | null;
-		}>
-	>;
-	fileResults: { name: string; path: string; isDir: boolean }[];
+	startQueuedMessageEdit: (id: string, text: string) => void;
+	cancelQueuedMessageEdit: () => void;
+	saveQueuedMessageEdit: (id: string) => void;
+	removeQueuedMessage: (id: string) => void;
+	fileMenu: FileMenuState;
+	setFileMenu: React.Dispatch<React.SetStateAction<FileMenuState>>;
+	fileResults: FileSearchResult[];
 	selectFile: (idx: number) => void;
-	slashMenu: { selectedIdx: number };
-	setSlashMenu: React.Dispatch<
-		React.SetStateAction<{
-			show: boolean;
-			selectedIdx: number;
-			query: string;
-			slashIndex: number;
-		}>
-	>;
+	slashMenu: SlashMenuState;
+	setSlashMenu: React.Dispatch<React.SetStateAction<SlashMenuState>>;
 	showCommands: boolean;
 	filteredCommands: SlashCommand[];
 	slashCommandNames: readonly string[];
@@ -175,7 +340,6 @@ export function ChatComposer({
 		}>
 	>;
 	onMdFileClick: (path: string) => void;
-	statusBar?: React.ReactNode;
 	voiceInput?: {
 		error: string | null;
 		isListening: boolean;
@@ -193,7 +357,7 @@ export function ChatComposer({
 		width: 360,
 		maxHeight: 360,
 	});
-	const usePlainTextarea = input.length > HIGHLIGHT_CHAR_LIMIT;
+	const usePlainTextarea = input.length > 6000;
 	const inputHighlights = useMemo(
 		() =>
 			usePlainTextarea ? null : renderInputHighlights(input, slashCommandNames),
@@ -220,9 +384,8 @@ export function ChatComposer({
 			if (
 				agentConfigMenuRef.current?.contains(target) ||
 				agentConfigButtonRef.current?.contains(target)
-			) {
+			)
 				return;
-			}
 			setAgentConfigOpen(false);
 		};
 		const handleKeyDown = (event: KeyboardEvent) => {
@@ -251,19 +414,6 @@ export function ChatComposer({
 		}
 		setAgentConfigOpen((open) => !open);
 	};
-	const saveQueuedEdit = (id: string) => {
-		const trimmed = editingQueueText.trim();
-		if (trimmed) {
-			const item = queueRef.current?.find(hasId.bind(null, id));
-			if (item) {
-				item.text = trimmed;
-				item.displayText = trimmed;
-			}
-			setQueuedMessages([...(queueRef.current ?? [])]);
-		}
-		setEditingQueueId(null);
-	};
-
 	return (
 		<>
 			<input
@@ -309,180 +459,59 @@ export function ChatComposer({
 				</div>
 			)}
 
-			{statusBar}
-
 			{showInput && (
 				<div {...stylex.props(styles.inputDock)}>
 					<div {...stylex.props(styles.inputFrame)} ref={inputContainerRef}>
 						{fileMenu.show && fileResults.length > 0 && (
-							<div {...stylex.props(styles.fileMenu)}>
+							<div {...stylex.props(styles.floatingMenu, styles.fileMenu)}>
 								<div {...stylex.props(styles.menuHeader)}>
 									FILES
 									{fileMenu.query ? ` matching "${fileMenu.query}"` : ""}
 								</div>
 								{fileResults.map((file, idx) => (
-									<button
-										type="button"
+									<FileMenuRow
 										key={file.path}
-										onClick={() => selectFile(idx)}
-										onMouseEnter={() =>
-											setFileMenu((prev) => ({ ...prev, selectedIdx: idx }))
-										}
-										{...stylex.props(
-											styles.fileMenuRow,
-											idx === fileMenu.selectedIdx && styles.fileMenuRowActive
-										)}
-									>
-										<span {...stylex.props(styles.fileMenuIcon)}>
-											{file.isDir ? "\u{1F4C1}" : "\u{1F4C4}"}
-										</span>
-										<span {...stylex.props(styles.fileMenuName)}>
-											{file.name}
-										</span>
-										<span {...stylex.props(styles.fileMenuPath)}>
-											{file.path}
-										</span>
-									</button>
+										file={file}
+										index={idx}
+										selected={idx === fileMenu.selectedIdx}
+										selectFile={selectFile}
+										setFileMenu={setFileMenu}
+									/>
 								))}
 							</div>
 						)}
 						{showCommands && filteredCommands.length > 0 && (
-							<div {...stylex.props(styles.commandMenu)}>
+							<div {...stylex.props(styles.floatingMenu, styles.commandMenu)}>
 								<div {...stylex.props(styles.commandHeader)}>Commands</div>
 								<div {...stylex.props(styles.commandList)}>
-									{filteredCommands.map((cmd, idx) => {
-										const isSelected = idx === slashMenu.selectedIdx;
-										return (
-											<button
-												type="button"
-												key={cmd.id || cmd.name}
-												onClick={() => selectCommand(idx)}
-												onMouseEnter={() =>
-													setSlashMenu((prev) => ({
-														...prev,
-														selectedIdx: idx,
-													}))
-												}
-												{...stylex.props(
-													styles.commandRow,
-													isSelected && styles.commandRowActive
-												)}
-											>
-												<span {...stylex.props(styles.commandTitleLine)}>
-													<span
-														{...stylex.props(
-															styles.commandName,
-															isSelected && styles.commandNameActive
-														)}
-													>
-														/{cmd.name}
-													</span>
-													{cmd.isLocalCommand && (
-														<span {...stylex.props(styles.commandBadge)}>
-															Native
-														</span>
-													)}
-												</span>
-												<span {...stylex.props(styles.commandDescription)}>
-													{cmd.description}
-												</span>
-											</button>
-										);
-									})}
+									{filteredCommands.map((command, idx) => (
+										<CommandMenuRow
+											key={command.id || command.name}
+											command={command}
+											index={idx}
+											selected={idx === slashMenu.selectedIdx}
+											selectCommand={selectCommand}
+											setSlashMenu={setSlashMenu}
+										/>
+									))}
 								</div>
 							</div>
 						)}
 						{queuedMessages.length > 0 && (
 							<div {...stylex.props(styles.queueList)}>
 								{queuedMessages.map((qm, idx) => (
-									<div key={qm.id} {...stylex.props(styles.queueRow)}>
-										<span {...stylex.props(styles.queueIndex)}>{idx + 1}</span>
-										{editingQueueId === qm.id ? (
-											<div {...stylex.props(styles.queueEditRow)}>
-												<input
-													type="text"
-													ref={(el) => el?.focus()}
-													value={editingQueueText}
-													onChange={setInputValue.bind(
-														null,
-														setEditingQueueText
-													)}
-													onKeyDown={(e) => {
-														if (e.key === "Enter") {
-															saveQueuedEdit(qm.id);
-														} else if (e.key === "Escape") {
-															setEditingQueueId(null);
-														}
-													}}
-													{...stylex.props(styles.queueEditInput)}
-												/>
-												<IconButton
-													type="button"
-													onClick={() => saveQueuedEdit(qm.id)}
-													variant="ghost"
-													size="xs"
-													className={stylex.props(styles.saveButton).className}
-													title="Save"
-												>
-													<IconCheck size={11} />
-												</IconButton>
-												<IconButton
-													type="button"
-													onClick={() => setEditingQueueId(null)}
-													variant="ghost"
-													size="xs"
-													title="Cancel"
-												>
-													<IconX size={11} />
-												</IconButton>
-											</div>
-										) : (
-											<>
-												{qm.images && qm.images.length > 0 && (
-													<img
-														src={`/api/file?path=${encodeURIComponent(qm.images[0]!)}`}
-														alt=""
-														{...stylex.props(styles.queueImage)}
-													/>
-												)}
-												<span {...stylex.props(styles.queueText)}>
-													{qm.displayText}
-												</span>
-												<div {...stylex.props(styles.queueActions)}>
-													<IconButton
-														type="button"
-														onClick={() => {
-															setEditingQueueId(qm.id);
-															setEditingQueueText(qm.text);
-														}}
-														variant="ghost"
-														size="xs"
-														title="Edit"
-													>
-														<IconPencil size={11} />
-													</IconButton>
-													<IconButton
-														type="button"
-														onClick={() => {
-															const next = (queueRef.current ?? []).filter(
-																(q) => q.id !== qm.id
-															);
-															if (queueRef.current) queueRef.current = next;
-															setQueuedMessages([...next]);
-															if (editingQueueId === qm.id) {
-																setEditingQueueId(null);
-															}
-														}}
-														variant="danger"
-														size="xs"
-														title="Remove from queue"
-													>
-														<IconTrash size={11} />
-													</IconButton>
-												</div>
-											</>
-										)}
-									</div>
+									<QueuedMessageRow
+										key={qm.id}
+										index={idx}
+										message={qm}
+										isEditing={editingQueueId === qm.id}
+										editingQueueText={editingQueueText}
+										setEditingQueueText={setEditingQueueText}
+										startQueuedMessageEdit={startQueuedMessageEdit}
+										cancelQueuedMessageEdit={cancelQueuedMessageEdit}
+										saveQueuedMessageEdit={saveQueuedMessageEdit}
+										removeQueuedMessage={removeQueuedMessage}
+									/>
 								))}
 							</div>
 						)}
@@ -508,7 +537,7 @@ export function ChatComposer({
 										className={`shrink-0 ${
 											stylex.props(
 												voiceInput.isListening && styles.voiceButtonListening,
-												!voiceInput.isListening && !!voiceInput.error
+												!voiceInput.isListening && voiceInput.error
 													? styles.voiceButtonError
 													: null
 											).className ?? ""
@@ -719,11 +748,14 @@ export function ChatComposer({
 				)}
 
 			{mdPreview.show && (
-				<div
-					{...stylex.props(styles.modalBackdrop)}
-					onClick={setMdPreview.bind(null, CLOSED_MD_PREVIEW)}
-				>
-					<div {...stylex.props(styles.modal)} onClick={stopPropagation}>
+				<div {...stylex.props(styles.modalBackdrop)}>
+					<button
+						type="button"
+						aria-label="Close markdown preview"
+						{...stylex.props(styles.modalBackdropButton)}
+						onClick={setMdPreview.bind(null, CLOSED_MD_PREVIEW)}
+					/>
+					<div {...stylex.props(styles.modal)}>
 						<div {...stylex.props(styles.modalHeader)}>
 							<span {...stylex.props(styles.modalTitle)}>{mdPreview.path}</span>
 							<IconButton
@@ -760,7 +792,7 @@ export function ChatComposer({
 			)}
 		</>
 	);
-}
+});
 
 const styles = stylex.create({
 	hidden: {
@@ -881,20 +913,22 @@ const styles = stylex.create({
 		alignItems: "center",
 		gap: "0.125rem",
 	},
-	fileMenu: {
+	floatingMenu: {
 		position: "absolute",
 		left: 0,
 		right: 0,
 		bottom: "100%",
 		zIndex: 9999,
-		maxHeight: "300px",
-		overflowY: "auto",
-		marginBottom: controlSize._1,
 		borderWidth: 1,
 		borderStyle: "solid",
 		borderColor: color.border,
-		borderRadius: controlSize._2,
 		backgroundColor: color.backgroundRaised,
+	},
+	fileMenu: {
+		maxHeight: "300px",
+		overflowY: "auto",
+		marginBottom: controlSize._1,
+		borderRadius: controlSize._2,
 		boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.6)",
 	},
 	menuHeader: {
@@ -951,19 +985,10 @@ const styles = stylex.create({
 		fontSize: font.size_1,
 	},
 	commandMenu: {
-		position: "absolute",
-		left: 0,
-		right: 0,
-		bottom: "100%",
-		zIndex: 9999,
 		maxHeight: "320px",
 		overflow: "hidden",
 		marginBottom: controlSize._2,
-		borderWidth: 1,
-		borderStyle: "solid",
-		borderColor: color.border,
 		borderRadius: radius.lg,
-		backgroundColor: color.backgroundRaised,
 		boxShadow: shadow.modal,
 	},
 	commandHeader: {
@@ -1156,6 +1181,13 @@ const styles = stylex.create({
 		backgroundColor: "rgba(0, 0, 0, 0.6)",
 		backdropFilter: "blur(4px)",
 	},
+	modalBackdropButton: {
+		position: "absolute",
+		inset: 0,
+		borderWidth: 0,
+		backgroundColor: "transparent",
+		padding: 0,
+	},
 	modal: {
 		position: "relative",
 		display: "flex",
@@ -1235,83 +1267,6 @@ const styles = stylex.create({
 		},
 		transitionProperty: "border-color, box-shadow, background-color",
 		transitionDuration: "150ms",
-	},
-	pickerButtonAccent: {
-		"--dropdown-button-bg-color": "transparent",
-		"--dropdown-button-bg-image": "none",
-		"--dropdown-button-border-color": "transparent",
-		"--dropdown-button-border-width": 0,
-		"--dropdown-button-hover-bg-color": "transparent",
-		"--dropdown-button-hover-bg-image": "none",
-		"--dropdown-button-hover-shadow": "none",
-		"--dropdown-button-open-bg-color": "transparent",
-		"--dropdown-button-open-bg-image": "none",
-		"--dropdown-button-open-border-color": "transparent",
-		"--dropdown-button-open-shadow": "none",
-		"--dropdown-button-shadow": "none",
-		height: controlSize._5,
-		borderRadius: 6,
-		borderColor: "transparent",
-		borderWidth: 0,
-		color: color.accent,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-		gap: controlSize._1,
-		paddingInline: controlSize._1,
-		userSelect: "none",
-		boxShadow: "none",
-		backgroundColor: {
-			default: "transparent",
-			":hover": "transparent",
-		},
-		backgroundImage: "none",
-	},
-	pickerButtonMuted: {
-		"--dropdown-button-bg-color": "transparent",
-		"--dropdown-button-bg-image": "none",
-		"--dropdown-button-border-color": "transparent",
-		"--dropdown-button-border-width": 0,
-		"--dropdown-button-hover-bg-color": "transparent",
-		"--dropdown-button-hover-bg-image": "none",
-		"--dropdown-button-hover-shadow": "none",
-		"--dropdown-button-open-bg-color": "transparent",
-		"--dropdown-button-open-bg-image": "none",
-		"--dropdown-button-open-border-color": "transparent",
-		"--dropdown-button-open-shadow": "none",
-		"--dropdown-button-shadow": "none",
-		height: controlSize._5,
-		borderRadius: 6,
-		borderColor: "transparent",
-		borderWidth: 0,
-		color: color.textMuted,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-		gap: controlSize._1,
-		paddingInline: controlSize._1,
-		userSelect: "none",
-		boxShadow: "none",
-		backgroundColor: {
-			default: "transparent",
-			":hover": "transparent",
-		},
-		backgroundImage: "none",
-	},
-	pickerLabel: {
-		fontSize: font.size_2,
-	},
-	modelLabel: {
-		maxWidth: "96px",
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-		fontSize: font.size_2,
-	},
-	reasoningLabel: {
-		maxWidth: "76px",
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-		fontSize: font.size_2,
 	},
 	inputRow: {
 		alignItems: "flex-end",

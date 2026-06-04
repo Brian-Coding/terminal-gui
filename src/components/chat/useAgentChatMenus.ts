@@ -1,7 +1,10 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchJsonOr } from "../../lib/fetch-json.ts";
+import { getAgentDefinition } from "../../features/agents/agents.ts";
 import type { SlashCommand } from "../../features/chat/agent-chat-shared.ts";
+import { usePrompts } from "../../features/prompts/usePrompts.ts";
+import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
+import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { findTriggerAtCursor, hideMenuState } from "./chat-agent-utils.ts";
 import { applyInlineCompletion } from "./chat-command-utils.ts";
 
@@ -12,7 +15,7 @@ interface MenuPosition {
 	maxHeight: number;
 }
 
-interface FileMenuState {
+export interface FileMenuState {
 	show: boolean;
 	selectedIdx: number;
 	query: string;
@@ -20,38 +23,70 @@ interface FileMenuState {
 	position: MenuPosition | null;
 }
 
-interface SlashMenuState {
+export interface SlashMenuState {
 	show: boolean;
 	selectedIdx: number;
 	query: string;
 	slashIndex: number;
 }
 
-interface FileSearchResult {
+export interface FileSearchResult {
 	name: string;
 	path: string;
 	isDir: boolean;
 }
 
 interface UseAgentChatMenusOptions {
+	agentKind: AgentKind;
 	cwd?: string;
+	enabled?: boolean;
 	input: string;
 	setInput: (value: string) => void;
-	allCommands: SlashCommand[];
 	textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 	inputContainerRef: React.RefObject<HTMLDivElement | null>;
 	containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
+function areMenuPositionsEqual(
+	prev: MenuPosition | null,
+	next: MenuPosition | null
+) {
+	if (prev === next) return true;
+	if (!prev || !next) return false;
+	return (
+		prev.top === next.top &&
+		prev.left === next.left &&
+		prev.width === next.width &&
+		prev.maxHeight === next.maxHeight
+	);
+}
+
+function areFileResultsEqual(
+	prev: FileSearchResult[],
+	next: FileSearchResult[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (a.name !== b.name || a.path !== b.path || a.isDir !== b.isDir) {
+			return false;
+		}
+	}
+	return true;
+}
+
 export function useAgentChatMenus({
+	agentKind,
 	cwd,
+	enabled = true,
 	input,
 	setInput,
-	allCommands,
 	textareaRef,
 	inputContainerRef,
 	containerRef,
 }: UseAgentChatMenusOptions) {
+	const { prompts: localPrompts, incrementUsage } = usePrompts(enabled);
 	const [fileMenu, setFileMenu] = useState<FileMenuState>({
 		show: false,
 		selectedIdx: 0,
@@ -67,8 +102,49 @@ export function useAgentChatMenus({
 	});
 	const [fileResults, setFileResults] = useState<FileSearchResult[]>([]);
 	const fileSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const fileSearchRequestRef = useRef(0);
 	const cachedRects = useRef<{ input: DOMRect; container: DOMRect } | null>(
 		null
+	);
+	const allCommands = useMemo<SlashCommand[]>(() => {
+		const deduped = new Map<string, SlashCommand>();
+		for (const command of [
+			{
+				name: "clear",
+				description: "Clear all messages",
+				action: "local" as const,
+				isLocalCommand: true,
+			},
+			{
+				name: "help",
+				description: "Show available commands",
+				action: "local" as const,
+				isLocalCommand: true,
+			},
+			...localPrompts.map((prompt) => ({
+				id: prompt._id,
+				name: prompt.command,
+				description: prompt.description,
+				action: "send" as const,
+				promptTemplate: prompt.promptTemplate,
+				category: prompt.category,
+				isFromLibrary: true,
+			})),
+			...getAgentDefinition(agentKind).nativeSlashCommands.map((command) => ({
+				name: command.name,
+				description: command.description,
+				action: "send" as const,
+				isLocalCommand: true,
+			})),
+		]) {
+			const key = command.name.toLowerCase();
+			if (!deduped.has(key)) deduped.set(key, command);
+		}
+		return [...deduped.values()];
+	}, [agentKind, localPrompts]);
+	const slashCommandNames = useMemo(
+		() => allCommands.map((command) => command.name),
+		[allCommands]
 	);
 
 	const slashCommandInfo = useMemo(() => {
@@ -86,6 +162,7 @@ export function useAgentChatMenus({
 	const showCommands = slashMenu.show && filteredCommands.length > 0;
 
 	useEffect(() => {
+		if (!enabled) return;
 		const inputEl = inputContainerRef.current;
 		const containerEl = containerRef.current;
 		if (!inputEl || !containerEl) return;
@@ -100,7 +177,18 @@ export function useAgentChatMenus({
 		obs.observe(inputEl);
 		obs.observe(containerEl);
 		return obs.disconnect.bind(obs);
-	}, [containerRef, inputContainerRef]);
+	}, [containerRef, enabled, inputContainerRef]);
+
+	useEffect(() => {
+		if (enabled) return;
+		fileSearchRequestRef.current++;
+		if (fileSearchTimerRef.current) {
+			clearTimeout(fileSearchTimerRef.current);
+			fileSearchTimerRef.current = null;
+		}
+		setFileMenu((prev) => (prev.show ? hideMenuState(prev) : prev));
+		setSlashMenu((prev) => (prev.show ? hideMenuState(prev) : prev));
+	}, [enabled]);
 
 	useEffect(
 		() => () => {
@@ -126,43 +214,70 @@ export function useAgentChatMenus({
 
 	const handleInputForSlashMenu = useCallback(
 		(value: string, cursorPos: number) => {
+			if (!enabled) return;
 			const trigger = findTriggerAtCursor(value, cursorPos, "/");
 			if (!trigger) {
-				if (slashMenu.show) setSlashMenu(hideMenuState);
+				setSlashMenu((prev) => (prev.show ? hideMenuState(prev) : prev));
 				return;
 			}
 
-			setSlashMenu({
-				show: true,
-				selectedIdx: 0,
-				query: trigger.query,
-				slashIndex: trigger.index,
+			setSlashMenu((prev) => {
+				if (
+					prev.show &&
+					prev.selectedIdx === 0 &&
+					prev.query === trigger.query &&
+					prev.slashIndex === trigger.index
+				) {
+					return prev;
+				}
+				return {
+					show: true,
+					selectedIdx: 0,
+					query: trigger.query,
+					slashIndex: trigger.index,
+				};
 			});
 		},
-		[slashMenu.show]
+		[enabled]
 	);
 
 	const handleInputForFileMenu = useCallback(
 		(value: string, cursorPos: number) => {
+			if (!enabled) return;
 			const trigger = findTriggerAtCursor(value, cursorPos, "@");
 			if (!trigger) {
-				if (fileMenu.show) setFileMenu(hideMenuState);
+				fileSearchRequestRef.current++;
+				if (fileSearchTimerRef.current) {
+					clearTimeout(fileSearchTimerRef.current);
+					fileSearchTimerRef.current = null;
+				}
+				setFileMenu((prev) => (prev.show ? hideMenuState(prev) : prev));
 				return;
 			}
 
-			let position = fileMenu.position;
 			const nextPosition = getMenuPosition(300);
-			if (nextPosition) position = nextPosition;
-
-			setFileMenu({
-				show: true,
-				selectedIdx: 0,
-				query: trigger.query,
-				atIndex: trigger.index,
-				position,
+			setFileMenu((prev) => {
+				const position = nextPosition ?? prev.position;
+				if (
+					prev.show &&
+					prev.selectedIdx === 0 &&
+					prev.query === trigger.query &&
+					prev.atIndex === trigger.index &&
+					areMenuPositionsEqual(prev.position, position)
+				) {
+					return prev;
+				}
+				return {
+					show: true,
+					selectedIdx: 0,
+					query: trigger.query,
+					atIndex: trigger.index,
+					position,
+				};
 			});
 
 			if (fileSearchTimerRef.current) clearTimeout(fileSearchTimerRef.current);
+			const requestId = ++fileSearchRequestRef.current;
 			fileSearchTimerRef.current = setTimeout(async () => {
 				const params = new URLSearchParams({
 					q: trigger.query,
@@ -173,10 +288,14 @@ export function useAgentChatMenus({
 					`/api/files/search?${params}`,
 					{}
 				);
-				setFileResults(data.results || []);
+				if (requestId !== fileSearchRequestRef.current) return;
+				const next = data.results || [];
+				setFileResults((prev) =>
+					areFileResultsEqual(prev, next) ? prev : next
+				);
 			}, 150);
 		},
-		[cwd, fileMenu.position, fileMenu.show, getMenuPosition]
+		[cwd, enabled, getMenuPosition]
 	);
 
 	const selectCommand = useCallback(
@@ -226,6 +345,7 @@ export function useAgentChatMenus({
 	);
 
 	return {
+		allCommands,
 		fileMenu,
 		setFileMenu,
 		fileResults,
@@ -233,6 +353,8 @@ export function useAgentChatMenus({
 		setSlashMenu,
 		filteredCommands,
 		showCommands,
+		incrementUsage,
+		slashCommandNames,
 		handleInputForFileMenu,
 		handleInputForSlashMenu,
 		selectCommand,

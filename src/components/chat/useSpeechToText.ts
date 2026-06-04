@@ -125,9 +125,11 @@ function cleanupSpeechRecognition({
 }
 
 export function useSpeechToText({
+	enabled = true,
 	value,
 	onChange,
 }: {
+	enabled?: boolean;
 	value: string;
 	onChange: (value: string) => void;
 }) {
@@ -143,10 +145,20 @@ export function useSpeechToText({
 	const ignoreAbortErrorRef = useRef(false);
 
 	useEffect(() => {
+		if (!enabled) return;
 		valueRef.current = value;
-	}, [value]);
+	}, [enabled, value]);
 
 	useEffect(() => {
+		if (!enabled) {
+			cleanupSpeechRecognition({
+				shouldApplyResultsRef,
+				ignoreAbortErrorRef,
+				recognitionRef,
+			});
+			setIsListening(false);
+			return;
+		}
 		setIsSupported(Boolean(getSpeechRecognition()));
 		return () => {
 			cleanupSpeechRecognition({
@@ -155,7 +167,7 @@ export function useSpeechToText({
 				recognitionRef,
 			});
 		};
-	}, []);
+	}, [enabled]);
 
 	const applyTranscript = useCallback(
 		(event: BrowserSpeechRecognitionResultEvent) => {
@@ -172,6 +184,7 @@ export function useSpeechToText({
 	);
 
 	const startListening = useCallback(async () => {
+		if (!enabled) return;
 		const Recognition = getSpeechRecognition();
 		if (!Recognition) {
 			setIsSupported(false);
@@ -232,7 +245,7 @@ export function useSpeechToText({
 			setIsListening(false);
 			setError("Speech recognition could not start.");
 		}
-	}, [applyTranscript]);
+	}, [applyTranscript, enabled]);
 
 	const stopListening = useCallback(() => {
 		recognitionRef.current?.stop();

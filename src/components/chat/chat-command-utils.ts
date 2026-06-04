@@ -1,4 +1,4 @@
-export type ChatCommandShape = {
+type ChatCommandShape = {
 	id?: string;
 	name: string;
 	promptTemplate?: string;

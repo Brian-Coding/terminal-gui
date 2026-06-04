@@ -1,7 +1,7 @@
 import { createCollection, localStorageCollectionOptions } from "@tanstack/db";
 import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
-import { isString, noop } from "../../lib/data.ts";
-import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
+import { hasRole, isString, noop } from "../../lib/data.ts";
+import { postJson, sendJson } from "../../lib/fetch-json.ts";
 import {
 	readStoredJson,
 	readStoredValue,
@@ -9,6 +9,7 @@ import {
 	writeStoredJson,
 	writeStoredValue,
 } from "../../lib/stored-json.ts";
+import type { ChatMessage } from "./agent-chat-shared.ts";
 
 const STORAGE_KEY_PREFIX = "inferay-chat-";
 const SESSION_KEY_PREFIX = "inferay-chat-session-";
@@ -20,8 +21,11 @@ const PENDING_SEND_KEY_PREFIX = "inferay-chat-pending-send-";
 const SUMMARY_KEY_PREFIX = "inferay-chat-summary-";
 const PENDING_WORKSPACE_KEY_PREFIX = "inferay-chat-pending-workspace-";
 const QUEUE_KEY_PREFIX = "inferay-chat-queue-";
-const LOADING_STATE_KEY_PREFIX = "inferay-chat-loading-";
-const LOADING_STATE_TTL_MS = 6 * 60 * 60 * 1000;
+const pendingSummaryRequests = new Set<string>();
+const pendingQueueFileSaves = new Map<
+	string,
+	{ queue: unknown[]; inFlight: boolean }
+>();
 
 type DbConversation = {
 	id: string;
@@ -38,7 +42,7 @@ type DbConversation = {
 type DbMessage = {
 	id: string;
 	conversationId: string;
-	role: "user" | "assistant" | "tool" | "system" | "btw";
+	role: ChatMessage["role"];
 	content: string;
 	toolName: string | null;
 	partsJson: string | null;
@@ -54,16 +58,6 @@ type DbPreference = {
 	id: string;
 	valueJson: string;
 	updatedAt: number;
-};
-
-type DbPendingMutation = {
-	id: string;
-	collectionId: string;
-	mutationJson: string;
-	createdAt: number;
-	lastAttemptAt: number | null;
-	status: "pending" | "error";
-	error: string | null;
 };
 
 const conversationsCollection = createCollection(
@@ -84,18 +78,6 @@ const preferencesCollection = createCollection(
 		getKey: (preference) => preference.id,
 	})
 );
-const pendingMutationsCollection = createCollection(
-	localStorageCollectionOptions<DbPendingMutation, string>({
-		storageKey: "inferay-db-pending-mutations",
-		getKey: (mutation) => mutation.id,
-	})
-);
-
-export interface StoredLoadingState {
-	isLoading: boolean;
-	status: string;
-	startTime: number | null;
-}
 
 function storageKey(prefix: string, paneId: string): string {
 	return prefix + paneId;
@@ -131,13 +113,50 @@ function loadPreference<T>(id: string, fallback: T): T {
 	return value ? JSON.parse(value) : fallback;
 }
 
+function messageStorageId(conversationId: string, messageId: string) {
+	return `${conversationId}:${messageId}`;
+}
+
+function getStoredMessageId(message: DbMessage): string {
+	if (message.partsJson) {
+		try {
+			const parsed = JSON.parse(message.partsJson) as { id?: unknown };
+			if (typeof parsed.id === "string" && parsed.id) return parsed.id;
+		} catch {}
+	}
+	const prefix = `${message.conversationId}:`;
+	return message.id.startsWith(prefix)
+		? message.id.slice(prefix.length)
+		: message.id;
+}
+
+function dedupeMessagesById<
+	T extends {
+		id: string;
+	},
+>(messages: T[]) {
+	const byId = new Map<string, T>();
+	for (const message of messages) {
+		if (byId.has(message.id)) byId.delete(message.id);
+		byId.set(message.id, message);
+	}
+	return [...byId.values()];
+}
+
 function savePreference(id: string, value: unknown) {
-	const row = { id, valueJson: JSON.stringify(value), updatedAt: Date.now() };
-	if (preferencesCollection.get(id)) {
+	const valueJson = JSON.stringify(value);
+	const existing = preferencesCollection.get(id);
+	if (existing?.valueJson === valueJson) return;
+	const row = { id, valueJson, updatedAt: Date.now() };
+	if (existing) {
 		preferencesCollection.update(id, (draft) => Object.assign(draft, row));
 	} else {
 		preferencesCollection.insert(row);
 	}
+}
+
+function removePreference(id: string) {
+	if (preferencesCollection.get(id)) preferencesCollection.delete(id);
 }
 
 function loadPaneMessages<T extends { id: string }>(paneId: string): T[] {
@@ -175,6 +194,9 @@ function savePaneMessages<
 	},
 >(paneId: string, messages: T[], agentKind = "codex") {
 	const now = Date.now();
+	const status = messages.some((message) => message.isStreaming)
+		? "streaming"
+		: "idle";
 	const conversation = conversationsCollection.toArray.find(
 		(item) => item.paneId === paneId
 	) ?? {
@@ -185,57 +207,78 @@ function savePaneMessages<
 		cwd: null,
 		createdAt: now,
 		updatedAt: now,
-		status: "idle" as const,
+		status,
 		syncState: "pending" as const,
 	};
 	if (conversationsCollection.get(conversation.id)) {
-		conversationsCollection.update(conversation.id, (draft) => {
-			draft.agentKind = agentKind;
-			draft.updatedAt = now;
-			draft.status = messages.some((message) => message.isStreaming)
-				? "streaming"
-				: "idle";
-			draft.syncState = "pending";
-		});
+		if (
+			conversation.agentKind !== agentKind ||
+			conversation.status !== status ||
+			conversation.syncState !== "pending"
+		) {
+			conversationsCollection.update(conversation.id, (draft) => {
+				draft.agentKind = agentKind;
+				draft.updatedAt = now;
+				draft.status = status;
+				draft.syncState = "pending";
+			});
+		}
 	} else {
 		conversationsCollection.insert(conversation);
 	}
-	for (let index = 0; index < messages.length; index++) {
-		const message = messages[index]!;
+	const existingRows = new Map(
+		messagesCollection.toArray
+			.filter((message) => message.conversationId === conversation.id)
+			.map((message) => [getStoredMessageId(message), message])
+	);
+	const dedupedMessages = dedupeMessagesById(messages);
+	const nextIds = new Set<string>();
+	for (let index = 0; index < dedupedMessages.length; index++) {
+		const message = dedupedMessages[index]!;
+		nextIds.add(message.id);
+		const partsJson = JSON.stringify(message);
+		const imagesJson = message.images?.length
+			? JSON.stringify(message.images)
+			: null;
+		const existing = existingRows.get(message.id);
+		const rowId = existing?.id ?? messageStorageId(conversation.id, message.id);
 		const row = {
-			id: message.id,
+			id: rowId,
 			conversationId: conversation.id,
 			role: message.role,
 			content: message.content,
 			toolName: message.toolName ?? null,
-			partsJson: JSON.stringify(message),
+			partsJson,
 			artifactsJson: null,
-			imagesJson: message.images?.length
-				? JSON.stringify(message.images)
-				: null,
+			imagesJson,
 			isStreaming: !!message.isStreaming,
-			createdAt: now + index,
+			createdAt: existing?.createdAt ?? now + index,
 			updatedAt: now,
 			syncState: "pending" as const,
 		};
-		if (messagesCollection.get(row.id)) {
-			messagesCollection.update(row.id, (draft) => Object.assign(draft, row));
+		if (existing || messagesCollection.get(rowId)) {
+			const current = existing ?? messagesCollection.get(rowId)!;
+			if (
+				current.conversationId === row.conversationId &&
+				current.role === row.role &&
+				current.content === row.content &&
+				current.toolName === row.toolName &&
+				current.partsJson === row.partsJson &&
+				current.imagesJson === row.imagesJson &&
+				current.isStreaming === row.isStreaming &&
+				current.syncState === row.syncState
+			) {
+				continue;
+			}
+			messagesCollection.update(rowId, (draft) => Object.assign(draft, row));
 		} else {
 			messagesCollection.insert(row);
 		}
 	}
-	pendingMutationsCollection.insert({
-		id: `messages-${paneId}-${now}`,
-		collectionId: "messages",
-		mutationJson: JSON.stringify({
-			paneId,
-			messageIds: messages.map((m) => m.id),
-		}),
-		createdAt: now,
-		lastAttemptAt: null,
-		status: "pending",
-		error: null,
-	});
+	for (const row of existingRows.values()) {
+		if (!nextIds.has(getStoredMessageId(row)))
+			messagesCollection.delete(row.id);
+	}
 }
 
 function clearPaneConversation(paneId: string) {
@@ -289,6 +332,7 @@ export function savePendingSend(paneId: string, value: string) {
 
 export function clearPendingSend(paneId: string) {
 	removePaneValue(PENDING_SEND_KEY_PREFIX, paneId);
+	removePreference(storageKey(PENDING_SEND_KEY_PREFIX, paneId));
 }
 
 export function loadStoredCheckpoints<T>(paneId: string): T[] {
@@ -301,10 +345,6 @@ export function loadStoredCheckpoints<T>(paneId: string): T[] {
 export function saveStoredCheckpoints<T>(paneId: string, checkpoints: T[]) {
 	writePaneJson(CHECKPOINT_KEY_PREFIX, paneId, checkpoints);
 	savePreference(storageKey(CHECKPOINT_KEY_PREFIX, paneId), checkpoints);
-}
-
-export function clearStoredCheckpoints(paneId: string) {
-	removePaneValue(CHECKPOINT_KEY_PREFIX, paneId);
 }
 
 export function loadStoredSessionId(paneId: string): string | null {
@@ -321,6 +361,7 @@ export function saveStoredSessionId(paneId: string, sessionId: string) {
 
 export function clearStoredSessionId(paneId: string) {
 	removePaneValue(SESSION_KEY_PREFIX, paneId);
+	removePreference(storageKey(SESSION_KEY_PREFIX, paneId));
 }
 
 export function loadStoredModel(paneId: string): string | null {
@@ -350,16 +391,43 @@ export function saveStoredReasoningLevel(
 	savePreference(storageKey(REASONING_KEY_PREFIX, paneId), reasoningLevel);
 }
 
-export function loadStoredSummary(paneId: string): string | null {
+function loadStoredSummary(paneId: string): string | null {
 	return loadPreference(
 		storageKey(SUMMARY_KEY_PREFIX, paneId),
 		readPaneValue(SUMMARY_KEY_PREFIX, paneId)
 	);
 }
 
-export function saveStoredSummary(paneId: string, summary: string) {
+function saveStoredSummary(paneId: string, summary: string) {
 	writePaneValue(SUMMARY_KEY_PREFIX, paneId, summary);
 	savePreference(storageKey(SUMMARY_KEY_PREFIX, paneId), summary);
+}
+
+export function deriveStoredSummary(
+	paneId: string,
+	messages = loadStoredMessages<{ role: string; content: string }>(paneId),
+	onStored?: () => void
+): string | null {
+	const existing = loadStoredSummary(paneId);
+	if (existing) return existing;
+	const firstUser = messages.find(hasRole.bind(null, "user"));
+	if (!firstUser?.content) return null;
+	if (!pendingSummaryRequests.has(paneId)) {
+		pendingSummaryRequests.add(paneId);
+		postJson<{ title?: string }>("/api/generate-title", {
+			message: firstUser.content,
+		})
+			.then((data) => {
+				const title = data?.title?.trim();
+				if (!title) return;
+				saveStoredSummary(paneId, title);
+				onStored?.();
+			})
+			.catch(noop)
+			.finally(() => pendingSummaryRequests.delete(paneId));
+	}
+	const text = firstUser.content.trim().split("\n")[0] ?? "";
+	return text.length > 60 ? `${text.slice(0, 57)}...` : text;
 }
 
 export function loadPendingWorkspacePaths(paneId: string): string[] {
@@ -378,18 +446,25 @@ export function savePendingWorkspacePaths(paneId: string, paths: string[]) {
 }
 
 export function loadStoredQueue<T>(paneId: string): T[] {
-	return loadPreference(
-		storageKey(QUEUE_KEY_PREFIX, paneId),
-		readPaneJson(QUEUE_KEY_PREFIX, paneId, [])
+	const directQueue = readPaneJson<T[] | null>(QUEUE_KEY_PREFIX, paneId, null);
+	return (
+		directQueue ?? loadPreference(storageKey(QUEUE_KEY_PREFIX, paneId), [])
 	);
 }
 
-export async function loadFileBackedQueue<T>(paneId: string): Promise<T[]> {
-	const response = await fetchJsonOr<{ queue?: unknown[] }>(
-		`/api/chat-queues/${encodeURIComponent(paneId)}`,
-		{ queue: [] }
-	);
-	return Array.isArray(response.queue) ? (response.queue as T[]) : [];
+export async function loadFileBackedQueue<T>(
+	paneId: string
+): Promise<T[] | null> {
+	try {
+		const response = await fetch(
+			`/api/chat-queues/${encodeURIComponent(paneId)}`
+		);
+		if (!response.ok) return null;
+		const payload = (await response.json()) as { queue?: unknown };
+		return Array.isArray(payload.queue) ? (payload.queue as T[]) : null;
+	} catch {
+		return null;
+	}
 }
 
 async function saveFileBackedQueue<T>(
@@ -409,53 +484,46 @@ async function saveFileBackedQueue<T>(
 	);
 }
 
+async function flushQueuedFileSave(
+	paneId: string,
+	state: { queue: unknown[]; inFlight: boolean }
+) {
+	state.inFlight = true;
+	while (pendingQueueFileSaves.get(paneId) === state) {
+		const queue = state.queue;
+		try {
+			await saveFileBackedQueue(paneId, queue);
+		} catch {
+			pendingQueueFileSaves.delete(paneId);
+			break;
+		}
+		if (state.queue === queue) {
+			pendingQueueFileSaves.delete(paneId);
+			break;
+		}
+	}
+	state.inFlight = false;
+}
+
+function saveLatestFileBackedQueue(paneId: string, queue: unknown[]) {
+	const state = pendingQueueFileSaves.get(paneId) ?? {
+		queue,
+		inFlight: false,
+	};
+	state.queue = queue;
+	pendingQueueFileSaves.set(paneId, state);
+	if (!state.inFlight) void flushQueuedFileSave(paneId, state);
+}
+
 export function saveStoredQueue<T>(paneId: string, queue: T[]) {
 	if (queue.length === 0) removePaneValue(QUEUE_KEY_PREFIX, paneId);
 	else writePaneJson(QUEUE_KEY_PREFIX, paneId, queue);
 	savePreference(storageKey(QUEUE_KEY_PREFIX, paneId), queue);
-	saveFileBackedQueue(paneId, queue).catch(noop);
+	saveLatestFileBackedQueue(paneId, queue);
 	flushPendingClientStorageSync();
 }
 
-export function loadStoredLoadingState(
-	paneId: string
-): StoredLoadingState | null {
-	const parsed = readPaneJson<Partial<StoredLoadingState> | null>(
-		LOADING_STATE_KEY_PREFIX,
-		paneId,
-		null
-	);
-	if (!parsed?.isLoading || typeof parsed.status !== "string") return null;
-	if (
-		typeof parsed.startTime !== "number" ||
-		Date.now() - parsed.startTime > LOADING_STATE_TTL_MS
-	) {
-		return null;
-	}
-	return {
-		isLoading: true,
-		status: parsed.status,
-		startTime: parsed.startTime,
-	};
-}
-
-export function saveStoredLoadingState(
-	paneId: string,
-	state: StoredLoadingState
-) {
-	if (!state.isLoading || !state.startTime) {
-		removePaneValue(LOADING_STATE_KEY_PREFIX, paneId);
-		return;
-	}
-	writePaneJson(LOADING_STATE_KEY_PREFIX, paneId, state);
-	savePreference(storageKey(LOADING_STATE_KEY_PREFIX, paneId), state);
-}
-
-export function clearStoredLoadingState(paneId: string) {
-	removePaneValue(LOADING_STATE_KEY_PREFIX, paneId);
-}
-
-export function clearAgentChatMessages(paneId: string) {
+export function clearAgentChatPaneState(paneId: string) {
 	clearPaneConversation(paneId);
 	for (const prefix of [
 		STORAGE_KEY_PREFIX,
@@ -463,9 +531,9 @@ export function clearAgentChatMessages(paneId: string) {
 		INPUT_KEY_PREFIX,
 		SUMMARY_KEY_PREFIX,
 		PENDING_WORKSPACE_KEY_PREFIX,
-		QUEUE_KEY_PREFIX,
-		LOADING_STATE_KEY_PREFIX,
 	]) {
 		removePaneValue(prefix, paneId);
+		removePreference(storageKey(prefix, paneId));
 	}
+	saveStoredQueue(paneId, []);
 }
