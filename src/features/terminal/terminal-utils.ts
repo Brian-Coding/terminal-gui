@@ -668,14 +668,14 @@ export function mutateTerminalWorkspaceState(
 }
 
 export type TerminalGroupsAction =
-	| {
+	| ({
 			type: "addPane";
 			groupId: string;
-			agentKind: AgentKind;
-			cwd?: string;
-			pendingCwd?: boolean;
 			referencePaths?: string[];
-	  }
+	  } & (
+			| { agentKind: AgentKind; cwd?: string; pendingCwd?: boolean }
+			| { pane: TerminalPaneModel }
+	  ))
 	| { type: "removePane"; groupId: string; paneId: string; force?: boolean }
 	| { type: "selectPane"; groupId: string; paneId: string }
 	| {
@@ -706,11 +706,10 @@ export function reduceTerminalGroups(
 ): TerminalGroupModel[] {
 	switch (action.type) {
 		case "addPane": {
-			const pane = createTerminalPane(
-				action.agentKind,
-				action.cwd,
-				action.pendingCwd
-			);
+			const pane =
+				"pane" in action
+					? action.pane
+					: createTerminalPane(action.agentKind, action.cwd, action.pendingCwd);
 			if (action.referencePaths) pane.referencePaths = action.referencePaths;
 			return state.map((group) =>
 				group.id === action.groupId

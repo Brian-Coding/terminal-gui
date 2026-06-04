@@ -24,22 +24,51 @@ function updatePromptsCache(prompts: Prompt[]) {
 	promptsCache = prompts;
 }
 
+function arePromptsEqual(prev: Prompt[], next: Prompt[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a._id !== b._id ||
+			a.name !== b.name ||
+			a.description !== b.description ||
+			a.command !== b.command ||
+			a.promptTemplate !== b.promptTemplate ||
+			a.category !== b.category ||
+			a.isBuiltIn !== b.isBuiltIn ||
+			a.executionCount !== b.executionCount ||
+			a.lastUsed !== b.lastUsed ||
+			a.createdAt !== b.createdAt ||
+			a.updatedAt !== b.updatedAt ||
+			a.tags.length !== b.tags.length
+		) {
+			return false;
+		}
+		for (let j = 0; j < a.tags.length; j++) {
+			if (a.tags[j] !== b.tags[j]) return false;
+		}
+	}
+	return true;
+}
+
 export function preloadPrompts() {
 	return loadPrompts().catch(() => []);
 }
 
-export function usePrompts() {
+export function usePrompts(enabled = true) {
 	const [prompts, setPrompts] = useState<Prompt[]>(() => promptsCache ?? []);
 
 	const reload = useCallback(async () => {
 		const data = await loadPrompts();
 		updatePromptsCache(data);
-		setPrompts(data);
+		setPrompts((current) => (arePromptsEqual(current, data) ? current : data));
 	}, []);
 
 	useEffect(() => {
+		if (!enabled) return;
 		reload();
-	}, [reload]);
+	}, [enabled, reload]);
 
 	const createPrompt = useCallback(
 		async (data: {
@@ -53,7 +82,9 @@ export function usePrompts() {
 			const next = await postJson<Prompt>("/api/prompts", data);
 			const updated = promptsCache ? [next, ...promptsCache] : [next];
 			updatePromptsCache(updated);
-			setPrompts(updated);
+			setPrompts((current) =>
+				arePromptsEqual(current, updated) ? current : updated
+			);
 		},
 		[]
 	);
@@ -71,7 +102,9 @@ export function usePrompts() {
 				prompt._id === id ? next : prompt
 			) ?? [next];
 			updatePromptsCache(updated);
-			setPrompts(updated);
+			setPrompts((current) =>
+				arePromptsEqual(current, updated) ? current : updated
+			);
 		},
 		[]
 	);
@@ -83,7 +116,9 @@ export function usePrompts() {
 		}
 		const updated = (promptsCache ?? []).filter(lacksObjectId.bind(null, id));
 		updatePromptsCache(updated);
-		setPrompts(updated);
+		setPrompts((current) =>
+			arePromptsEqual(current, updated) ? current : updated
+		);
 	}, []);
 
 	const incrementUsage = useCallback(async (id: string) => {

@@ -39,6 +39,21 @@ function cwdLabel(cwd: string) {
 	return parts[parts.length - 1] || cwd;
 }
 
+function areFileSearchEntriesEqual(
+	prev: FileSearchEntry[],
+	next: FileSearchEntry[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (a.name !== b.name || a.path !== b.path || a.isDir !== b.isDir) {
+			return false;
+		}
+	}
+	return true;
+}
+
 function fileStatusType(
 	project: GitProjectStatus | null,
 	path: string
@@ -148,10 +163,21 @@ export function ProjectFileGraphView({
 	}, [activeCwd]);
 	const { data: files, loading } = useAsyncResource<FileSearchEntry[]>(
 		fetchFiles,
-		[]
+		[],
+		{ isEqual: areFileSearchEntriesEqual }
 	);
 	const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 	const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+	const cwdOptions = useMemo(
+		() =>
+			cwds.map((cwd) => ({
+				id: cwd,
+				label: cwdLabel(cwd),
+				detail: cwd,
+				icon: <IconFolder size={12} />,
+			})),
+		[cwds]
+	);
 
 	const nodes = useMemo(
 		() => buildGraphNodes(project, files),
@@ -185,12 +211,7 @@ export function ProjectFileGraphView({
 				<div {...stylex.props(styles.canvasControls)}>
 					<DropdownButton
 						value={activeCwd}
-						options={cwds.map((cwd) => ({
-							id: cwd,
-							label: cwdLabel(cwd),
-							detail: cwd,
-							icon: <IconFolder size={12} />,
-						}))}
+						options={cwdOptions}
 						onChange={onSelectCwd}
 						minWidth={220}
 						buttonClassName={stylex.props(styles.dropdownButton).className}

@@ -25,19 +25,41 @@ class TestResizeObserver {
 }
 
 function setupDom() {
-	const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+	const dom = new JSDOM('<div id="root"></div>', {
+		pretendToBeVisual: true,
+		url: "http://localhost/#/terminal",
+	});
 	const raf = (callback: FrameRequestCallback) =>
 		setTimeout(() => callback(Date.now()), 0) as unknown as number;
 	const caf = (handle: number) => clearTimeout(handle);
 
-	Object.assign(globalThis, {
-		window: dom.window,
-		document: dom.window.document,
-		HTMLElement: dom.window.HTMLElement,
-		SVGElement: dom.window.SVGElement,
-		ResizeObserver: TestResizeObserver,
-		requestAnimationFrame: raf,
-		cancelAnimationFrame: caf,
+	Object.defineProperty(globalThis, "window", {
+		configurable: true,
+		value: dom.window,
+	});
+	Object.defineProperty(globalThis, "document", {
+		configurable: true,
+		value: dom.window.document,
+	});
+	Object.defineProperty(globalThis, "HTMLElement", {
+		configurable: true,
+		value: dom.window.HTMLElement,
+	});
+	Object.defineProperty(globalThis, "SVGElement", {
+		configurable: true,
+		value: dom.window.SVGElement,
+	});
+	Object.defineProperty(globalThis, "ResizeObserver", {
+		configurable: true,
+		value: TestResizeObserver,
+	});
+	Object.defineProperty(globalThis, "requestAnimationFrame", {
+		configurable: true,
+		value: raf,
+	});
+	Object.defineProperty(globalThis, "cancelAnimationFrame", {
+		configurable: true,
+		value: caf,
 	});
 	Object.assign(dom.window, {
 		ResizeObserver: TestResizeObserver,

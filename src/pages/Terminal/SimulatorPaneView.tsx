@@ -79,6 +79,91 @@ async function loadSimulatorSnapshot(): Promise<SimulatorSnapshot> {
 	};
 }
 
+function areSimulatorStringArraysEqual(prev: string[], next: string[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		if (prev[i] !== next[i]) return false;
+	}
+	return true;
+}
+
+function areSimulatorDevicesEqual(
+	prev: SimulatorDevice[],
+	next: SimulatorDevice[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.udid !== b.udid ||
+			a.name !== b.name ||
+			a.state !== b.state ||
+			a.runtime !== b.runtime ||
+			a.isAvailable !== b.isAvailable
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function areSimulatorProjectsEqual(
+	prev: SimulatorProject[],
+	next: SimulatorProject[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.id !== b.id ||
+			a.name !== b.name ||
+			a.kind !== b.kind ||
+			a.path !== b.path ||
+			a.projectPath !== b.projectPath ||
+			a.workspacePath !== b.workspacePath ||
+			a.iosPath !== b.iosPath ||
+			a.defaultScheme !== b.defaultScheme ||
+			a.bundleId !== b.bundleId ||
+			a.bootedDeviceUdid !== b.bootedDeviceUdid ||
+			a.installed !== b.installed ||
+			a.running !== b.running ||
+			!areSimulatorStringArraysEqual(a.schemes, b.schemes)
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function areBaguetteStatusesEqual(
+	prev: BaguetteStatus | null,
+	next: BaguetteStatus | null
+) {
+	if (prev === next) return true;
+	if (!prev || !next) return false;
+	return (
+		prev.installed === next.installed &&
+		prev.running === next.running &&
+		prev.port === next.port &&
+		prev.baseUrl === next.baseUrl &&
+		prev.error === next.error
+	);
+}
+
+function areSimulatorSnapshotsEqual(
+	prev: SimulatorSnapshot,
+	next: SimulatorSnapshot
+) {
+	return (
+		prev.error === next.error &&
+		areBaguetteStatusesEqual(prev.status, next.status) &&
+		areSimulatorDevicesEqual(prev.devices, next.devices) &&
+		areSimulatorProjectsEqual(prev.projects, next.projects)
+	);
+}
+
 type LaunchPhase = "booting" | "building" | "launching";
 type FarmLayout = "grid" | "wall" | "list";
 type FarmPlatform = "iphone" | "ipad";
@@ -149,11 +234,17 @@ function simulatorUiReducer(
 	action: SimulatorUiAction
 ): SimulatorUiState {
 	switch (action.type) {
-		case "fieldChanged":
+		case "fieldChanged": {
+			const nextValue = resolveStateValue(
+				state[action.field],
+				action.value
+			) as SimulatorUiState[typeof action.field];
+			if (Object.is(state[action.field], nextValue)) return state;
 			return {
 				...state,
-				[action.field]: resolveStateValue(state[action.field], action.value),
+				[action.field]: nextValue,
 			};
+		}
 	}
 }
 
@@ -601,11 +692,17 @@ function FarmTile({
 
 export function SimulatorPaneView() {
 	const { data: simulatorSnapshot, refresh } =
-		useAsyncResource<SimulatorSnapshot>(loadSimulatorSnapshot, {
-			devices: [],
-			projects: [],
-			status: null,
-		});
+		useAsyncResource<SimulatorSnapshot>(
+			loadSimulatorSnapshot,
+			{
+				devices: [],
+				projects: [],
+				status: null,
+			},
+			{
+				isEqual: areSimulatorSnapshotsEqual,
+			}
+		);
 	const {
 		devices,
 		projects,

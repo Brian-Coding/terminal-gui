@@ -38,7 +38,7 @@ const EMPTY_SPACER_LINE: DiffLine = {
 	content: "",
 	type: "spacer",
 };
-export const MAX_DIFF_TOKENIZE_LINE_CHARS = 1000;
+const MAX_DIFF_TOKENIZE_LINE_CHARS = 1000;
 
 export type SplitDiffRow = {
 	index: number;
@@ -187,6 +187,46 @@ function safeDiffMessage(content: string): HunkDiff {
 	};
 }
 
+function areDiffRequestsEqual(
+	prev: DiffRequest | null,
+	next: DiffRequest | null
+) {
+	if (prev === next) return true;
+	if (!prev || !next) return false;
+	return (
+		prev.cwd === next.cwd &&
+		prev.file === next.file &&
+		prev.staged === next.staged
+	);
+}
+
+function areDiffLinesEqual(prev: DiffLine[], next: DiffLine[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (a.number !== b.number || a.content !== b.content || a.type !== b.type) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function areHunkDiffsEqual(prev: HunkDiff | null, next: HunkDiff | null) {
+	if (prev === next) return true;
+	if (!prev || !next) return false;
+	return (
+		prev.isBinary === next.isBinary &&
+		prev.isNew === next.isNew &&
+		prev.isImage === next.isImage &&
+		prev.imagePath === next.imagePath &&
+		prev.rawPatch === next.rawPatch &&
+		prev.mergeConflictContent === next.mergeConflictContent &&
+		areDiffLinesEqual(prev.oldLines, next.oldLines) &&
+		areDiffLinesEqual(prev.newLines, next.newLines)
+	);
+}
+
 export function summarizeHunkDiff(diff: HunkDiff | null): HunkDiffStats {
 	if (!diff) return { added: 0, removed: 0, hunks: 0, lines: 0 };
 	let added = 0;
@@ -243,10 +283,14 @@ export function useGitDiff() {
 		const canUseCached =
 			cached && Date.now() - cached.storedAt <= DIFF_CACHE_TTL_MS;
 		activeId.current = id;
-		setRequest(req);
+		setRequest((current) =>
+			areDiffRequestsEqual(current, req) ? current : req
+		);
 		setLoading(!canUseCached);
 		if (canUseCached) {
-			setDiff(cached.diff);
+			setDiff((current) =>
+				areHunkDiffsEqual(current, cached.diff) ? current : cached.diff
+			);
 		}
 
 		fetch(
@@ -264,13 +308,18 @@ export function useGitDiff() {
 					? result
 					: safeDiffMessage("Diff response could not be rendered safely");
 				diffCache.set(cacheKey, { diff: nextDiff, storedAt: Date.now() });
-				setDiff(nextDiff);
+				setDiff((current) =>
+					areHunkDiffsEqual(current, nextDiff) ? current : nextDiff
+				);
 				setLoading(false);
 			})
 			.catch(() => {
 				if (activeId.current !== id) return;
-				setDiff(
-					safeDiffMessage("Diff timed out before it could render safely")
+				const nextDiff = safeDiffMessage(
+					"Diff timed out before it could render safely"
+				);
+				setDiff((current) =>
+					areHunkDiffsEqual(current, nextDiff) ? current : nextDiff
 				);
 				setLoading(false);
 			})

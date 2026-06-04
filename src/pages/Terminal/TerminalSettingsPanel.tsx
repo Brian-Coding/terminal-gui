@@ -15,6 +15,7 @@ import {
 } from "../../features/terminal/terminal-utils.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
+import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import {
 	SYNTAX_HIGHLIGHT_THEMES,
 	type SyntaxHighlightTheme,
@@ -55,6 +56,15 @@ const VISIBLE_APP_THEMES = APP_THEMES.filter(
 );
 const ENABLE_CUSTOM_THEME_PICKER = false;
 const EMPTY_FOLDERS: string[] = [];
+
+function areLoadedFoldersEqual(prev: string[] | null, next: string[] | null) {
+	if (prev === next) return true;
+	if (!prev || !next || prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		if (prev[i] !== next[i]) return false;
+	}
+	return true;
+}
 
 function ColorInput({
 	label,
@@ -162,7 +172,7 @@ function SearchFoldersSection() {
 	}, []);
 	const { data: loadedFolders, setData: setFolders } = useAsyncResource<
 		string[] | null
-	>(fetchSearchFolders, null);
+	>(fetchSearchFolders, null, { isEqual: areLoadedFoldersEqual });
 	const folders = useMemo(
 		() => loadedFolders ?? EMPTY_FOLDERS,
 		[loadedFolders]
@@ -441,7 +451,14 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 	onClose,
 }: TerminalSettingsPanelProps) {
 	return (
-		<div {...stylex.props(styles.overlay)} onClick={onClose}>
+		<div
+			role="button"
+			tabIndex={0}
+			aria-label="Close terminal settings"
+			{...stylex.props(styles.overlay)}
+			onClick={onClose}
+			onKeyDown={activateOnEnterOrSpacePreventDefault.bind(null, onClose)}
+		>
 			<div
 				{...stylex.props(styles.panel)}
 				onClick={(event) => event.stopPropagation()}

@@ -13,6 +13,18 @@ interface UseFileWatcherOptions {
 	onDiffLoaded: () => void;
 }
 
+function isFileChangedMessage(
+	msg: unknown
+): msg is { type: "file:changed"; cwd: string; file: string } {
+	return (
+		!!msg &&
+		typeof msg === "object" &&
+		(msg as { type?: unknown }).type === "file:changed" &&
+		typeof (msg as { cwd?: unknown }).cwd === "string" &&
+		typeof (msg as { file?: unknown }).file === "string"
+	);
+}
+
 export function useFileWatcher({
 	enabled,
 	cwd,
@@ -48,22 +60,20 @@ export function useFileWatcher({
 	useEffect(() => {
 		if (!cwd || !paneId) return;
 
-		const handleMessage = (msg: {
-			type: string;
-			cwd?: string;
-			file?: string;
-		}) => {
-			if (!enabledRef.current) return;
-			if (
-				msg.type !== "file:changed" ||
-				msg.cwd !== cwdRef.current ||
-				!msg.file
-			)
-				return;
+		let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
-			setTimeout(() => {
+		const handleMessage = (msg: unknown) => {
+			if (!enabledRef.current) return;
+			if (!isFileChangedMessage(msg) || msg.cwd !== cwdRef.current) return;
+
+			if (reloadTimer) {
+				clearTimeout(reloadTimer);
+			}
+
+			reloadTimer = setTimeout(() => {
+				reloadTimer = undefined;
 				if (!enabledRef.current || !cwdRef.current) return;
-				const changedFile = msg.file!;
+				const changedFile = msg.file;
 				pendingScrollRef.current = true;
 				loadDiffRef.current({
 					cwd: cwdRef.current,
@@ -76,7 +86,14 @@ export function useFileWatcher({
 			}, 400);
 		};
 
-		return wsClient.onMessage(handleMessage as (msg: unknown) => void);
+		const unsubscribe = wsClient.onMessage(handleMessage);
+
+		return () => {
+			if (reloadTimer) {
+				clearTimeout(reloadTimer);
+			}
+			unsubscribe();
+		};
 	}, [cwd, paneId]);
 
 	return {

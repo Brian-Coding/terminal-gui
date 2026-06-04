@@ -17,20 +17,40 @@ export function usePollingResource<T>(
 	fetcher: (signal?: AbortSignal) => Promise<T>,
 	pollInterval: number,
 	initialValue: T,
-	options?: { deferInitialFetch?: boolean }
+	options?: {
+		deferInitialFetch?: boolean;
+		enabled?: boolean;
+		isEqual?: (prev: T, next: T) => boolean;
+	}
 ) {
 	const [data, setData] = useState(initialValue);
 	const [loaded, setLoaded] = useState(false);
 	const mountedRef = useRef(true);
 	const dataRef = useRef(data);
-	dataRef.current = data;
 	const deferInitialFetch = options?.deferInitialFetch ?? false;
+	const enabled = options?.enabled ?? true;
+	const enabledRef = useRef(enabled);
+	const requestVersionRef = useRef(0);
+	dataRef.current = data;
+	enabledRef.current = enabled;
+	const isEqualRef = useRef(options?.isEqual);
+	isEqualRef.current = options?.isEqual;
 	const refetch = useCallback(
 		async (signal?: AbortSignal) => {
+			if (!enabledRef.current) return dataRef.current;
+			const requestVersion = requestVersionRef.current;
 			try {
 				const next = await fetcher(signal);
-				if (mountedRef.current) {
-					setData(next);
+				if (
+					mountedRef.current &&
+					enabledRef.current &&
+					requestVersion === requestVersionRef.current
+				) {
+					setData((prev) => {
+						if (isEqualRef.current?.(prev, next)) return prev;
+						dataRef.current = next;
+						return next;
+					});
 					setLoaded(true);
 				}
 				return next;
@@ -45,11 +65,26 @@ export function usePollingResource<T>(
 	);
 	useEffect(() => {
 		mountedRef.current = true;
+		const effectVersion = ++requestVersionRef.current;
+		if (!enabled) {
+			return () => {
+				mountedRef.current = false;
+				if (requestVersionRef.current === effectVersion) {
+					requestVersionRef.current++;
+				}
+			};
+		}
 		const controller = new AbortController();
+		let initialFetchFrame: number | null = null;
 		// Defer initial fetch to next frame to avoid blocking render
 		if (deferInitialFetch) {
-			requestAnimationFrame(() => {
-				if (mountedRef.current) {
+			initialFetchFrame = requestAnimationFrame(() => {
+				initialFetchFrame = null;
+				if (
+					mountedRef.current &&
+					enabledRef.current &&
+					requestVersionRef.current === effectVersion
+				) {
 					void refetch(controller.signal);
 				}
 			});
@@ -61,9 +96,15 @@ export function usePollingResource<T>(
 		}, pollInterval);
 		return () => {
 			mountedRef.current = false;
+			if (requestVersionRef.current === effectVersion) {
+				requestVersionRef.current++;
+			}
+			if (initialFetchFrame !== null) {
+				cancelAnimationFrame(initialFetchFrame);
+			}
 			controller.abort();
 			window.clearInterval(interval);
 		};
-	}, [pollInterval, refetch, deferInitialFetch]);
+	}, [pollInterval, refetch, deferInitialFetch, enabled]);
 	return { data, setData, refetch, mountedRef, loaded };
 }

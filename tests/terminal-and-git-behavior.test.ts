@@ -12,6 +12,7 @@ import {
 	type PaneId,
 	type TerminalGroupModel,
 	type TerminalPaneModel,
+	type TerminalSavedState,
 } from "../src/features/terminal/terminal-utils.ts";
 import { summarizeHunkDiff } from "../src/features/git/useGitDiff.ts";
 import {
@@ -231,7 +232,7 @@ describe("terminal state and git change behavior", () => {
 
 	test("keeps new workspace panes consistent across selection and reload", () => {
 		const initialGroup = createDefaultAgentChatGroup();
-		const initialState = {
+		const initialState: TerminalSavedState = {
 			groups: [initialGroup],
 			selectedGroupId: initialGroup.id,
 			themeId: "default",
@@ -562,7 +563,7 @@ describe("terminal state and git change behavior", () => {
 		);
 	});
 
-	test("accepts editor as a restorable terminal main view", () => {
+	test("accepts editor as a selectable terminal main view", () => {
 		expect(isTerminalMainView("editor")).toBe(true);
 		expect(isTerminalMainView("chat")).toBe(true);
 		expect(isTerminalMainView("missing")).toBe(false);

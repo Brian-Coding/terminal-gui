@@ -1,12 +1,9 @@
 import * as stylex from "@stylexjs/stylex";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { hasId } from "../../lib/data.ts";
-import {
-	activateOnEnterOrSpacePreventDefault,
-	setInputValue,
-} from "../../lib/react-events.ts";
+import { setInputValue } from "../../lib/react-events.ts";
 import {
 	color,
 	controlSize,
@@ -37,6 +34,7 @@ interface DropdownButtonProps {
 	buttonClassName?: string;
 	labelClassName?: string;
 	menuPlacement?: "auto" | "top" | "bottom";
+	onOpen?: () => void;
 }
 
 function selectDropdownOption(
@@ -62,18 +60,13 @@ function DropdownCustomOption({
 	setOpen: (v: boolean) => void;
 }) {
 	return (
-		<div
-			role="button"
-			tabIndex={0}
+		<button
+			type="button"
 			onClick={selectDropdownOption.bind(null, onChange, setOpen, opt.id)}
-			onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
-				null,
-				selectDropdownOption.bind(null, onChange, setOpen, opt.id)
-			)}
 			className="cursor-pointer"
 		>
 			{renderOption(opt, isSelected)}
-		</div>
+		</button>
 	);
 }
 
@@ -90,6 +83,7 @@ export function DropdownButton({
 	buttonClassName,
 	labelClassName = "",
 	menuPlacement = "auto",
+	onOpen,
 }: DropdownButtonProps) {
 	const [open, setOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -131,55 +125,66 @@ export function DropdownButton({
 			document.removeEventListener("keydown", handleKey);
 		};
 	}, [open]);
+	const updateMenuPosition = useCallback(() => {
+		if (!btnRef.current) return;
+		const rect = btnRef.current.getBoundingClientRect();
+		const spaceBelow = window.innerHeight - rect.bottom - 8;
+		const spaceAbove = rect.top - 8;
+		const placeAbove =
+			menuPlacement === "top" ||
+			(menuPlacement === "auto" && spaceAbove > spaceBelow);
+		const rowHeight = renderOption ? 34 : 30;
+		const searchHeight = options.length > 5 ? 38 : 0;
+		const contentHeight = Math.min(
+			options.length * rowHeight + searchHeight + 2,
+			400
+		);
+		const maxH = Math.min(contentHeight, placeAbove ? spaceAbove : spaceBelow);
+		setPos({
+			top: placeAbove ? 0 : rect.bottom + 4,
+			bottom: placeAbove ? window.innerHeight - rect.top + 4 : 0,
+			left: Math.min(
+				Math.max(8, rect.left),
+				Math.max(8, window.innerWidth - Math.max(rect.width, minWidth) - 8)
+			),
+			width: Math.max(rect.width, minWidth),
+			maxH,
+			placement: placeAbove ? "top" : "bottom",
+		});
+	}, [menuPlacement, minWidth, options.length, renderOption]);
 	const toggle = () => {
-		if (!open && btnRef.current) {
-			const rect = btnRef.current.getBoundingClientRect();
-			const spaceBelow = window.innerHeight - rect.bottom - 8;
-			const spaceAbove = rect.top - 8;
-			const placeAbove =
-				menuPlacement === "top" ||
-				(menuPlacement === "auto" && spaceAbove > spaceBelow);
-			const rowHeight = renderOption ? 34 : 30;
-			const searchHeight = options.length > 5 ? 38 : 0;
-			const contentHeight = Math.min(
-				options.length * rowHeight + searchHeight + 2,
-				400
-			);
-			const maxH = Math.min(
-				contentHeight,
-				placeAbove ? spaceAbove : spaceBelow
-			);
-			setPos({
-				top: placeAbove ? 0 : rect.bottom + 4,
-				bottom: placeAbove ? window.innerHeight - rect.top + 4 : 0,
-				left: Math.min(
-					Math.max(8, rect.left),
-					Math.max(8, window.innerWidth - Math.max(rect.width, minWidth) - 8)
-				),
-				width: Math.max(rect.width, minWidth),
-				maxH,
-				placement: placeAbove ? "top" : "bottom",
-			});
+		if (!open) {
+			onOpen?.();
+			updateMenuPosition();
 			setSearch("");
 			setTimeout(() => searchRef.current?.focus(), 0);
 		}
 		setOpen(!open);
 	};
-	const selected = options.find(hasId.bind(null, value));
+	useEffect(() => {
+		if (!open) return;
+		updateMenuPosition();
+	}, [open, updateMenuPosition]);
+	const selected = useMemo(
+		() => options.find(hasId.bind(null, value)),
+		[options, value]
+	);
 	const buttonProps = stylex.props(
 		styles.button,
 		fullWidth ? styles.fullWidth : null,
 		open ? styles.buttonOpen : styles.buttonClosed
 	);
 	const showSearch = options.length > 5;
-	const filtered = search
-		? options.filter(
-				(o) =>
-					o.label.toLowerCase().includes(search.toLowerCase()) ||
-					o.detail?.toLowerCase().includes(search.toLowerCase()) ||
-					o.status?.toLowerCase().includes(search.toLowerCase())
-			)
-		: options;
+	const filtered = useMemo(() => {
+		if (!search) return options;
+		const needle = search.toLowerCase();
+		return options.filter(
+			(o) =>
+				o.label.toLowerCase().includes(needle) ||
+				o.detail?.toLowerCase().includes(needle) ||
+				o.status?.toLowerCase().includes(needle)
+		);
+	}, [options, search]);
 	const searchBox = showSearch ? (
 		<div {...stylex.props(styles.searchWrap)}>
 			<input
@@ -379,7 +384,7 @@ const styles = stylex.create({
 		overflow: "hidden",
 		position: "fixed",
 		userSelect: "none",
-		zIndex: 120,
+		zIndex: 320,
 	},
 	searchWrap: {
 		borderBottomColor: color.border,

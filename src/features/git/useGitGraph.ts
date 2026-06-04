@@ -41,6 +41,61 @@ interface GraphData {
 
 const EMPTY_GRAPH: GraphData = { commits: [], rows: [] };
 
+function areStringArraysEqual(prev: string[], next: string[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		if (prev[i] !== next[i]) return false;
+	}
+	return true;
+}
+
+function areGraphDataEqual(prev: GraphData, next: GraphData) {
+	if (prev.commits.length !== next.commits.length) return false;
+	for (let i = 0; i < prev.commits.length; i++) {
+		const a = prev.commits[i]!;
+		const b = next.commits[i]!;
+		if (
+			a.hash !== b.hash ||
+			a.message !== b.message ||
+			a.author !== b.author ||
+			a.authorEmail !== b.authorEmail ||
+			a.authorAvatarUrl !== b.authorAvatarUrl ||
+			a.date !== b.date ||
+			a.column !== b.column ||
+			a.color !== b.color ||
+			!areStringArraysEqual(a.parents, b.parents) ||
+			!areStringArraysEqual(a.refs, b.refs)
+		) {
+			return false;
+		}
+	}
+	if (prev.rows.length !== next.rows.length) return false;
+	for (let i = 0; i < prev.rows.length; i++) {
+		const a = prev.rows[i]!;
+		const b = next.rows[i]!;
+		if (a.row !== b.row || a.rails.length !== b.rails.length) return false;
+		for (let j = 0; j < a.rails.length; j++) {
+			const railA = a.rails[j]!;
+			const railB = b.rails[j]!;
+			if (railA.column !== railB.column || railA.color !== railB.color)
+				return false;
+		}
+		if (a.transitions.length !== b.transitions.length) return false;
+		for (let j = 0; j < a.transitions.length; j++) {
+			const transitionA = a.transitions[j]!;
+			const transitionB = b.transitions[j]!;
+			if (
+				transitionA.fromColumn !== transitionB.fromColumn ||
+				transitionA.toColumn !== transitionB.toColumn ||
+				transitionA.color !== transitionB.color
+			) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 export function useGitGraph(cwd: string | undefined, limit = 50) {
 	const fetchGraph = useCallback(() => {
 		if (!cwd) return null;
@@ -58,7 +113,8 @@ export function useGitGraph(cwd: string | undefined, limit = 50) {
 	}, [cwd, limit]);
 	const { data, loading, error, refresh } = useAsyncResource<GraphData>(
 		fetchGraph,
-		EMPTY_GRAPH
+		EMPTY_GRAPH,
+		{ isEqual: areGraphDataEqual }
 	);
 	return { commits: data.commits, rows: data.rows, loading, error, refresh };
 }
@@ -78,6 +134,36 @@ interface CommitDetails {
 	files: CommitFile[];
 }
 
+function areCommitDetailsEqual(
+	prev: CommitDetails | null,
+	next: CommitDetails | null
+) {
+	if (prev === next) return true;
+	if (!prev || !next) return false;
+	if (
+		prev.hash !== next.hash ||
+		prev.message !== next.message ||
+		prev.author !== next.author ||
+		prev.date !== next.date ||
+		prev.files.length !== next.files.length
+	) {
+		return false;
+	}
+	for (let i = 0; i < prev.files.length; i++) {
+		const a = prev.files[i]!;
+		const b = next.files[i]!;
+		if (
+			a.path !== b.path ||
+			a.status !== b.status ||
+			a.additions !== b.additions ||
+			a.deletions !== b.deletions
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
 export function useCommitDetails(
 	cwd: string | undefined,
 	hash: string | undefined
@@ -94,6 +180,8 @@ export function useCommitDetails(
 		})();
 	}, [cwd, hash]);
 	const { data, loading, error, refresh } =
-		useAsyncResource<CommitDetails | null>(fetchCommitDetails, null);
+		useAsyncResource<CommitDetails | null>(fetchCommitDetails, null, {
+			isEqual: areCommitDetailsEqual,
+		});
 	return { details: data, loading, error, refresh };
 }

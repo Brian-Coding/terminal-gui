@@ -41,6 +41,27 @@ interface InlineDirectoryPickerProps {
 	showStartButton?: boolean;
 }
 
+function areQuickPicksEqual(prev: QuickPick[], next: QuickPick[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (a.name !== b.name || a.path !== b.path || a.isGitRepo !== b.isGitRepo)
+			return false;
+	}
+	return true;
+}
+
+function arePickerDataEqual(
+	prev: { quickPicks: QuickPick[]; homePath: string },
+	next: { quickPicks: QuickPick[]; homePath: string }
+) {
+	return (
+		prev.homePath === next.homePath &&
+		areQuickPicksEqual(prev.quickPicks, next.quickPicks)
+	);
+}
+
 export function InlineDirectoryPicker({
 	onSelect,
 	onCancel,
@@ -62,10 +83,16 @@ export function InlineDirectoryPicker({
 			homePath: data.home || "",
 		};
 	}, []);
-	const { data: pickerData } = useAsyncResource(fetchPickerData, {
-		quickPicks: [],
-		homePath: "",
-	});
+	const { data: pickerData } = useAsyncResource(
+		fetchPickerData,
+		{
+			quickPicks: [],
+			homePath: "",
+		},
+		{
+			isEqual: arePickerDataEqual,
+		}
+	);
 	const fetchSearchResults = useCallback(async () => {
 		if (!deferredQuery) return [];
 		const data = await fetchJsonOr<{
@@ -79,7 +106,7 @@ export function InlineDirectoryPicker({
 	}, [deferredQuery]);
 	const { data: searchResults, loading: searchLoading } = useAsyncResource<
 		QuickPick[]
-	>(fetchSearchResults, []);
+	>(fetchSearchResults, [], { isEqual: areQuickPicksEqual });
 	const [selectedIndexValue, setSelectedIndex] = useState(-1);
 	const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
 	const inputRef = useRef<HTMLInputElement>(null);

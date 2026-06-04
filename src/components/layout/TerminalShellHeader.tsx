@@ -1,5 +1,9 @@
 import * as stylex from "@stylexjs/stylex";
 import {
+	APP_REGION_DRAG_CLASS,
+	APP_REGION_NO_DRAG_CLASS,
+} from "../../lib/app-region.ts";
+import {
 	type ReactNode,
 	useCallback,
 	useEffect,
@@ -19,6 +23,7 @@ import {
 	loadTerminalState,
 	mutateCanonicalTerminalState,
 	mutateTerminalWorkspaceState,
+	terminalStateKey,
 } from "../../features/terminal/terminal-utils.ts";
 import {
 	APP_PAGE_ROUTES,
@@ -27,6 +32,7 @@ import {
 	TERMINAL_MAIN_VIEWS,
 	type TerminalMainView,
 } from "../../lib/app-navigation.tsx";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import {
 	listenDocumentEvent,
 	listenWindowEvent,
@@ -55,7 +61,7 @@ const AUTOMATIONS_ROUTE = APP_PAGE_ROUTES.find(
 
 function loadShellState() {
 	const terminalState = loadTerminalState();
-	const mainView = readStoredValue("terminal-main-view");
+	const mainView = readStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY);
 
 	return {
 		groups: terminalState?.groups ?? [],
@@ -64,6 +70,7 @@ function loadShellState() {
 		mainView: isTerminalMainView(mainView)
 			? mainView
 			: DEFAULT_TERMINAL_MAIN_VIEW,
+		key: terminalState ? terminalStateKey(terminalState) : "",
 	};
 }
 
@@ -99,7 +106,12 @@ export function TerminalShellHeader() {
 	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
 
 	const refreshShellState = useCallback(() => {
-		setShellState(loadShellState());
+		const next = loadShellState();
+		setShellState((current) =>
+			current.key === next.key && current.mainView === next.mainView
+				? current
+				: next
+		);
 	}, []);
 
 	useEffect(() => {
@@ -125,11 +137,16 @@ export function TerminalShellHeader() {
 
 	const updateMainView = useCallback(
 		(view: TerminalMainView) => {
-			writeStoredValue("terminal-main-view", view);
-			dispatchTerminalShellChange({ source: "view", reason: "main-view" });
-			navigate("/terminal");
+			if (shellState.mainView !== view) {
+				writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, view);
+				setShellState((current) =>
+					current.mainView === view ? current : { ...current, mainView: view }
+				);
+				dispatchTerminalShellChange({ source: "view", reason: "main-view" });
+			}
+			if (location.pathname !== "/terminal") navigate("/terminal");
 		},
-		[navigate]
+		[location.pathname, navigate, shellState.mainView]
 	);
 
 	const addPaneToSelectedGroup = useCallback(
@@ -152,27 +169,45 @@ export function TerminalShellHeader() {
 		) ?? null;
 	const isTerminalRoute = location.pathname === "/terminal";
 
-	const updateLayoutMode = useCallback((mode: "grid" | "rows") => {
-		writeStoredValue("terminal-layout-mode", mode);
-		setLayoutMode(mode);
-		dispatchTerminalShellChange({ source: "view", reason: "layout-mode" });
-	}, []);
+	const updateLayoutMode = useCallback(
+		(mode: "grid" | "rows") => {
+			if (mode === layoutMode) return;
+			writeStoredValue("terminal-layout-mode", mode);
+			setLayoutMode(mode);
+			dispatchTerminalShellChange({ source: "view", reason: "layout-mode" });
+		},
+		[layoutMode]
+	);
 
 	const updateSelectedGroupGrid = useCallback(
 		async (patch: { columns?: number; rows?: number }) => {
+			setShellState((current) => {
+				let changed = false;
+				const groups = current.groups.map((group) => {
+					if (group.id !== current.selectedGroupId) return group;
+					const columns = patch.columns ?? group.columns;
+					const rows = patch.rows ?? group.rows;
+					if (columns === group.columns && rows === group.rows) return group;
+					changed = true;
+					return { ...group, columns, rows };
+				});
+				return changed ? { ...current, groups } : current;
+			});
 			await mutateCanonicalTerminalState((terminalState) => {
 				if (!terminalState.selectedGroupId) return null;
+				let changed = false;
+				const groups = terminalState.groups.map((group) => {
+					if (group.id !== terminalState.selectedGroupId) return group;
+					const columns = patch.columns ?? group.columns;
+					const rows = patch.rows ?? group.rows;
+					if (columns === group.columns && rows === group.rows) return group;
+					changed = true;
+					return { ...group, columns, rows };
+				});
+				if (!changed) return null;
 				return {
 					...terminalState,
-					groups: terminalState.groups.map((group) =>
-						group.id === terminalState.selectedGroupId
-							? {
-									...group,
-									columns: patch.columns ?? group.columns,
-									rows: patch.rows ?? group.rows,
-								}
-							: group
-					),
+					groups,
 				};
 			}, "grid-size");
 		},
@@ -181,10 +216,10 @@ export function TerminalShellHeader() {
 
 	return (
 		<div
-			className={`electrobun-webkit-app-region-drag ${stylex.props(styles.header).className ?? ""}`}
+			className={`${APP_REGION_DRAG_CLASS} ${stylex.props(styles.header).className ?? ""}`}
 		>
 			<div
-				className={`electrobun-webkit-app-region-no-drag ${stylex.props(styles.viewTabs).className ?? ""}`}
+				className={`${APP_REGION_NO_DRAG_CLASS} ${stylex.props(styles.viewTabs).className ?? ""}`}
 			>
 				{TERMINAL_MAIN_VIEWS.map((view) => {
 					const Icon = view.icon;
@@ -211,7 +246,7 @@ export function TerminalShellHeader() {
 				<>
 					<div {...stylex.props(styles.spacer)} />
 					<div
-						className={`electrobun-webkit-app-region-no-drag ${stylex.props(styles.actions).className ?? ""}`}
+						className={`${APP_REGION_NO_DRAG_CLASS} ${stylex.props(styles.actions).className ?? ""}`}
 					>
 						{shellState.mainView === "chat" && (
 							<>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BundledLanguage, BundledTheme, Highlighter } from "shiki";
 import { incrementNumber } from "../lib/data.ts";
 
@@ -66,6 +66,13 @@ export const SYNTAX_HIGHLIGHT_THEMES: {
 
 const SYNTAX_THEME_STORAGE_KEY = "inferay-syntax-highlight-theme" as const;
 const SYNTAX_THEME_EVENT = "inferay-syntax-highlight-theme-change" as const;
+const EMPTY_HIGHLIGHTS = new Map<number, string>();
+const FALLBACK_TOKEN_COLORS = {
+	keyword: "#c586c0",
+	string: "#ce9178",
+	number: "#b5cea8",
+	comment: "#6a9955",
+};
 
 function normalizeSyntaxTheme(theme: string | null): SyntaxHighlightTheme {
 	return (
@@ -164,6 +171,33 @@ function highlightLine(
 	} catch {
 		return escapeHtml(line);
 	}
+}
+
+function fallbackHighlightLine(line: string) {
+	const escaped = escapeHtml(line);
+	return escaped
+		.replace(/(&quot;.*?&quot;|&#39;.*?&#39;|`.*?`)/g, (match) => {
+			return `<span style="color:${FALLBACK_TOKEN_COLORS.string}">${match}</span>`;
+		})
+		.replace(/\b(\d+(?:\.\d+)?)\b/g, (match) => {
+			return `<span style="color:${FALLBACK_TOKEN_COLORS.number}">${match}</span>`;
+		})
+		.replace(
+			/\b(import|export|const|let|var|function|return|from|type|interface|if|else|for|while|class|extends|new|true|false|null|undefined)\b/g,
+			(match) =>
+				`<span style="color:${FALLBACK_TOKEN_COLORS.keyword}">${match}</span>`
+		)
+		.replace(/(\/\/.*)$/g, (match) => {
+			return `<span style="color:${FALLBACK_TOKEN_COLORS.comment}">${match}</span>`;
+		});
+}
+
+function fallbackHighlightLines(lines: string[]) {
+	const highlighted = new Map<number, string>();
+	for (let i = 0; i < lines.length; i++) {
+		highlighted.set(i, fallbackHighlightLine(lines[i] ?? ""));
+	}
+	return highlighted;
 }
 
 const HIGHLIGHT_CONTEXT_LINES = 200;
@@ -267,14 +301,16 @@ export function useShikiHighlighter({
 	theme = "github-dark-default",
 	enabled = true,
 }: UseShikiHighlighterOptions): ShikiHighlighterAPI {
-	const [isReady, setIsReady] = useState(false);
+	// Detect language from file path
+	const language = getLanguageFromPath(filePath);
+	const highlightKey = `${enabled}\0${filePath}\0${language ?? ""}\0${theme}\0${lines.length}`;
+	const [readyKey, setReadyKey] = useState<string | null>(null);
 	const [, setHighlightVersion] = useState(0); // Force re-render when highlighting completes
 	const cacheRef = useRef<Map<number, string>>(new Map());
 	const highlighterRef = useRef<Highlighter | null>(null);
 	const langRef = useRef<BundledLanguage | null>(null);
 
-	// Detect language from file path
-	const language = getLanguageFromPath(filePath);
+	const isReady = readyKey === highlightKey;
 
 	// Store visible range in ref so we can use it in init
 	const visibleRangeRef = useRef(visibleRange);
@@ -287,14 +323,13 @@ export function useShikiHighlighter({
 		cacheRef.current.clear();
 
 		if (!enabled || !language) {
-			setIsReady(true); // Ready but won't highlight
+			setReadyKey(highlightKey); // Ready but won't highlight
 			return;
 		}
 		const resolvedLanguage = language;
 
 		const controller = new AbortController();
 		const { signal } = controller;
-		setIsReady(false);
 
 		async function init() {
 			try {
@@ -322,17 +357,17 @@ export function useShikiHighlighter({
 					cacheRef.current.set(lineIdx, html);
 				}
 
-				setIsReady(true);
+				setReadyKey(highlightKey);
 				setHighlightVersion(incrementNumber);
 			} catch {
-				setIsReady(true); // Continue without highlighting
+				setReadyKey(highlightKey); // Continue without highlighting
 			}
 		}
 
 		init();
 
 		return controller.abort.bind(controller);
-	}, [enabled, filePath, language, lines, theme]);
+	}, [enabled, filePath, highlightKey, language, lines, theme]);
 
 	// Keep normal scrolling responsive; programmatic jumps call
 	// ensureHighlightedRange before moving the viewport.
@@ -445,13 +480,22 @@ export function useShikiSnippet(
 	enabled = true,
 	theme: SyntaxHighlightTheme = DEFAULT_SYNTAX_HIGHLIGHT_THEME
 ): { highlighted: Map<number, string>; isReady: boolean } {
-	const [highlighted, setHighlighted] = useState<Map<number, string>>(
-		new Map()
-	);
-	const [isReady, setIsReady] = useState(false);
+	const language = getLanguageFromPath(filePath);
+	const snippetKey = `${enabled}\0${filePath}\0${language ?? ""}\0${theme}\0${lines.join("\0")}`;
+	const [highlightedState, setHighlightedState] = useState<{
+		key: string;
+		highlighted: Map<number, string>;
+	} | null>(null);
 	const linesRef = useRef<string[]>([]);
 
-	const language = getLanguageFromPath(filePath);
+	const isReady = highlightedState?.key === snippetKey;
+	const fallbackHighlighted = useMemo(
+		() => fallbackHighlightLines(lines),
+		[lines]
+	);
+	const highlighted = isReady
+		? highlightedState.highlighted
+		: fallbackHighlighted;
 
 	useEffect(() => {
 		// Only re-highlight if lines actually changed
@@ -463,7 +507,7 @@ export function useShikiSnippet(
 		linesRef.current = lines;
 
 		if (!enabled || !language || lines.length === 0) {
-			setIsReady(true);
+			setHighlightedState({ key: snippetKey, highlighted: EMPTY_HIGHLIGHTS });
 			return;
 		}
 		const resolvedLanguage = language;
@@ -490,12 +534,14 @@ export function useShikiSnippet(
 				);
 
 				if (!signal.aborted) {
-					setHighlighted(result);
-					setIsReady(true);
+					setHighlightedState({ key: snippetKey, highlighted: result });
 				}
 			} catch {
 				if (!signal.aborted) {
-					setIsReady(true);
+					setHighlightedState({
+						key: snippetKey,
+						highlighted: fallbackHighlighted,
+					});
 				}
 			}
 		}
@@ -503,7 +549,15 @@ export function useShikiSnippet(
 		highlight();
 
 		return controller.abort.bind(controller);
-	}, [lines, language, enabled, isReady, theme]);
+	}, [
+		fallbackHighlighted,
+		lines,
+		language,
+		enabled,
+		isReady,
+		snippetKey,
+		theme,
+	]);
 
 	return { highlighted, isReady };
 }

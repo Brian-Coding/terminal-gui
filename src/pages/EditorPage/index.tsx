@@ -8,11 +8,11 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { BranchDropdown } from "../../components/chat/AgentChatHeader.tsx";
 import {
 	type AgentChatHandle,
 	AgentChatView,
 } from "../../components/chat/AgentChatView.tsx";
-import { BranchDropdown } from "../../components/chat/AgentChatHeader.tsx";
 import { DiffViewerBoundary } from "../../components/diff/DiffViewerBoundary.tsx";
 import {
 	ChangeFileSidebar,
@@ -30,14 +30,18 @@ import {
 	IconSettings,
 	IconX,
 } from "../../components/ui/Icons.tsx";
-import { useActivityFeed } from "../../features/activity-feed/useActivityFeed.ts";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
-import { useAgentSessions } from "../../features/agents/useAgentSessions.ts";
 import {
-	clearAgentChatMessages,
+	clearAgentChatPaneState,
 	loadPendingWorkspacePaths,
 } from "../../features/chat/chat-session-store.ts";
 import { useFileWatcher } from "../../features/file-watcher/useFileWatcher.ts";
+import {
+	isStagedChange,
+	isUnstagedTrackedChange,
+	isUntrackedChange,
+	orderProjectGitFiles,
+} from "../../features/git/git-file-utils.ts";
 import { useGitChangeActions } from "../../features/git/useGitChangeActions.ts";
 import {
 	type DiffRequest,
@@ -52,7 +56,9 @@ import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
 	dispatchTerminalShellChange,
 	loadTerminalState,
+	terminalStateKey,
 	type TerminalGroupModel,
+	type TerminalShellChangeDetail,
 	type ThemeId,
 } from "../../features/terminal/terminal-utils.ts";
 import {
@@ -65,12 +71,6 @@ import {
 	toggleBoolean,
 } from "../../lib/data.ts";
 import {
-	isStagedChange,
-	isUnstagedTrackedChange,
-	isUntrackedChange,
-	orderProjectGitFiles,
-} from "../../features/git/git-file-utils.ts";
-import {
 	listenWindowEvent,
 	setupTerminalThemePanelShortcut,
 } from "../../lib/react-events.ts";
@@ -79,7 +79,6 @@ import {
 	removeStoredValue,
 	writeStoredValue,
 } from "../../lib/stored-json.ts";
-import { wsClient } from "../../lib/websocket.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { type DiffViewMode, GitDiffView } from "../Terminal/GitDiffView.tsx";
 import { TerminalSettingsPanel } from "../Terminal/TerminalSettingsPanel.tsx";
@@ -147,11 +146,17 @@ function editorUiReducer(
 	action: EditorUiAction
 ): EditorUiState {
 	switch (action.type) {
-		case "fieldChanged":
+		case "fieldChanged": {
+			const nextValue = resolveStateValue(
+				state[action.field],
+				action.value
+			) as EditorUiState[typeof action.field];
+			if (Object.is(state[action.field], nextValue)) return state;
 			return {
 				...state,
-				[action.field]: resolveStateValue(state[action.field], action.value),
+				[action.field]: nextValue,
 			};
+		}
 	}
 }
 
@@ -228,8 +233,6 @@ export function EditorPage({
 	onSelectPane,
 	onDirectoryChange,
 }: EditorPageProps = {}) {
-	const [, setTick] = useState(0);
-	const [, setAgentStatuses] = useState<Map<string, string>>(new Map());
 	const [editorUiState, editorUiDispatch] = useReducer(
 		editorUiReducer,
 		undefined,
@@ -323,7 +326,12 @@ export function EditorPage({
 	} | null>(null);
 
 	const [, setSessionVersion] = useState(0);
-	const terminalState = liveGroups ? null : loadTerminalState();
+	const hasLiveGroups = liveGroups !== undefined;
+	const terminalState = hasLiveGroups ? null : loadTerminalState();
+	const terminalStateKeyRef = useRef<string | null>(null);
+	terminalStateKeyRef.current = terminalState
+		? terminalStateKey(terminalState)
+		: null;
 	const themeId =
 		liveThemeId ??
 		terminalState?.themeId ??
@@ -357,7 +365,6 @@ export function EditorPage({
 			? activePaneId
 			: (sessions[0]?.paneId ?? null);
 	}, [activeGroupSelectedPaneId, selectedPaneId, sessions]);
-	const { sessions: liveAgentSessions } = useAgentSessions();
 	const trackedDirs = useMemo(
 		() => [...new Set(sessions.map((s) => s.cwd).filter(isNonEmptyString))],
 		[sessions]
@@ -375,29 +382,6 @@ export function EditorPage({
 		clear: clearDiff,
 	} = useGitDiff();
 	const selectedDiffStats = useMemo(() => summarizeHunkDiff(diff), [diff]);
-
-	const refresh = useCallback(() => setTick(incrementNumber), []);
-	useEffect(() => {
-		return wsClient.connect();
-	}, []);
-
-	useEffect(() => {
-		const id = setInterval(refresh, 5000);
-		return () => clearInterval(id);
-	}, [refresh]);
-
-	useEffect(() => {
-		setAgentStatuses((cur) => {
-			const next = new Map(cur);
-			for (const s of liveAgentSessions) {
-				const existing = next.get(s.paneId);
-				if (!existing || existing === "idle" || existing === "thinking") {
-					next.set(s.paneId, s.isRunning ? "thinking" : "idle");
-				}
-			}
-			return next;
-		});
-	}, [liveAgentSessions]);
 
 	useEffect(() => {
 		if (effectiveSelectedPaneId) {
@@ -426,7 +410,6 @@ export function EditorPage({
 		unstageAll,
 	} = useGitChangeActions({
 		cwd: session?.cwd,
-		onRefresh: refresh,
 		applyOptimistic,
 		refetchStatus: refetchGit,
 	});
@@ -466,11 +449,6 @@ export function EditorPage({
 		[loadDiff, setSelectedFiles]
 	);
 
-	useActivityFeed({
-		paneId: session?.paneId,
-		cwd: session?.cwd,
-	});
-
 	const { checkPendingScroll } = useFileWatcher({
 		enabled: zenMode,
 		cwd: session?.cwd,
@@ -488,9 +466,9 @@ export function EditorPage({
 			[session?.paneId, setSelectedFiles]
 		),
 		onDiffLoaded: useCallback(() => {
-			refresh();
+			void refetchGit();
 			setTimeout(setScrollToChange, 50, incrementNumber);
-		}, [refresh, setScrollToChange]),
+		}, [refetchGit, setScrollToChange]),
 	});
 
 	const updateZenMode = useCallback(
@@ -501,17 +479,37 @@ export function EditorPage({
 		},
 		[setZenMode]
 	);
+	const exitZenMode = useCallback(() => updateZenMode(false), [updateZenMode]);
+	const toggleZenMode = useCallback(
+		() => updateZenMode(!zenMode),
+		[updateZenMode, zenMode]
+	);
+	const refreshGitBranch = useCallback(() => {
+		void refetchGit();
+	}, [refetchGit]);
+	const bumpSessionVersion = useCallback(
+		() => setSessionVersion(incrementNumber),
+		[]
+	);
 
 	useEffect(() => {
-		const syncEditorShellState = () => {
+		const syncEditorShellState = (event: Event) => {
+			const detail = (event as CustomEvent<TerminalShellChangeDetail>).detail;
 			setZenMode(loadZenMode());
-			setSessionVersion(incrementNumber);
-			// Re-read selected pane (sidebar may have changed it)
 			const storedPane = readStoredValue("editor-selected-pane");
 			if (storedPane) setSelectedPaneId(storedPane);
+			if (hasLiveGroups) return;
+			if (detail?.source === "view" && !detail.stateKey) return;
+			const storedTerminalState = loadTerminalState();
+			const nextKey =
+				detail?.stateKey ??
+				(storedTerminalState ? terminalStateKey(storedTerminalState) : null);
+			if (nextKey === terminalStateKeyRef.current) return;
+			terminalStateKeyRef.current = nextKey;
+			setSessionVersion(incrementNumber);
 		};
 		return listenWindowEvent("terminal-shell-change", syncEditorShellState);
-	}, [setSelectedPaneId, setZenMode]);
+	}, [hasLiveGroups, setSelectedPaneId, setZenMode]);
 
 	useEffect(() => {
 		return setupTerminalThemePanelShortcut(setShowSettings);
@@ -609,7 +607,7 @@ export function EditorPage({
 
 	const closePane = useCallback(
 		(paneId: string) => {
-			clearAgentChatMessages(paneId);
+			clearAgentChatPaneState(paneId);
 			setClosedPaneIds((prev) => new Set(prev).add(paneId));
 			if (effectiveSelectedPaneId === paneId) {
 				const rest = sessions.filter((s) => s.paneId !== paneId);
@@ -625,13 +623,6 @@ export function EditorPage({
 		},
 		[onSelectPane, setSelectedPaneId]
 	);
-
-	const handleAgentStatusChange = useCallback((id: string, status: string) => {
-		setAgentStatuses((cur) => {
-			if (cur.get(id) === status) return cur;
-			return new Map(cur).set(id, status);
-		});
-	}, []);
 
 	const handleSidebarDragStart = useCallback(
 		(e: React.MouseEvent) => {
@@ -736,7 +727,9 @@ export function EditorPage({
 	};
 	const diffSidebar = sidebarVisible ? (
 		<div {...stylex.props(styles.sidebarShell)} style={{ width: sidebarWidth }}>
-			<div
+			<button
+				type="button"
+				aria-label="Resize file sidebar"
 				{...stylex.props(styles.sidebarResize)}
 				onMouseDown={handleSidebarDragStart}
 			/>
@@ -751,7 +744,9 @@ export function EditorPage({
 	) : null;
 	const detailsSidebar = sidebarVisible ? (
 		<div {...stylex.props(styles.sidebarShell)} style={{ width: sidebarWidth }}>
-			<div
+			<button
+				type="button"
+				aria-label="Resize file sidebar"
 				{...stylex.props(styles.sidebarResize)}
 				onMouseDown={handleSidebarDragStart}
 			/>
@@ -785,9 +780,9 @@ export function EditorPage({
 			onToggleSidebar={setSidebarVisible.bind(null, toggleBoolean)}
 			onMainViewModeChange={setMainViewMode}
 			onDiffViewModeChange={setDiffViewMode}
-			onGitBranchChanged={() => void refetchGit()}
+			onGitBranchChanged={refreshGitBranch}
 			zenMode={zenMode}
-			onToggleZenMode={() => updateZenMode(!zenMode)}
+			onToggleZenMode={toggleZenMode}
 		/>
 	) : null;
 
@@ -823,10 +818,10 @@ export function EditorPage({
 						<EditorAgentChat
 							session={session}
 							chatRef={chatRef}
-							onStatusChange={handleAgentStatusChange}
+							gitBranch={project?.branch ?? null}
 							composerOnly
 							composerOnlyOffsetX={sidebarVisible ? -(sidebarWidth / 2) : 0}
-							onExitComposerOnly={() => updateZenMode(false)}
+							onExitComposerOnly={exitZenMode}
 							onDirectoryChange={onDirectoryChange}
 						/>
 					}
@@ -841,7 +836,7 @@ export function EditorPage({
 						<EditorAgentChat
 							session={session}
 							chatRef={chatRef}
-							onStatusChange={handleAgentStatusChange}
+							gitBranch={project?.branch ?? null}
 							onClose={closePane}
 							sessions={sessions}
 							onSelectSession={selectEditorPane}
@@ -859,7 +854,7 @@ export function EditorPage({
 			{showSettings && (
 				<TerminalSettingsPanel
 					themeId={themeId}
-					onThemeChange={() => setSessionVersion(incrementNumber)}
+					onThemeChange={bumpSessionVersion}
 					onClose={setShowSettings.bind(null, false)}
 				/>
 			)}
@@ -919,7 +914,7 @@ function EditorWorkspace({
 function EditorAgentChat({
 	session,
 	chatRef,
-	onStatusChange,
+	gitBranch,
 	onClose,
 	sessions,
 	onSelectSession,
@@ -930,7 +925,7 @@ function EditorAgentChat({
 }: {
 	session: Session;
 	chatRef: React.RefObject<AgentChatHandle | null>;
-	onStatusChange: (paneId: string, status: string) => void;
+	gitBranch: string | null;
 	onClose?: (paneId: string) => void;
 	sessions?: Session[];
 	onSelectSession?: (paneId: string) => void;
@@ -950,8 +945,8 @@ function EditorAgentChat({
 			paneId={session.paneId}
 			cwd={session.cwd}
 			referencePaths={session.referencePaths}
+			gitBranch={gitBranch}
 			agentKind={session.agentKind}
-			onStatusChange={onStatusChange}
 			onClose={onClose}
 			sessions={sessions}
 			onSelectSession={onSelectSession}
@@ -1215,8 +1210,10 @@ const styles = stylex.create({
 	},
 	sidebarResize: {
 		width: controlSize._1,
+		borderWidth: 0,
 		flexShrink: 0,
 		cursor: "ew-resize",
+		padding: 0,
 		backgroundColor: {
 			default: "transparent",
 			":hover": color.controlActive,

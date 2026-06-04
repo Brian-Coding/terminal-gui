@@ -2,6 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useCallback, useMemo, useState } from "react";
 import type { GitFileEntry } from "../../features/git/types.ts";
 import { postJson } from "../../lib/fetch-json.ts";
+import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import {
 	color,
 	controlSize,
@@ -1381,10 +1382,19 @@ function TreeNodeRow({
 		file && selected?.path === file.path && selected?.staged === file.staged;
 
 	const sortedChildren = sortTreeChildren(node);
+	const selectTreeNode = () => {
+		if (isDir) {
+			toggleDir(node.path);
+		} else if (file) {
+			onSelect(file);
+		}
+	};
 
 	return (
 		<>
 			<div
+				role="button"
+				tabIndex={0}
 				{...stylex.props(styles.treeRow, active && styles.fileRowActive)}
 				style={{ paddingLeft: `${4 + depth * 9}px`, paddingRight: 6 }}
 				onMouseEnter={() => {
@@ -1392,13 +1402,11 @@ function TreeNodeRow({
 					onActionHover(file.path);
 				}}
 				onMouseLeave={() => file && onActionHover(null)}
-				onClick={() => {
-					if (isDir) {
-						toggleDir(node.path);
-					} else if (file) {
-						onSelect(file);
-					}
-				}}
+				onClick={selectTreeNode}
+				onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
+					null,
+					selectTreeNode
+				)}
 			>
 				{isDir ? (
 					<>

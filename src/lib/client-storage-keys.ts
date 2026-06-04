@@ -1,6 +1,6 @@
 export const TERMINAL_STATE_STORAGE_KEY = "inferay-terminal-state";
+export const TERMINAL_MAIN_VIEW_STORAGE_KEY = "terminal-main-view";
 const TERMINAL_LAYOUT_MODE_STORAGE_KEY = "terminal-layout-mode";
-const TERMINAL_MAIN_VIEW_STORAGE_KEY = "terminal-main-view";
 const EDITOR_SELECTED_PANE_STORAGE_KEY = "editor-selected-pane";
 const MAIN_SIDEBAR_WIDTH_STORAGE_KEY = "main-sidebar-width";
 export const ONBOARDING_DONE_STORAGE_KEY = "inferay-onboarding-done";

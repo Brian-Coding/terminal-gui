@@ -1,4 +1,8 @@
 import * as stylex from "@stylexjs/stylex";
+import {
+	APP_REGION_DRAG_CLASS,
+	APP_REGION_NO_DRAG_CLASS,
+} from "../../lib/app-region.ts";
 import { memo } from "react";
 import { IconButton } from "../../components/ui/IconButton.tsx";
 import {
@@ -11,10 +15,7 @@ import {
 	getStatusInfo,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
-import {
-	activateOnEnterOrSpace,
-	stopPropagationAndCall,
-} from "../../lib/react-events.ts";
+import { stopPropagationAndCall } from "../../lib/react-events.ts";
 import {
 	color,
 	controlSize,
@@ -64,12 +65,12 @@ export const AgentSidebar = memo(function AgentSidebar({
 	return (
 		<div {...stylex.props(styles.sidebar)}>
 			<div {...stylex.props(styles.sidebarInner)}>
-				<div className="electrobun-webkit-app-region-drag py-1">
+				<div className={`${APP_REGION_DRAG_CLASS} py-1`}>
 					<button
 						type="button"
 						onClick={onCollapse}
 						{...stylex.props(styles.collapseButton)}
-						className={`electrobun-webkit-app-region-no-drag ${stylex.props(styles.collapseButton).className ?? ""}`}
+						className={`${APP_REGION_NO_DRAG_CLASS} ${stylex.props(styles.collapseButton).className ?? ""}`}
 					>
 						<IconPanelLeft size={12} className="rotate-180" />
 						<span {...stylex.props(styles.sectionLabel)}>Agents</span>
@@ -79,34 +80,30 @@ export const AgentSidebar = memo(function AgentSidebar({
 					const isSelected = pane.id === selectedPaneId;
 					const s = agentStatuses.get(pane.id) ?? "idle";
 					return (
-						<div
-							key={pane.id}
-							role="button"
-							tabIndex={0}
-							onClick={onSelectPane.bind(null, pane.id)}
-							onKeyDown={activateOnEnterOrSpace.bind(
-								null,
-								onSelectPane.bind(null, pane.id)
-							)}
-							{...stylex.props(
-								styles.paneRow,
-								isSelected ? styles.paneRowSelected : styles.paneRowIdle
-							)}
-						>
-							<div className="shrink-0">
-								<PaneIcon pane={pane} status={s} size={13} />
-							</div>
-							<div {...stylex.props(styles.paneTextWrap)}>
-								<p
-									{...stylex.props(
-										styles.paneTitle,
-										isSelected ? styles.paneTitleSelected : null
-									)}
-									title={pane.cwd}
-								>
-									{getPaneTitle(pane)}
-								</p>
-							</div>
+						<div key={pane.id} {...stylex.props(styles.paneRowShell)}>
+							<button
+								type="button"
+								onClick={onSelectPane.bind(null, pane.id)}
+								{...stylex.props(
+									styles.paneRow,
+									isSelected ? styles.paneRowSelected : styles.paneRowIdle
+								)}
+							>
+								<div className="shrink-0">
+									<PaneIcon pane={pane} status={s} size={13} />
+								</div>
+								<div {...stylex.props(styles.paneTextWrap)}>
+									<p
+										{...stylex.props(
+											styles.paneTitle,
+											isSelected ? styles.paneTitleSelected : null
+										)}
+										title={pane.cwd}
+									>
+										{getPaneTitle(pane)}
+									</p>
+								</div>
+							</button>
 							<IconButton
 								variant="danger"
 								size="xs"
@@ -206,13 +203,21 @@ const styles = stylex.create({
 		letterSpacing: 0,
 		textTransform: "uppercase",
 	},
+	paneRowShell: {
+		alignItems: "center",
+		display: "flex",
+		gap: controlSize._1,
+		marginBottom: controlSize._0_5,
+	},
 	paneRow: {
 		alignItems: "center",
+		borderWidth: 0,
 		borderRadius: radius.md,
+		color: "inherit",
 		cursor: "pointer",
 		display: "flex",
+		font: "inherit",
 		gap: controlSize._2,
-		marginBottom: controlSize._0_5,
 		paddingBlock: controlSize._1_5,
 		paddingInline: controlSize._2,
 		textAlign: "left",

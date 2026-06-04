@@ -73,10 +73,10 @@ export function useXtermTerminal({
 			if (!initializedRef.current) {
 				initializedRef.current = true;
 				const dims = fitAddon.proposeDimensions();
-				reconnectCleanup = wsClient.subscribe(paneId, (msg: any) => {
+				reconnectCleanup = wsClient.subscribe(paneId, (msg) => {
 					if (msg.type !== "terminal:reconnected") return;
 					if (msg.ok) {
-						if (msg.buffer && termRef.current)
+						if (typeof msg.buffer === "string" && termRef.current)
 							termRef.current.write(msg.buffer);
 					} else {
 						wsClient.send({
@@ -104,20 +104,35 @@ export function useXtermTerminal({
 		const resizeDisposable = term.onResize(({ cols, rows }) => {
 			wsClient.send({ type: "terminal:resize", paneId, cols, rows });
 		});
-		const cleanupMessage = wsClient.subscribe(paneId, (msg: any) => {
-			if (msg.type === "terminal:output") term.write(msg.data);
-			else if (msg.type === "terminal:exit")
+		const cleanupMessage = wsClient.subscribe(paneId, (msg) => {
+			if (msg.type === "terminal:output" && typeof msg.data === "string") {
+				term.write(msg.data);
+			} else if (msg.type === "terminal:exit") {
 				term.write(
 					`\r\n\x1b[90m[Process exited with code ${msg.exitCode ?? "unknown"}]\x1b[0m\r\n`
 				);
-			else if (msg.type === "terminal:reconnected" && msg.ok && msg.buffer)
+			} else if (
+				msg.type === "terminal:reconnected" &&
+				msg.ok &&
+				typeof msg.buffer === "string"
+			) {
 				term.write(msg.buffer);
+			}
 		});
 		const cleanupReconnect = wsClient.onReconnect(() => {
 			wsClient.send({ type: "terminal:reconnect", paneId });
 		});
 		let rafId: number | null = null;
+		let lastWidth = 0;
+		let lastHeight = 0;
 		const resizeObserver = new ResizeObserver(() => {
+			const element = containerRef.current;
+			if (!element) return;
+			const nextWidth = element.clientWidth;
+			const nextHeight = element.clientHeight;
+			if (nextWidth === lastWidth && nextHeight === lastHeight) return;
+			lastWidth = nextWidth;
+			lastHeight = nextHeight;
 			if (rafId !== null) cancelAnimationFrame(rafId);
 			rafId = requestAnimationFrame(() => {
 				rafId = null;
@@ -138,18 +153,7 @@ export function useXtermTerminal({
 			termRef.current = null;
 			fitRef.current = null;
 		};
-	}, [
-		enabled,
-		paneId,
-		agentKind,
-		cwd,
-		isClaude,
-		fontFamily,
-		fontSize,
-		theme.bg,
-		theme.cursor,
-		theme.fg,
-	]);
+	}, [enabled, paneId, agentKind, cwd, isClaude]);
 
 	useEffect(() => {
 		if (!termRef.current) return;
@@ -158,7 +162,7 @@ export function useXtermTerminal({
 			foreground: theme.fg,
 			cursor: theme.cursor,
 		};
-	}, [theme]);
+	}, [theme.bg, theme.cursor, theme.fg]);
 
 	useEffect(() => {
 		if (!termRef.current) return;

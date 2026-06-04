@@ -284,7 +284,8 @@ const WipRow = memo(function WipRow({
 	const nodeTop = ROW_HEIGHT / 2 - AVATAR_SIZE / 2;
 
 	return (
-		<div
+		<button
+			type="button"
 			{...stylex.props(styles.graphRow)}
 			style={{
 				height: ROW_HEIGHT,
@@ -351,7 +352,7 @@ const WipRow = memo(function WipRow({
 				</div>
 			)}
 			<div {...stylex.props(styles.rowEndPad)} />
-		</div>
+		</button>
 	);
 });
 
@@ -381,7 +382,8 @@ const CommitRow = memo(function CommitRow({
 	const hasRefs = commit.refs.length > 0;
 
 	return (
-		<div
+		<button
+			type="button"
 			{...stylex.props(styles.graphRow)}
 			style={{
 				height: ROW_HEIGHT,
@@ -454,7 +456,7 @@ const CommitRow = memo(function CommitRow({
 				</div>
 			)}
 			<div {...stylex.props(styles.rowEndPad)} />
-		</div>
+		</button>
 	);
 });
 
@@ -513,12 +515,11 @@ export const CommitGraph = memo(function CommitGraph({
 	wipFiles = [],
 	branch,
 }: CommitGraphProps) {
-	const [columns, setColumns] = useState<ColumnVisibility>(DEFAULT_COLUMNS);
+	const [columns, setColumns] = useState<ColumnVisibility>(loadColumns);
 	const [isColumnsOpen, setIsColumnsOpen] = useState(false);
 	const hasWip = wipFiles.length > 0;
 	const wipOffset = hasWip ? 1 : 0;
 
-	useEffect(() => setColumns(loadColumns()), []);
 	useEffect(() => {
 		writeStoredJson(COLUMN_PREFS_KEY, columns);
 	}, [columns]);
@@ -818,8 +819,14 @@ const styles = stylex.create({
 	graphRow: {
 		position: "relative",
 		display: "flex",
+		width: "100%",
+		borderWidth: 0,
 		cursor: "pointer",
 		alignItems: "center",
+		color: "inherit",
+		font: "inherit",
+		padding: 0,
+		textAlign: "left",
 		transitionProperty: "background-color",
 		transitionDuration: "120ms",
 		":hover": {

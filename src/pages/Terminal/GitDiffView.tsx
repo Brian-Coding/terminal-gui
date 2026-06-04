@@ -31,7 +31,10 @@ import {
 	useSyntaxHighlightTheme,
 } from "../../hooks/useShikiHighlighter.ts";
 import { contentOf } from "../../lib/data.ts";
-import { listenWindowEvent } from "../../lib/react-events.ts";
+import {
+	activateOnEnterOrSpacePreventDefault,
+	listenWindowEvent,
+} from "../../lib/react-events.ts";
 import { type Token, tokenizeLine } from "../../lib/syntax-tokens.ts";
 import {
 	color,
@@ -749,7 +752,10 @@ const VirtualPanel = memo(function VirtualPanel({
 		if (!el) return;
 		setViewH(el.clientHeight);
 		const obs = new ResizeObserver((e) =>
-			setViewH(e[0]?.contentRect.height ?? 600)
+			setViewH((current) => {
+				const next = e[0]?.contentRect.height ?? 600;
+				return Math.abs(current - next) > 0.5 ? next : current;
+			})
 		);
 		obs.observe(el);
 		return obs.disconnect.bind(obs);
@@ -1027,7 +1033,10 @@ const VirtualSplitPanel = memo(function VirtualSplitPanel({
 		if (!el) return;
 		setViewH(el.clientHeight);
 		const obs = new ResizeObserver((e) =>
-			setViewH(e[0]?.contentRect.height ?? 600)
+			setViewH((current) => {
+				const next = e[0]?.contentRect.height ?? 600;
+				return Math.abs(current - next) > 0.5 ? next : current;
+			})
 		);
 		obs.observe(el);
 		return obs.disconnect.bind(obs);
@@ -1038,7 +1047,10 @@ const VirtualSplitPanel = memo(function VirtualSplitPanel({
 		cancelAnimationFrame(rafRef.current);
 		rafRef.current = requestAnimationFrame(() => {
 			if (!scrollRef.current) return;
-			setScrollTop(scrollRef.current.scrollTop);
+			const next = scrollRef.current.scrollTop;
+			setScrollTop((current) =>
+				Math.abs(current - next) > 0.5 ? next : current
+			);
 		});
 	}, [scrollRef]);
 
@@ -1275,7 +1287,10 @@ const DiffMinimap = memo(function DiffMinimap({
 		if (!el) return;
 		setContainerHeight(el.clientHeight);
 		const obs = new ResizeObserver((e) =>
-			setContainerHeight(e[0]?.contentRect.height ?? 0)
+			setContainerHeight((current) => {
+				const next = e[0]?.contentRect.height ?? 0;
+				return Math.abs(current - next) > 0.5 ? next : current;
+			})
 		);
 		obs.observe(el);
 		return obs.disconnect.bind(obs);
@@ -1305,12 +1320,23 @@ const DiffMinimap = memo(function DiffMinimap({
 		if (!Number.isFinite(lineIndex)) return;
 		onScrollTo(Math.max(0, Math.min(lines.length - 1, lineIndex)));
 	};
+	const handleKeyboardJump = () => {
+		if (lines.length === 0) return;
+		onScrollTo(Math.floor(lines.length / 2));
+	};
 
 	return (
 		<div
 			ref={containerRef}
+			role="button"
+			tabIndex={0}
+			aria-label="Jump within diff"
 			{...stylex.props(diffStyles.minimap, diffStyles.minimapInteractive)}
 			onClick={handleClick}
+			onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
+				null,
+				handleKeyboardJump
+			)}
 		>
 			{segments.map((seg, i) => (
 				<div

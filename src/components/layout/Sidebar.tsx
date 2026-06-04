@@ -10,26 +10,29 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import { isChatAgentKind } from "../../features/agents/agents.ts";
-import {
-	loadStoredMessages,
-	loadStoredSummary,
-	saveStoredSummary,
-} from "../../features/chat/chat-session-store.ts";
+import { deriveStoredSummary } from "../../features/chat/chat-session-store.ts";
 import {
 	compactTerminalState,
 	dispatchTerminalShellChange,
 	loadCanonicalTerminalState,
 	loadTerminalState,
 	mutateTerminalWorkspaceState,
+	terminalStateKey,
+	type TerminalShellChangeDetail,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
-import { loadAppThemeId } from "../../lib/app-theme.ts";
-import { hasRole, noop, toggleBoolean } from "../../lib/data.ts";
-import { fetchJsonOr, postJson, sendJson } from "../../lib/fetch-json.ts";
 import {
+	APP_REGION_DRAG_CLASS,
+	APP_REGION_NO_DRAG_CLASS,
+} from "../../lib/app-region.ts";
+import { loadAppThemeId } from "../../lib/app-theme.ts";
+import { noop, toggleBoolean } from "../../lib/data.ts";
+import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
+import {
+	activateOnEnterOrSpacePreventDefault,
 	listenWindowEvent,
 	setInputValue,
 	stopPropagation,
@@ -69,6 +72,21 @@ interface ForgeAccount {
 	active: boolean;
 }
 
+function sameForgeAccount(a: ForgeAccount | null, b: ForgeAccount | null) {
+	return (
+		a === b ||
+		(!!a &&
+			!!b &&
+			a.provider === b.provider &&
+			a.host === b.host &&
+			a.login === b.login &&
+			a.name === b.name &&
+			a.avatarUrl === b.avatarUrl &&
+			a.email === b.email &&
+			a.active === b.active)
+	);
+}
+
 async function loadGithubAccount(): Promise<ForgeAccount | null> {
 	const payload = await fetchJsonOr<{ accounts?: ForgeAccount[] }>(
 		"/api/forge/accounts",
@@ -83,40 +101,13 @@ const DEFAULT_SIDEBAR_WIDTH = 192;
 const MIN_SIDEBAR_WIDTH = 152;
 const MAX_SIDEBAR_WIDTH = 340;
 
-// Track which panes have a pending title request to avoid duplicates
-const pendingTitleRequests = new Set<string>();
-
 function deriveSummary(paneId: string): string | null {
-	const existing = loadStoredSummary(paneId);
-	if (existing) return existing;
-	// Try to derive from stored messages
-	const messages = loadStoredMessages<{ role: string; content: string }>(
-		paneId
-	);
-	const firstUser = messages.find(hasRole.bind(null, "user"));
-	if (!firstUser?.content) return null;
-	// Fire off AI title generation in background
-	if (!pendingTitleRequests.has(paneId)) {
-		pendingTitleRequests.add(paneId);
-		postJson<{ title?: string }>("/api/generate-title", {
-			message: firstUser.content,
+	return deriveStoredSummary(paneId, undefined, () =>
+		dispatchTerminalShellChange({
+			source: "cache",
+			reason: "session-title",
 		})
-			.then((data) => {
-				const title = data?.title?.trim();
-				if (title) {
-					saveStoredSummary(paneId, title);
-					dispatchTerminalShellChange({
-						source: "cache",
-						reason: "session-title",
-					});
-				}
-			})
-			.catch(noop)
-			.finally(() => pendingTitleRequests.delete(paneId));
-	}
-	// Return a temporary placeholder from the first line while AI generates
-	const text = firstUser.content.trim().split("\n")[0] ?? "";
-	return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+	);
 }
 
 function PaneSummaryItem({
@@ -187,16 +178,12 @@ function WorkspaceItem({
 	onDelete: () => void;
 	onRename: (name: string) => void;
 }) {
-	const [expanded, setExpanded] = useState(true);
+	const [collapsedGroupId, setCollapsedGroupId] = useState<string | null>(null);
 	const [editing, setEditing] = useState(false);
 	const [editValue, setEditValue] = useState(group.name);
 	const [hovered, setHovered] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
-
-	// Auto-expand when workspace becomes active
-	useEffect(() => {
-		if (isActive) setExpanded(true);
-	}, [isActive]);
+	const expanded = collapsedGroupId !== group.id;
 
 	useEffect(() => {
 		if (editing) {
@@ -216,11 +203,13 @@ function WorkspaceItem({
 	const handleClick = () => {
 		if (isActive) {
 			// Already active — toggle expand/collapse
-			setExpanded(toggleBoolean);
+			setCollapsedGroupId((current) =>
+				current === group.id ? null : group.id
+			);
 		} else {
 			// Select this workspace and expand
 			onSelect();
-			setExpanded(true);
+			setCollapsedGroupId(null);
 		}
 	};
 
@@ -275,11 +264,14 @@ function WorkspaceItem({
 			onMouseLeave={setHovered.bind(null, false)}
 		>
 			<div
+				role="button"
+				tabIndex={0}
 				{...stylex.props(
 					styles.workspaceHeader,
 					isActive ? styles.workspaceHeaderActive : styles.workspaceHeaderIdle
 				)}
 				onClick={handleClick}
+				onKeyDown={activateOnEnterOrSpacePreventDefault.bind(null, handleClick)}
 			>
 				<div {...stylex.props(styles.workspaceNameWrap)}>
 					{editing ? (
@@ -348,9 +340,79 @@ function WorkspaceItem({
 	);
 }
 
+function SidebarNavItems({ collapsed }: { collapsed: boolean }) {
+	const navigate = useNavigate();
+	const pathname = useLocation().pathname;
+	const goToRoute = useCallback(
+		(path: string) => {
+			navigate(path);
+		},
+		[navigate]
+	);
+
+	return (
+		<>
+			{SIDEBAR_NAV_ROUTES.map((item) => {
+				const Icon = item.icon;
+				const isActive = pathname === item.path;
+				const itemProps = stylex.props(
+					styles.navItem,
+					isActive ? styles.navItemActive : styles.navItemIdle,
+					collapsed ? styles.navItemCollapsed : styles.navItemOpen
+				);
+				return (
+					<button
+						key={item.path}
+						type="button"
+						onClick={() => goToRoute(item.path)}
+						{...itemProps}
+						className={`${APP_REGION_NO_DRAG_CLASS} ${itemProps.className ?? ""}`}
+						title={collapsed ? item.label : undefined}
+					>
+						<Icon size={14} className="shrink-0" />
+						{!collapsed && <span>{item.label}</span>}
+					</button>
+				);
+			})}
+		</>
+	);
+}
+
+function SidebarProfileButton({
+	collapsed,
+	githubLabel,
+	githubAccount,
+}: {
+	collapsed: boolean;
+	githubLabel: string;
+	githubAccount: ForgeAccount | null;
+}) {
+	const navigate = useNavigate();
+	const isProfileActive = useLocation().pathname === "/profile";
+	const profileButtonProps = stylex.props(
+		styles.profileButton,
+		isProfileActive ? styles.profileButtonActive : styles.profileButtonIdle,
+		collapsed ? styles.profileButtonCollapsed : styles.profileButtonOpen
+	);
+
+	return (
+		<button
+			type="button"
+			onClick={() => navigate("/profile")}
+			{...profileButtonProps}
+			className={`${APP_REGION_NO_DRAG_CLASS} ${profileButtonProps.className ?? ""}`}
+			title={collapsed ? githubLabel : undefined}
+		>
+			<SidebarAccountAvatar account={githubAccount} />
+			{!collapsed ? (
+				<span {...stylex.props(styles.profileLabel)}>{githubLabel}</span>
+			) : null}
+		</button>
+	);
+}
+
 export function Sidebar() {
 	const navigate = useNavigate();
-	const location = useLocation();
 	const [collapsed, setCollapsed] = useState(() => {
 		return readStoredBoolean("sidebar-collapsed");
 	});
@@ -365,7 +427,7 @@ export function Sidebar() {
 		"idle" | "updating" | "error"
 	>("idle");
 	const { data: githubAccount, refresh: refreshGithubAccount } =
-		useAsyncResource(loadGithubAccount, null);
+		useAsyncResource(loadGithubAccount, null, { isEqual: sameForgeAccount });
 	const { data: appInfo } = useAppInfo();
 	const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 	const resizeWidthRef = useRef(sidebarWidth);
@@ -389,6 +451,7 @@ export function Sidebar() {
 			groups: cleanState?.groups ?? [],
 			selectedGroupId:
 				cleanState?.selectedGroupId ?? cleanState?.groups[0]?.id ?? null,
+			key: cleanState ? terminalStateKey(cleanState) : "",
 		};
 	}, []);
 
@@ -398,7 +461,12 @@ export function Sidebar() {
 		let cancelled = false;
 		loadCanonicalTerminalState()
 			.then(() => {
-				if (!cancelled) setWorkspaces(loadWorkspaces());
+				if (!cancelled) {
+					const next = loadWorkspaces();
+					setWorkspaces((current) =>
+						current.key === next.key ? current : next
+					);
+				}
 			})
 			.catch(noop);
 		return () => {
@@ -407,13 +475,26 @@ export function Sidebar() {
 	}, [loadWorkspaces]);
 
 	useEffect(() => {
-		const refresh = () => setWorkspaces(loadWorkspaces());
+		const refresh = (event: Event) => {
+			const detail = (event as CustomEvent<TerminalShellChangeDetail>).detail;
+			if (detail?.reason === "session-title") {
+				setWorkspaces((current) => ({ ...current }));
+				return;
+			}
+			if (detail?.source === "view" && !detail.stateKey) return;
+			const next = loadWorkspaces();
+			setWorkspaces((current) => (current.key === next.key ? current : next));
+		};
 		return listenWindowEvent("terminal-shell-change", refresh);
 	}, [loadWorkspaces]);
 
 	const selectWorkspace = useCallback(
 		async (groupId: string) => {
-			setWorkspaces((prev) => ({ ...prev, selectedGroupId: groupId as never }));
+			setWorkspaces((prev) =>
+				prev.selectedGroupId === groupId
+					? prev
+					: { ...prev, selectedGroupId: groupId as never }
+			);
 			const next = await mutateTerminalWorkspaceState(
 				{ type: "selectWorkspace", groupId },
 				"select-workspace"
@@ -422,6 +503,7 @@ export function Sidebar() {
 				setWorkspaces({
 					groups: next.groups,
 					selectedGroupId: next.selectedGroupId,
+					key: terminalStateKey(next),
 				});
 			}
 			if (window.location.hash !== "#/terminal") {
@@ -433,14 +515,18 @@ export function Sidebar() {
 
 	const selectPane = useCallback(
 		async (groupId: string, paneId: string) => {
-			setWorkspaces((prev) => ({
-				groups: prev.groups.map((group) =>
-					group.id === groupId
-						? { ...group, selectedPaneId: paneId as never }
-						: group
-				),
-				selectedGroupId: groupId as never,
-			}));
+			setWorkspaces((prev) => {
+				let changed = prev.selectedGroupId !== groupId;
+				const groups = prev.groups.map((group) => {
+					if (group.id !== groupId) return group;
+					if (group.selectedPaneId === paneId) return group;
+					changed = true;
+					return { ...group, selectedPaneId: paneId as never };
+				});
+				return changed
+					? { ...prev, groups, selectedGroupId: groupId as never }
+					: prev;
+			});
 			const next = await mutateTerminalWorkspaceState(
 				{ type: "selectPane", groupId, paneId },
 				"select-pane"
@@ -449,6 +535,7 @@ export function Sidebar() {
 				setWorkspaces({
 					groups: next.groups,
 					selectedGroupId: next.selectedGroupId,
+					key: terminalStateKey(next),
 				});
 			}
 			if (window.location.hash !== "#/terminal") {
@@ -468,6 +555,7 @@ export function Sidebar() {
 			setWorkspaces({
 				groups: next.groups,
 				selectedGroupId: next.selectedGroupId,
+				key: terminalStateKey(next),
 			});
 		}
 		navigate("/terminal");
@@ -482,6 +570,7 @@ export function Sidebar() {
 			setWorkspaces({
 				groups: next.groups,
 				selectedGroupId: next.selectedGroupId,
+				key: terminalStateKey(next),
 			});
 		}
 	}, []);
@@ -495,6 +584,7 @@ export function Sidebar() {
 			setWorkspaces({
 				groups: next.groups,
 				selectedGroupId: next.selectedGroupId,
+				key: terminalStateKey(next),
 			});
 		}
 	}, []);
@@ -504,7 +594,7 @@ export function Sidebar() {
 	}, [collapsed]);
 
 	const handleResizeStart = useCallback(
-		(event: ReactMouseEvent<HTMLDivElement>) => {
+		(event: ReactMouseEvent<HTMLElement>) => {
 			if (collapsed) return;
 			event.preventDefault();
 			setResizing(true);
@@ -555,12 +645,6 @@ export function Sidebar() {
 				setUpdateStatus("error");
 			});
 	}, []);
-	const goToRoute = useCallback(
-		(path: string) => {
-			navigate(path);
-		},
-		[navigate]
-	);
 	const shellProps = stylex.props(
 		styles.shell,
 		collapsed ? styles.shellCollapsed : styles.shellOpen,
@@ -571,34 +655,30 @@ export function Sidebar() {
 	const workspaceSectionProps = stylex.props(styles.workspaceSection);
 	const footerProps = stylex.props(styles.footer);
 	const resizeHandleProps = stylex.props(styles.resizeHandle);
-	const isProfileActive = location.pathname === "/profile";
-	const profileButtonProps = stylex.props(
-		styles.profileButton,
-		isProfileActive ? styles.profileButtonActive : styles.profileButtonIdle,
-		collapsed ? styles.profileButtonCollapsed : styles.profileButtonOpen
-	);
 
 	return (
 		<aside
 			{...shellProps}
-			className={`electrobun-webkit-app-region-drag ${shellProps.className ?? ""}`}
+			className={`${APP_REGION_DRAG_CLASS} ${shellProps.className ?? ""}`}
 			style={collapsed ? undefined : { width: sidebarWidth }}
 		>
 			{!collapsed && (
-				<div
+				<button
+					type="button"
+					aria-label="Resize sidebar"
 					{...resizeHandleProps}
-					className={`electrobun-webkit-app-region-no-drag ${resizeHandleProps.className ?? ""}`}
+					className={`${APP_REGION_NO_DRAG_CLASS} ${resizeHandleProps.className ?? ""}`}
 					onMouseDown={handleResizeStart}
 				/>
 			)}
 			<div
-				className={`electrobun-webkit-app-region-drag ${logoBarProps.className ?? ""}`}
+				className={`${APP_REGION_DRAG_CLASS} ${logoBarProps.className ?? ""}`}
 			>
 				<button
 					type="button"
 					onClick={() => setCollapsed(!collapsed)}
 					{...logoButtonProps}
-					className={`electrobun-webkit-app-region-no-drag ${logoButtonProps.className ?? ""}`}
+					className={`${APP_REGION_NO_DRAG_CLASS} ${logoButtonProps.className ?? ""}`}
 				>
 					<span {...stylex.props(styles.logoFrame)}>
 						<img
@@ -611,32 +691,11 @@ export function Sidebar() {
 				</button>
 			</div>
 			<nav {...stylex.props(styles.nav)}>
-				{SIDEBAR_NAV_ROUTES.map((item) => {
-					const Icon = item.icon;
-					const isActive = location.pathname === item.path;
-					const itemProps = stylex.props(
-						styles.navItem,
-						isActive ? styles.navItemActive : styles.navItemIdle,
-						collapsed ? styles.navItemCollapsed : styles.navItemOpen
-					);
-					return (
-						<button
-							key={item.path}
-							type="button"
-							onClick={() => goToRoute(item.path)}
-							{...itemProps}
-							className={`electrobun-webkit-app-region-no-drag ${itemProps.className ?? ""}`}
-							title={collapsed ? item.label : undefined}
-						>
-							<Icon size={14} className="shrink-0" />
-							{!collapsed && <span>{item.label}</span>}
-						</button>
-					);
-				})}
+				<SidebarNavItems collapsed={collapsed} />
 
 				{/* Workspaces section */}
 				<div
-					className={`electrobun-webkit-app-region-no-drag ${workspaceSectionProps.className ?? ""}`}
+					className={`${APP_REGION_NO_DRAG_CLASS} ${workspaceSectionProps.className ?? ""}`}
 				>
 					<div
 						{...stylex.props(
@@ -692,7 +751,7 @@ export function Sidebar() {
 				</div>
 			</nav>
 			<div
-				className={`electrobun-webkit-app-region-no-drag ${footerProps.className ?? ""}`}
+				className={`${APP_REGION_NO_DRAG_CLASS} ${footerProps.className ?? ""}`}
 			>
 				{updateAvailable ? (
 					<button
@@ -720,18 +779,11 @@ export function Sidebar() {
 						) : null}
 					</button>
 				) : null}
-				<button
-					type="button"
-					onClick={() => goToRoute("/profile")}
-					{...profileButtonProps}
-					className={`electrobun-webkit-app-region-no-drag ${profileButtonProps.className ?? ""}`}
-					title={collapsed ? githubLabel : undefined}
-				>
-					<SidebarAccountAvatar account={githubAccount} />
-					{!collapsed ? (
-						<span {...stylex.props(styles.profileLabel)}>{githubLabel}</span>
-					) : null}
-				</button>
+				<SidebarProfileButton
+					collapsed={collapsed}
+					githubLabel={githubLabel}
+					githubAccount={githubAccount}
+				/>
 			</div>
 		</aside>
 	);
@@ -1010,7 +1062,9 @@ const styles = stylex.create({
 		bottom: 0,
 		zIndex: 30,
 		width: controlSize._1,
+		borderWidth: 0,
 		cursor: "ew-resize",
+		padding: 0,
 		backgroundColor: {
 			default: "transparent",
 			":hover": color.controlActive,

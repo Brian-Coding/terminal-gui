@@ -12,6 +12,7 @@ export function readStoredJson<T>(key: string, fallback: T): T {
 export function writeStoredJson<T>(key: string, value: T) {
 	try {
 		const stored = JSON.stringify(value);
+		if (localStorage.getItem(key) === stored) return;
 		localStorage.setItem(key, stored);
 		syncStoredValue(key, stored);
 	} catch {}
@@ -30,6 +31,7 @@ export function readStoredValue(
 
 export function writeStoredValue(key: string, value: string): void {
 	try {
+		if (localStorage.getItem(key) === value) return;
 		localStorage.setItem(key, value);
 		syncStoredValue(key, value);
 	} catch {}
@@ -37,6 +39,7 @@ export function writeStoredValue(key: string, value: string): void {
 
 export function removeStoredValue(key: string): void {
 	try {
+		if (localStorage.getItem(key) === null) return;
 		localStorage.removeItem(key);
 		syncStoredValue(key, null);
 	} catch {}

@@ -1,6 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import type React from "react";
-import { memo, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
 import { AgentChatView } from "../../components/chat/AgentChatView.tsx";
 import { IconButton } from "../../components/ui/IconButton.tsx";
@@ -16,19 +16,18 @@ import type {
 	TerminalTheme,
 } from "../../features/terminal/terminal-utils.ts";
 import { useXtermTerminal } from "../../hooks/useXtermTerminal.ts";
-import {
-	activateOnEnterOrSpace,
-	focusRef,
-	stopPropagationAndCall,
-} from "../../lib/react-events.ts";
+import { APP_REGION_NO_DRAG_CLASS } from "../../lib/app-region.ts";
+import { activateOnEnterOrSpace, focusRef } from "../../lib/react-events.ts";
 import { color, font } from "../../tokens.stylex.ts";
 
 interface TerminalPaneViewProps {
 	pane: TerminalPaneModel;
 	isSelected: boolean;
+	isVisible?: boolean;
 	theme: TerminalTheme;
 	fontSize: number;
 	fontFamily: string;
+	gitBranch?: string | null;
 	onSelect: (paneId: string) => void;
 	onClose: (paneId: string, force?: boolean) => void;
 	onDirectorySelect?: (
@@ -49,12 +48,15 @@ interface TerminalPaneViewProps {
 export const TerminalPaneView = memo(function TerminalPaneView({
 	pane,
 	isSelected,
+	isVisible = true,
 	theme,
 	fontSize,
 	fontFamily,
+	gitBranch,
 	onSelect,
 	onClose,
 	onDirectorySelect,
+	onDirectoryCancel,
 	chatRef,
 	onAgentStatusChange,
 	paneIndex,
@@ -71,7 +73,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	const isAgentChatPane = isChatAgentKind(viewAgentKind);
 	const paneLabel = getAgentDefinition(viewAgentKind).label;
 	const { containerRef, termRef, refit } = useXtermTerminal({
-		enabled: !isAgentChatPane && !pane.pendingCwd,
+		enabled: isVisible && !isAgentChatPane && !pane.pendingCwd,
 		paneId: pane.id,
 		agentKind: pane.agentKind,
 		isClaude: pane.isClaude,
@@ -82,83 +84,115 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	});
 
 	useEffect(() => {
-		if (isSelected && !isAgentChatPane) refit();
-	}, [isAgentChatPane, isSelected, refit]);
+		if (isVisible && isSelected && !isAgentChatPane) refit();
+	}, [isAgentChatPane, isSelected, isVisible, refit]);
+
+	const handlePaneDragStart = useCallback(
+		(e: React.DragEvent) => {
+			if (paneIndex == null || !onHeaderDragStart) return;
+			e.dataTransfer.setData("text/plain", pane.id);
+			const img = new Image();
+			img.src =
+				"data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+			e.dataTransfer.setDragImage(img, 0, 0);
+			onHeaderDragStart(e, paneIndex);
+		},
+		[onHeaderDragStart, pane.id, paneIndex]
+	);
+	const handleSelect = useCallback(() => {
+		onSelect(pane.id);
+	}, [onSelect, pane.id]);
+	const handleCloseClick = useCallback(
+		(event: React.SyntheticEvent) => {
+			event.stopPropagation();
+			onClose(pane.id);
+		},
+		[onClose, pane.id]
+	);
+	const focusTerminal = useCallback(() => {
+		focusRef(termRef);
+	}, [termRef]);
+	const handleTerminalKeyDown = useCallback(
+		(event: React.KeyboardEvent) => {
+			activateOnEnterOrSpace(focusTerminal, event);
+		},
+		[focusTerminal]
+	);
+	const handleDirectoryChange = useCallback(
+		(pid: string, cwd: string | null, refs?: string[]) => {
+			if (pane.pendingCwd && !isChatAgentKind(pane.agentKind)) {
+				onSetPaneAgentKind?.(pid, loadDefaultChatSettings().agentKind);
+			}
+			onDirectorySelect?.(pid, cwd, refs);
+		},
+		[onDirectorySelect, onSetPaneAgentKind, pane.agentKind, pane.pendingCwd]
+	);
+	const handleChatRef = useCallback(
+		(handle: AgentChatHandle | null) => {
+			chatHandleRef.current = handle;
+			chatRef(pane.id, handle);
+		},
+		[chatRef, pane.id]
+	);
 
 	return (
 		<div
-			onClick={() => onSelect(pane.id)}
-			onKeyDown={
-				isAgentChatPane
-					? undefined
-					: (e) => {
-							if (e.key === "Enter" || e.key === " ") onSelect(pane.id);
-						}
-			}
-			tabIndex={isAgentChatPane ? undefined : 0}
-			role={isAgentChatPane ? undefined : "button"}
 			{...stylex.props(styles.root)}
 			style={isAgentChatPane ? undefined : { backgroundColor: theme.bg }}
 		>
 			{!isAgentChatPane && (
 				<div
-					className={`electrobun-webkit-app-region-no-drag ${stylex.props(styles.header).className ?? ""}`}
+					className={`${APP_REGION_NO_DRAG_CLASS} ${stylex.props(styles.header).className ?? ""}`}
 					style={{
 						borderColor: theme.separator,
 						backgroundColor: theme.bg,
 					}}
 					draggable={paneIndex != null && !!onHeaderDragStart}
-					onDragStart={(e) => {
-						if (paneIndex != null && onHeaderDragStart) {
-							e.dataTransfer.setData("text/plain", pane.id);
-							const img = new Image();
-							img.src =
-								"data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-							e.dataTransfer.setDragImage(img, 0, 0);
-							onHeaderDragStart(e, paneIndex);
-						}
-					}}
+					onDragStart={handlePaneDragStart}
 					onDragEnd={onHeaderDragEnd}
 				>
-					<span
-						{...stylex.props(
-							styles.terminalIcon,
-							isSelected && styles.activeAccent
-						)}
+					<button
+						type="button"
+						onClick={handleSelect}
+						{...stylex.props(styles.headerSelectButton)}
 					>
-						<IconTerminal size={10} />
-					</span>
-					<span
-						{...stylex.props(
-							styles.paneLabel,
-							isSelected && styles.selectedLabel
+						<span
+							{...stylex.props(
+								styles.terminalIcon,
+								isSelected && styles.activeAccent
+							)}
+						>
+							<IconTerminal size={10} />
+						</span>
+						<span
+							{...stylex.props(
+								styles.paneLabel,
+								isSelected && styles.selectedLabel
+							)}
+						>
+							{paneLabel}
+						</span>
+						{pane.cwd && (
+							<>
+								<span {...stylex.props(styles.breadcrumbSep)}>›</span>
+								<span
+									{...stylex.props(
+										styles.cwdLabel,
+										isSelected && styles.selectedCwd
+									)}
+									title={pane.cwd}
+								>
+									{pane.cwd.split("/").pop() || pane.cwd}
+								</span>
+							</>
 						)}
-					>
-						{paneLabel}
-					</span>
-					{pane.cwd && (
-						<>
-							<span {...stylex.props(styles.breadcrumbSep)}>›</span>
-							<span
-								{...stylex.props(
-									styles.cwdLabel,
-									isSelected && styles.selectedCwd
-								)}
-								title={pane.cwd}
-							>
-								{pane.cwd.split("/").pop() || pane.cwd}
-							</span>
-						</>
-					)}
+					</button>
 					<span {...stylex.props(styles.spacer)} />
 					{isSelected && <div {...stylex.props(styles.selectedDot)} />}
 					<IconButton
 						type="button"
-						onClick={stopPropagationAndCall.bind(
-							null,
-							onClose.bind(null, pane.id)
-						)}
-						className="electrobun-webkit-app-region-no-drag"
+						onClick={handleCloseClick}
+						className={APP_REGION_NO_DRAG_CLASS}
 						variant="danger"
 						size="xs"
 						title="Close pane"
@@ -176,50 +210,30 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					overflow: "hidden",
 					padding: 0,
 				}}
-				onClick={focusRef.bind(null, termRef)}
-				onKeyDown={activateOnEnterOrSpace.bind(
-					null,
-					focusRef.bind(null, termRef)
-				)}
+				onClick={focusTerminal}
+				onKeyDown={handleTerminalKeyDown}
 				tabIndex={0}
 				role="button"
 			/>
 			{isAgentChatPane && (
-				<div
-					{...stylex.props(styles.agentPane)}
-					style={{ pointerEvents: isSelected ? "auto" : "none" }}
-				>
+				<div {...stylex.props(styles.agentPane)}>
 					<AgentChatView
 						paneId={pane.id}
 						cwd={pane.cwd}
 						referencePaths={pane.referencePaths}
+						gitBranch={gitBranch}
 						agentKind={viewAgentKind}
 						onStatusChange={onAgentStatusChange}
 						onClose={onClose}
 						isSelected={isSelected}
-						onDirectoryChange={(pid, cwd, refs) => {
-							if (pane.pendingCwd && !isChatAgentKind(pane.agentKind)) {
-								onSetPaneAgentKind?.(pid, loadDefaultChatSettings().agentKind);
-							}
-							onDirectorySelect?.(pid, cwd, refs);
-						}}
+						isVisible={isVisible}
+						onDirectoryChange={handleDirectoryChange}
+						onDirectoryCancel={onDirectoryCancel}
 						onAddPane={onAddPane}
 						draggable={paneIndex != null && !!onHeaderDragStart}
-						onDragStart={(e) => {
-							if (paneIndex != null && onHeaderDragStart) {
-								e.dataTransfer.setData("text/plain", pane.id);
-								const img = new Image();
-								img.src =
-									"data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-								e.dataTransfer.setDragImage(img, 0, 0);
-								onHeaderDragStart(e, paneIndex);
-							}
-						}}
+						onDragStart={handlePaneDragStart}
 						onDragEnd={onHeaderDragEnd}
-						ref={(handle) => {
-							chatHandleRef.current = handle;
-							chatRef(pane.id, handle);
-						}}
+						ref={handleChatRef}
 					/>
 				</div>
 			)}
@@ -250,6 +264,18 @@ const styles = stylex.create({
 		":active": {
 			cursor: "grabbing",
 		},
+	},
+	headerSelectButton: {
+		alignItems: "center",
+		borderWidth: 0,
+		color: "inherit",
+		display: "flex",
+		flex: 1,
+		font: "inherit",
+		gap: "0.5rem",
+		minWidth: 0,
+		padding: 0,
+		textAlign: "left",
 	},
 	terminalIcon: {
 		color: color.textMuted,

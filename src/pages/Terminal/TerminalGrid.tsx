@@ -4,10 +4,13 @@ import {
 	useCallback,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
 import type { AgentChatHandle } from "../../components/chat/AgentChatView.tsx";
+import { isChatAgentKind } from "../../features/agents/agents.ts";
+import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import type {
 	AgentKind,
 	TerminalPaneModel,
@@ -15,7 +18,10 @@ import type {
 } from "../../features/terminal/terminal-utils.ts";
 import { TerminalPaneView } from "./TerminalPaneView.tsx";
 
+const EMPTY_CWD_LIST: string[] = [];
+
 interface TerminalGridProps {
+	active?: boolean;
 	panes: TerminalPaneModel[];
 	selectedPaneId: string | null;
 	columns: number;
@@ -44,13 +50,16 @@ const paneViewProps = (
 	pane: TerminalPaneModel,
 	idx: number,
 	onDragStart: (e: React.DragEvent, i: number) => void,
-	onDragEnd: () => void
+	onDragEnd: () => void,
+	gitBranch: string | null
 ) => ({
 	pane,
-	isSelected: pane.id === p.selectedPaneId,
+	isSelected: p.active !== false && pane.id === p.selectedPaneId,
+	isVisible: p.active !== false,
 	theme: p.theme,
 	fontSize: p.fontSize,
 	fontFamily: p.fontFamily,
+	gitBranch,
 	onSelect: p.onSelectPane,
 	onClose: p.onClosePane,
 	onDirectorySelect: p.onDirectorySelect,
@@ -67,12 +76,39 @@ const paneViewProps = (
 export const TerminalGrid = memo(function TerminalGrid(
 	props: TerminalGridProps
 ) {
-	const { panes, columns, rows, layoutMode, theme, onReorderPanes } = props;
+	const {
+		active = true,
+		panes,
+		columns,
+		rows,
+		layoutMode,
+		theme,
+		onReorderPanes,
+	} = props;
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [containerHeight, setContainerHeight] = useState(0);
 	const dragIndexRef = useRef<number | null>(null);
 	const [dragIndex, setDragIndex] = useState<number | null>(null);
 	const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+	const chatStatusCwds = useMemo(() => {
+		if (!active) return EMPTY_CWD_LIST;
+		const seen = new Set<string>();
+		const cwds: string[] = [];
+		for (const pane of panes) {
+			if (
+				!pane.cwd ||
+				(!pane.pendingCwd && !isChatAgentKind(pane.agentKind)) ||
+				seen.has(pane.cwd)
+			)
+				continue;
+			seen.add(pane.cwd);
+			cwds.push(pane.cwd);
+		}
+		return cwds;
+	}, [active, panes]);
+	const { projectMap: chatProjectMap } = useGitStatus(chatStatusCwds, {
+		enabled: active && chatStatusCwds.length > 0,
+	});
 	const clearDragState = useCallback(() => {
 		dragIndexRef.current = null;
 		setDragIndex(null);
@@ -80,15 +116,19 @@ export const TerminalGrid = memo(function TerminalGrid(
 	}, []);
 
 	useLayoutEffect(() => {
+		if (!active) return;
 		const el = containerRef.current?.parentElement;
 		if (!el) return;
 		const ro = new ResizeObserver(([entry]) => {
 			if (!entry) return;
-			setContainerHeight(entry.contentRect.height);
+			const nextHeight = entry.contentRect.height;
+			setContainerHeight((current) =>
+				current === nextHeight ? current : nextHeight
+			);
 		});
 		ro.observe(el);
 		return ro.disconnect.bind(ro);
-	}, []);
+	}, [active]);
 
 	const handleHeaderDragStart = useCallback(
 		(e: React.DragEvent, index: number) => {
@@ -106,7 +146,7 @@ export const TerminalGrid = memo(function TerminalGrid(
 	const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
 		e.preventDefault();
 		e.dataTransfer.dropEffect = "move";
-		setDragOverIndex(index);
+		setDragOverIndex((current) => (current === index ? current : index));
 	}, []);
 
 	const handleDrop = useCallback(
@@ -121,13 +161,17 @@ export const TerminalGrid = memo(function TerminalGrid(
 	);
 
 	useEffect(() => {
+		if (!active) {
+			clearDragState();
+			return;
+		}
 		window.addEventListener("dragend", clearDragState);
 		window.addEventListener("drop", clearDragState);
 		return () => {
 			window.removeEventListener("dragend", clearDragState);
 			window.removeEventListener("drop", clearDragState);
 		};
-	}, [clearDragState]);
+	}, [active, clearDragState]);
 
 	const cellStyle = (idx: number): React.CSSProperties =>
 		({
@@ -159,7 +203,8 @@ export const TerminalGrid = memo(function TerminalGrid(
 								pane,
 								idx,
 								handleHeaderDragStart,
-								handleHeaderDragEnd
+								handleHeaderDragEnd,
+								pane.cwd ? (chatProjectMap.get(pane.cwd)?.branch ?? null) : null
 							)}
 						/>
 					</div>
@@ -197,7 +242,8 @@ export const TerminalGrid = memo(function TerminalGrid(
 							pane,
 							idx,
 							handleHeaderDragStart,
-							handleHeaderDragEnd
+							handleHeaderDragEnd,
+							pane.cwd ? (chatProjectMap.get(pane.cwd)?.branch ?? null) : null
 						)}
 					/>
 				</div>
