@@ -96,8 +96,5 @@ export function mergeSyncedMessages(
 		userIdx++;
 		return displayText ? { ...message, content: displayText } : message;
 	});
-	if (localUserMsgs.length <= serverUserMsgs.length) return merged;
-
-	const trailingLocalUsers = localUserMsgs.slice(serverUserMsgs.length);
-	return trimMessages([...merged, ...trailingLocalUsers]);
+	return merged;
 }

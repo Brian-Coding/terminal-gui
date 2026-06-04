@@ -375,14 +375,12 @@ export function useChatConnection({
 				const serverMessages: ChatMessage[] = dedupeChatMessagesById(
 					msg.messages
 				);
-				const currentMessages = messagesRef.current;
-				if (serverMessages.length < currentMessages.length && !msg.isStreaming)
-					return;
-				if (serverMessages.length > 0) {
-					setMessages((prev) =>
-						trimMessages(mergeSyncedMessages(prev, serverMessages))
+				if (serverMessages.length > 0 || !msg.isStreaming) {
+					const mergedMessages = trimMessages(
+						mergeSyncedMessages(messagesRef.current, serverMessages)
 					);
-					saveMessagesNow(serverMessages);
+					setMessages(mergedMessages);
+					saveMessagesNow(mergedMessages);
 				}
 				if (msg.isStreaming) {
 					setLoadingState((prev) => ({
