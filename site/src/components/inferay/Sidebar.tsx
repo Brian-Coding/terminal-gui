@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { useState } from "react";
 import { Icons } from "./Icons";
 import { activityTimeline, sessionTimeline } from "./data";
@@ -6,6 +6,13 @@ import { gitStatusColors } from "./fileIcons";
 
 function stopPropagation(event: MouseEvent) {
 	event.stopPropagation();
+}
+
+function activateOnRowKey(event: KeyboardEvent, action: () => void) {
+	if (event.key === "Enter" || event.key === " ") {
+		event.preventDefault();
+		action();
+	}
 }
 
 // Path-based file list for git changes
@@ -145,17 +152,21 @@ function TreeNodeRow({
 	const [expanded, setExpanded] = useState(node.expanded ?? true);
 	const isFolder = node.type === "folder";
 	const paddingLeft = depth * 10 + 4;
+	const selectOrToggle = () => {
+		if (isFolder) {
+			setExpanded(!expanded);
+		} else {
+			onSelectFile(node.name);
+		}
+	};
 
 	return (
 		<>
-			<button
-				onClick={() => {
-					if (isFolder) {
-						setExpanded(!expanded);
-					} else {
-						onSelectFile(node.name);
-					}
-				}}
+			<div
+				role="button"
+				tabIndex={0}
+				onClick={selectOrToggle}
+				onKeyDown={(event) => activateOnRowKey(event, selectOrToggle)}
 				className={`w-full flex items-center gap-1 py-0.5 rounded-sm transition-colors group/row ${
 					!isFolder && selectedFile === node.name
 						? "bg-inferay-surface-2 text-inferay-text"
@@ -197,7 +208,7 @@ function TreeNodeRow({
 						</button>
 					</>
 				)}
-			</button>
+			</div>
 			{isFolder && expanded && node.children && (
 				<div>
 					{node.children.map((child, i) => (
@@ -241,8 +252,11 @@ function FileGroupTree({
 	return (
 		<div className="mb-1">
 			{/* Group header */}
-			<button
+			<div
+				role="button"
+				tabIndex={0}
 				onClick={onToggle}
+				onKeyDown={(event) => activateOnRowKey(event, onToggle)}
 				className="w-full flex items-center gap-1 px-1.5 py-1 rounded-md hover:bg-inferay-surface/50 transition-colors group"
 			>
 				<span
@@ -265,7 +279,7 @@ function FileGroupTree({
 				>
 					{isStaged ? "−" : "+"}
 				</button>
-			</button>
+			</div>
 
 			{/* Tree view */}
 			{expanded && (
@@ -308,8 +322,11 @@ function FileGroupPath({
 	return (
 		<div className="mb-1">
 			{/* Group header */}
-			<button
+			<div
+				role="button"
+				tabIndex={0}
 				onClick={onToggle}
+				onKeyDown={(event) => activateOnRowKey(event, onToggle)}
 				className="w-full flex items-center gap-1 px-1.5 py-1 rounded-md hover:bg-inferay-surface/50 transition-colors group"
 			>
 				<span
@@ -332,15 +349,20 @@ function FileGroupPath({
 				>
 					{isStaged ? "−" : "+"}
 				</button>
-			</button>
+			</div>
 
 			{/* File list */}
 			{expanded && (
 				<div className="ml-2 pr-1">
 					{files.map((file) => (
-						<button
+						<div
+							role="button"
+							tabIndex={0}
 							key={file.path}
 							onClick={() => onSelectFile(file.name)}
+							onKeyDown={(event) =>
+								activateOnRowKey(event, () => onSelectFile(file.name))
+							}
 							className={`w-full flex items-center gap-1.5 px-1.5 py-0.5 rounded-sm transition-colors group/file ${
 								selectedFile === file.name
 									? "bg-inferay-surface-2 text-inferay-text"
@@ -365,7 +387,7 @@ function FileGroupPath({
 							>
 								{isStaged ? "−" : "+"}
 							</button>
-						</button>
+						</div>
 					))}
 				</div>
 			)}

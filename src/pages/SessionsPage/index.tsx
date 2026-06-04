@@ -9,9 +9,11 @@ import {
 	loadCanonicalTerminalState,
 	mutateTerminalWorkspaceState,
 	type PaneId,
+	type TerminalShellChangeDetail,
 	type TerminalGroupModel,
 	type TerminalPaneModel,
 } from "../../features/terminal/terminal-utils.ts";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { basename, formatRelativeTime, trimText } from "../../lib/format.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
@@ -30,13 +32,50 @@ interface LocalSessionInfo {
 	inCurrentWorkspace: boolean;
 }
 
+function sameSessions(
+	prev: LocalSessionInfo[],
+	next: LocalSessionInfo[]
+): boolean {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.paneId !== b.paneId ||
+			a.title !== b.title ||
+			a.agentKind !== b.agentKind ||
+			a.cwd !== b.cwd ||
+			a.messageCount !== b.messageCount ||
+			a.lastMessage !== b.lastMessage ||
+			a.lastRole !== b.lastRole ||
+			a.updatedAt !== b.updatedAt ||
+			a.inCurrentWorkspace !== b.inCurrentWorkspace
+		)
+			return false;
+	}
+	return true;
+}
+
+function sameWorkspaceOptions(
+	prev: TerminalGroupModel[],
+	next: TerminalGroupModel[]
+): boolean {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (a.id !== b.id || a.name !== b.name || a.panes.length !== b.panes.length)
+			return false;
+	}
+	return true;
+}
+
 export function SessionsPage() {
 	const [sessions, setSessions] = useState<LocalSessionInfo[]>([]);
 	const [workspaces, setWorkspaces] = useState<TerminalGroupModel[]>([]);
 	const [loading, setLoading] = useState(true);
 
 	const refresh = useCallback(async () => {
-		setLoading(true);
 		try {
 			const [sessionPayload, terminalState] = await Promise.all([
 				fetchJsonOr<{ sessions?: LocalSessionInfo[] }>("/api/sessions", {
@@ -44,10 +83,16 @@ export function SessionsPage() {
 				}),
 				loadCanonicalTerminalState(),
 			]);
-			setSessions(
-				Array.isArray(sessionPayload.sessions) ? sessionPayload.sessions : []
+			const nextSessions = Array.isArray(sessionPayload.sessions)
+				? sessionPayload.sessions
+				: [];
+			const nextWorkspaces = terminalState?.groups ?? [];
+			setSessions((current) =>
+				sameSessions(current, nextSessions) ? current : nextSessions
 			);
-			setWorkspaces(terminalState?.groups ?? []);
+			setWorkspaces((current) =>
+				sameWorkspaceOptions(current, nextWorkspaces) ? current : nextWorkspaces
+			);
 		} finally {
 			setLoading(false);
 		}
@@ -56,7 +101,9 @@ export function SessionsPage() {
 	useEffect(() => {
 		void refresh();
 		const id = window.setInterval(() => void refresh(), 2000);
-		const cleanupShell = listenWindowEvent("terminal-shell-change", () => {
+		const cleanupShell = listenWindowEvent("terminal-shell-change", (event) => {
+			const detail = (event as CustomEvent<TerminalShellChangeDetail>).detail;
+			if (detail?.source === "view" && !detail.stateKey) return;
 			void refresh();
 		});
 		const refreshOnFocus = () => void refresh();
@@ -118,7 +165,7 @@ export function SessionsPage() {
 				"restore-session",
 				{ createIfMissing: true }
 			);
-			writeStoredValue("terminal-main-view", "chat");
+			writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, "chat");
 			dispatchTerminalShellChange({
 				source: "view",
 				reason: "restore-session",

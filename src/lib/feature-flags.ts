@@ -16,7 +16,7 @@ export type FeatureFlagName =
 
 export type FeatureFlags = Record<FeatureFlagName, boolean>;
 
-export const ENABLED_FEATURE_FLAGS: FeatureFlags = {
+const ENABLED_FEATURE_FLAGS: FeatureFlags = {
 	terminal: true,
 	git: true,
 	prompts: true,

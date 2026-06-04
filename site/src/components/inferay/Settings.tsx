@@ -55,6 +55,10 @@ const providers: ApiKey[] = [
 
 type ProfileTab = "profile" | "keys" | "preferences";
 
+function getKeyPreview(providerId: string) {
+	return providerId.padEnd(4, "x").slice(0, 4);
+}
+
 function ApiKeyRow({
 	provider,
 	onEdit,
@@ -91,7 +95,7 @@ function ApiKeyRow({
 			{provider.isSet ? (
 				<div className="flex items-center gap-2">
 					<span className="text-[9px] font-mono text-inferay-text-3">
-						sk-...{Math.random().toString(36).substring(2, 6)}
+						sk-...{getKeyPreview(provider.id)}
 					</span>
 					<button
 						onClick={onEdit}

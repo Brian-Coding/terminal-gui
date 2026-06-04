@@ -1,9 +1,10 @@
 import * as stylex from "@stylexjs/stylex";
-import { useCallback, useEffect, useState } from "react";
-import { Markdown } from "../../components/chat/ChatRichContent.tsx";
+import { useCallback, useState } from "react";
+import { DotMatrixRipple } from "../../components/ui/DotMatrixLoader.tsx";
+import { IconTarget } from "../../components/ui/Icons.tsx";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
-import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { usePollingResource } from "../../hooks/usePollingResource.ts";
+import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { basename, formatElapsedMs } from "../../lib/format.ts";
 import {
 	color,
@@ -13,8 +14,6 @@ import {
 	radius,
 	shadow,
 } from "../../tokens.stylex.ts";
-import { DotMatrixRipple } from "../../components/ui/DotMatrixLoader.tsx";
-import { IconTarget } from "../../components/ui/Icons.tsx";
 
 interface GoalInfo {
 	paneId: string;
@@ -28,17 +27,6 @@ interface GoalInfo {
 	turns: number;
 	startedAt: number;
 	elapsedMs: number;
-	recentMessages: Array<{
-		role: "assistant" | "system";
-		content: string;
-	}>;
-	brief: {
-		phase: string;
-		currentStep: string;
-		nextAction: string;
-		blocker: string | null;
-		lastResult: string | null;
-	};
 	activity: Array<{
 		id: string;
 		type: "status" | "tool" | "result" | "system" | "error";
@@ -46,8 +34,42 @@ interface GoalInfo {
 		detail: string | null;
 		state: "running" | "complete" | "paused" | "error";
 	}>;
-	files: string[];
-	checks: string[];
+}
+
+function areGoalsEqual(prev: GoalInfo[], next: GoalInfo[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.paneId !== b.paneId ||
+			a.agentKind !== b.agentKind ||
+			a.cwd !== b.cwd ||
+			a.sessionId !== b.sessionId ||
+			a.isRunning !== b.isRunning ||
+			a.clientCount !== b.clientCount ||
+			a.objective !== b.objective ||
+			a.status !== b.status ||
+			a.turns !== b.turns ||
+			a.startedAt !== b.startedAt ||
+			a.elapsedMs !== b.elapsedMs ||
+			a.activity.length !== b.activity.length
+		)
+			return false;
+		for (let j = 0; j < a.activity.length; j++) {
+			const aa = a.activity[j]!;
+			const ba = b.activity[j]!;
+			if (
+				aa.id !== ba.id ||
+				aa.type !== ba.type ||
+				aa.label !== ba.label ||
+				aa.detail !== ba.detail ||
+				aa.state !== ba.state
+			)
+				return false;
+		}
+	}
+	return true;
 }
 
 export function GoalsPage() {
@@ -59,7 +81,9 @@ export function GoalsPage() {
 		});
 		return Array.isArray(payload.goals) ? payload.goals : [];
 	}, []);
-	const { data: goals, loaded } = usePollingResource(loadGoals, 1500, []);
+	const { data: goals, loaded } = usePollingResource(loadGoals, 1500, [], {
+		isEqual: areGoalsEqual,
+	});
 
 	const selectedGoal =
 		goals.find((goal) => goal.paneId === selectedGoalId) ?? goals[0] ?? null;
@@ -125,11 +149,6 @@ export function GoalsPage() {
 								</div>
 								<GoalStatus goal={selectedGoal} />
 							</div>
-							<div {...stylex.props(styles.signalGrid)}>
-								<SignalList title="Files" items={selectedGoal.files} />
-								<SignalList title="Checks" items={selectedGoal.checks} />
-							</div>
-
 							<div {...stylex.props(styles.outputSection)}>
 								<div {...stylex.props(styles.outputHeader)}>
 									<span>Activity</span>
@@ -177,28 +196,6 @@ export function GoalsPage() {
 									)}
 								</div>
 							</div>
-
-							<details {...stylex.props(styles.transcriptDetails)}>
-								<summary {...stylex.props(styles.transcriptSummary)}>
-									Raw transcript
-									<span {...stylex.props(styles.outputCount)}>
-										{selectedGoal.recentMessages.length}
-									</span>
-								</summary>
-								<div {...stylex.props(styles.transcriptList)}>
-									{selectedGoal.recentMessages.map((message, index) => (
-										<div
-											key={`${message.role}-${index}`}
-											{...stylex.props(styles.transcriptItem)}
-										>
-											<span {...stylex.props(styles.outputRole)}>
-												{message.role}
-											</span>
-											<Markdown text={message.content} />
-										</div>
-									))}
-								</div>
-							</details>
 						</>
 					) : (
 						<div {...stylex.props(styles.detailEmpty)}>
@@ -206,28 +203,6 @@ export function GoalsPage() {
 						</div>
 					)}
 				</aside>
-			</div>
-		</div>
-	);
-}
-
-function SignalList({ title, items }: { title: string; items: string[] }) {
-	return (
-		<div {...stylex.props(styles.signalList)}>
-			<div {...stylex.props(styles.outputHeader)}>
-				<span>{title}</span>
-				<span {...stylex.props(styles.outputCount)}>{items.length}</span>
-			</div>
-			<div {...stylex.props(styles.signalBody)}>
-				{items.length > 0 ? (
-					items.map((item) => (
-						<span key={item} {...stylex.props(styles.signalItem)}>
-							{item}
-						</span>
-					))
-				) : (
-					<span {...stylex.props(styles.signalEmpty)}>None yet</span>
-				)}
 			</div>
 		</div>
 	);
@@ -469,42 +444,6 @@ const styles = stylex.create({
 		lineHeight: 1.35,
 		margin: 0,
 	},
-	signalGrid: {
-		borderBottomColor: color.border,
-		borderBottomStyle: "solid",
-		borderBottomWidth: 1,
-		display: "grid",
-		gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-		minHeight: controlSize._16,
-	},
-	signalList: {
-		borderRightColor: color.border,
-		borderRightStyle: "solid",
-		borderRightWidth: 1,
-		display: "flex",
-		flexDirection: "column",
-		minWidth: 0,
-	},
-	signalBody: {
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._1,
-		maxHeight: 104,
-		overflowY: "auto",
-		padding: controlSize._2,
-	},
-	signalItem: {
-		color: color.textSoft,
-		fontFamily: font.familyMono,
-		fontSize: font.size_1,
-		overflow: "hidden",
-		textOverflow: "ellipsis",
-		whiteSpace: "nowrap",
-	},
-	signalEmpty: {
-		color: color.textMuted,
-		fontSize: font.size_1,
-	},
 	outputSection: {
 		display: "flex",
 		flex: 1,
@@ -616,41 +555,6 @@ const styles = stylex.create({
 		fontSize: font.size_2,
 		paddingBlock: controlSize._8,
 		textAlign: "center",
-	},
-	transcriptDetails: {
-		borderTopColor: color.border,
-		borderTopStyle: "solid",
-		borderTopWidth: 1,
-		flexShrink: 0,
-	},
-	transcriptSummary: {
-		alignItems: "center",
-		color: color.textMuted,
-		cursor: "pointer",
-		display: "flex",
-		fontSize: font.size_1,
-		fontWeight: font.weight_5,
-		justifyContent: "space-between",
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
-		textTransform: "uppercase",
-	},
-	transcriptList: {
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._2,
-		maxHeight: 240,
-		overflowY: "auto",
-		padding: controlSize._3,
-	},
-	transcriptItem: {
-		borderColor: color.border,
-		borderRadius: radius.md,
-		borderStyle: "solid",
-		borderWidth: 1,
-		color: color.textSoft,
-		fontSize: font.size_2,
-		padding: controlSize._2,
 	},
 	detailEmpty: {
 		alignItems: "center",

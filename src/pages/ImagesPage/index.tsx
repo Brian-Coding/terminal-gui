@@ -14,6 +14,7 @@ import {
 } from "../../features/terminal/terminal-utils.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { DEFAULT_APP_ROUTE } from "../../lib/app-navigation.tsx";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import { fetchJsonOr } from "../../lib/fetch-json.ts";
 import { formatBytes } from "../../lib/format.ts";
 import { setInputValue } from "../../lib/react-events.ts";
@@ -39,6 +40,23 @@ function selectedFiles(
 	selectedPaths: Set<string>
 ): FileEntry[] {
 	return files.filter((file) => selectedPaths.has(file.path));
+}
+
+function areImageFilesEqual(prev: FileEntry[], next: FileEntry[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.name !== b.name ||
+			a.path !== b.path ||
+			a.timestamp !== b.timestamp ||
+			a.size !== b.size
+		) {
+			return false;
+		}
+	}
+	return true;
 }
 
 function buildFileChatMessage(files: FileEntry[]) {
@@ -77,7 +95,9 @@ export function ImagesPage() {
 		data: files,
 		setData: setFiles,
 		loading,
-	} = useAsyncResource<FileEntry[]>(fetchImageFiles, []);
+	} = useAsyncResource<FileEntry[]>(fetchImageFiles, [], {
+		isEqual: areImageFilesEqual,
+	});
 	const [query, setQuery] = useState("");
 	const [selectedPaths, setSelectedPaths] = useState<Set<string>>(
 		() => new Set()
@@ -139,7 +159,7 @@ export function ImagesPage() {
 
 		const { fullText } = buildFileChatMessage(selected);
 		savePendingSend(paneId, fullText);
-		writeStoredValue("terminal-main-view", "chat");
+		writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, "chat");
 		dispatchTerminalShellChange({ source: "view", reason: "image-start-chat" });
 		navigate(DEFAULT_APP_ROUTE);
 	}, [navigate, selected]);

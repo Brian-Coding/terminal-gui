@@ -32,7 +32,7 @@ import {
 	getCachedGithubRepos,
 	invalidateGithubReposCache,
 } from "../../features/forge/forge-client.ts";
-import type { GithubRepo } from "../../features/forge/types.ts";
+import type { ForgeAccount, GithubRepo } from "../../features/forge/types.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { ONBOARDING_DONE_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
@@ -91,11 +91,17 @@ function profileUiReducer(
 	action: ProfileUiAction
 ): ProfileUiState {
 	switch (action.type) {
-		case "fieldChanged":
+		case "fieldChanged": {
+			const nextValue = resolveStateValue(
+				state[action.field],
+				action.value
+			) as ProfileUiState[typeof action.field];
+			if (Object.is(state[action.field], nextValue)) return state;
 			return {
 				...state,
-				[action.field]: resolveStateValue(state[action.field], action.value),
+				[action.field]: nextValue,
 			};
+		}
 	}
 }
 
@@ -104,6 +110,77 @@ async function fetchSimulatorProjectFolders(): Promise<string[]> {
 	if (!response.ok) throw new Error(await response.text());
 	const payload = (await response.json()) as { folders?: string[] };
 	return Array.isArray(payload.folders) ? payload.folders : [];
+}
+
+function areStringArraysEqual(prev: string[], next: string[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		if (prev[i] !== next[i]) return false;
+	}
+	return true;
+}
+
+function areForgeAccountsEqual(prev: ForgeAccount[], next: ForgeAccount[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.provider !== b.provider ||
+			a.host !== b.host ||
+			a.login !== b.login ||
+			a.name !== b.name ||
+			a.avatarUrl !== b.avatarUrl ||
+			a.email !== b.email ||
+			a.active !== b.active
+		)
+			return false;
+	}
+	return true;
+}
+
+function areGithubReposEqual(prev: GithubRepo[], next: GithubRepo[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.name !== b.name ||
+			a.full_name !== b.full_name ||
+			a.description !== b.description ||
+			a.html_url !== b.html_url ||
+			a.language !== b.language ||
+			a.stargazers_count !== b.stargazers_count ||
+			a.updated_at !== b.updated_at ||
+			a.private !== b.private
+		)
+			return false;
+	}
+	return true;
+}
+
+function areAgentAccountStatusesEqual(
+	prev: AgentAccountProviderStatus[],
+	next: AgentAccountProviderStatus[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.kind !== b.kind ||
+			a.label !== b.label ||
+			a.installed !== b.installed ||
+			a.binaryPath !== b.binaryPath ||
+			a.version !== b.version ||
+			a.health !== b.health ||
+			a.summary !== b.summary ||
+			!areStringArraysEqual(a.authConfigPaths, b.authConfigPaths) ||
+			!areStringArraysEqual(a.usageSignals, b.usageSignals)
+		)
+			return false;
+	}
+	return true;
 }
 
 export function ProfilePage() {
@@ -117,7 +194,9 @@ export function ProfilePage() {
 		data: accounts,
 		loading: accountsLoading,
 		error: accountsError,
-	} = useAsyncResource(fetchForgeAccounts, initialAccounts);
+	} = useAsyncResource(fetchForgeAccounts, initialAccounts, {
+		isEqual: areForgeAccountsEqual,
+	});
 	const loadState: LoadState = accountsLoading
 		? "loading"
 		: accountsError
@@ -129,7 +208,9 @@ export function ProfilePage() {
 		data: simProjectFolders,
 		setData: setSimProjectFolders,
 		error: simProjectFoldersError,
-	} = useAsyncResource(fetchSimulatorProjectFolders, []);
+	} = useAsyncResource(fetchSimulatorProjectFolders, [], {
+		isEqual: areStringArraysEqual,
+	});
 	const fetchRepos = useCallback(
 		async () => (accounts.length > 0 ? fetchGithubRepos() : []),
 		[accounts.length]
@@ -139,7 +220,9 @@ export function ProfilePage() {
 		loading: reposLoading,
 		error: reposError,
 		refresh: refreshRepos,
-	} = useAsyncResource(fetchRepos, getCachedGithubRepos());
+	} = useAsyncResource(fetchRepos, getCachedGithubRepos(), {
+		isEqual: areGithubReposEqual,
+	});
 	const fetchAgentAccountStatuses = useCallback(
 		async () =>
 			fetchJsonOr<{ providers?: AgentAccountProviderStatus[] }>(
@@ -155,7 +238,9 @@ export function ProfilePage() {
 		loading: agentAccountStatusesLoading,
 		error: agentAccountStatusesError,
 		refresh: refreshAgentAccountStatuses,
-	} = useAsyncResource(fetchAgentAccountStatuses, []);
+	} = useAsyncResource(fetchAgentAccountStatuses, [], {
+		isEqual: areAgentAccountStatusesEqual,
+	});
 	const [profileUiState, profileUiDispatch] = useReducer(
 		profileUiReducer,
 		initialProfileUiState

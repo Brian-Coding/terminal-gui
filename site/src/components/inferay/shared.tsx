@@ -166,7 +166,7 @@ export function Minimap() {
 						key={i}
 						className="h-[3px] my-[1px] mx-2 rounded-full"
 						style={{
-							width: `${30 + Math.random() * 50}%`,
+							width: `${30 + ((i * 17) % 50)}%`,
 							backgroundColor:
 								i === 16 || i === 17 || i === 18 || i === 19
 									? "rgba(46,160,67,0.3)"

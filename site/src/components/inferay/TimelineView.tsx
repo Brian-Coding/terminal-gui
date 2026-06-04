@@ -1,12 +1,13 @@
-import React, { useState } from "react";
-import { Icons } from "./Icons";
+import { useState } from "react";
 import { chatThreads } from "./data";
+import { Icons } from "./Icons";
 
 // Timeline View - Per-chat session history
 export function TimelineView() {
 	const [selectedChatId, setSelectedChatId] = useState(1);
 	const selectedChat =
 		chatThreads.find((c) => c.id === selectedChatId) || chatThreads[0];
+	if (!selectedChat) return null;
 
 	// Build timeline from chat messages
 	const buildTimeline = () => {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Icons } from "./Icons";
 
 type Repository = {
@@ -255,7 +255,7 @@ function RepoDetail({ repo }: { repo: Repository }) {
 
 export function Repositories() {
 	const [selectedRepo, setSelectedRepo] = useState<Repository | null>(
-		repositories[0]
+		repositories[0] ?? null
 	);
 
 	return (

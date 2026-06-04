@@ -137,21 +137,36 @@ function automationsReducer(
 ): AutomationsState {
 	switch (action.type) {
 		case "flowSelected":
+			if (
+				state.selectedFlowId === action.flowId &&
+				state.selectedNodeId === action.nodeId
+			)
+				return state;
 			return {
 				...state,
 				selectedFlowId: action.flowId,
 				selectedNodeId: action.nodeId,
 			};
 		case "nodeSelected":
-			return { ...state, selectedNodeId: action.nodeId };
+			return state.selectedNodeId === action.nodeId
+				? state
+				: { ...state, selectedNodeId: action.nodeId };
 		case "showGridChanged":
-			return { ...state, showGrid: action.value };
+			return state.showGrid === action.value
+				? state
+				: { ...state, showGrid: action.value };
 		case "showAddMenuChanged":
-			return { ...state, showAddMenu: action.value };
+			return state.showAddMenu === action.value
+				? state
+				: { ...state, showAddMenu: action.value };
 		case "dragStateChanged":
-			return { ...state, dragState: action.value };
+			return state.dragState === action.value
+				? state
+				: { ...state, dragState: action.value };
 		case "runStateChanged":
-			return { ...state, runState: action.value };
+			return state.runState === action.value
+				? state
+				: { ...state, runState: action.value };
 	}
 }
 
@@ -302,6 +317,82 @@ function getNodeConfig(kind: unknown): NodeKindConfig {
 
 const defaultFlows: AutomationFlow[] = [createSampleFlow()];
 
+function areAutomationStringArraysEqual(prev: string[], next: string[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		if (prev[i] !== next[i]) return false;
+	}
+	return true;
+}
+
+function areAutomationNodesEqual(
+	prev: AutomationNode[],
+	next: AutomationNode[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.id !== b.id ||
+			a.kind !== b.kind ||
+			a.title !== b.title ||
+			a.description !== b.description ||
+			a.x !== b.x ||
+			a.y !== b.y ||
+			a.file !== b.file ||
+			a.body !== b.body ||
+			a.output !== b.output ||
+			!areAutomationStringArraysEqual(
+				a.contextPaths ?? [],
+				b.contextPaths ?? []
+			)
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
+function areAutomationEdgesEqual(
+	prev: Array<[string, string]>,
+	next: Array<[string, string]>
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (a[0] !== b[0] || a[1] !== b[1]) return false;
+	}
+	return true;
+}
+
+function areAutomationFlowsEqual(
+	prev: AutomationFlow[],
+	next: AutomationFlow[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.id !== b.id ||
+			a.name !== b.name ||
+			a.description !== b.description ||
+			a.schedule !== b.schedule ||
+			a.nextRun !== b.nextRun ||
+			a.status !== b.status ||
+			a.primaryPath !== b.primaryPath ||
+			!areAutomationStringArraysEqual(a.referencePaths, b.referencePaths) ||
+			!areAutomationNodesEqual(a.nodes, b.nodes) ||
+			!areAutomationEdgesEqual(a.edges, b.edges)
+		) {
+			return false;
+		}
+	}
+	return true;
+}
+
 function createSampleFlow(): AutomationFlow {
 	const id = "research-summarizer";
 	return {
@@ -435,7 +526,8 @@ export function AutomationsPage() {
 	}, []);
 	const { data: flows, setData: setFlows } = useAsyncResource(
 		fetchAutomationFlows,
-		defaultFlows
+		defaultFlows,
+		{ isEqual: areAutomationFlowsEqual }
 	);
 	const [automationsState, automationsDispatch] = useReducer(
 		automationsReducer,
@@ -498,6 +590,7 @@ export function AutomationsPage() {
 
 	const persistFlows = useCallback(
 		(nextFlows: AutomationFlow[]) => {
+			if (areAutomationFlowsEqual(flowsRef.current, nextFlows)) return;
 			setFlows(nextFlows);
 			flowsRef.current = nextFlows;
 			if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
@@ -514,6 +607,7 @@ export function AutomationsPage() {
 
 	const persistFlowsNow = useCallback(
 		async (nextFlows: AutomationFlow[]) => {
+			if (areAutomationFlowsEqual(flowsRef.current, nextFlows)) return;
 			setFlows(nextFlows);
 			flowsRef.current = nextFlows;
 			if (persistTimerRef.current) clearTimeout(persistTimerRef.current);

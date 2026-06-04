@@ -17,6 +17,7 @@ import {
 	IconX,
 } from "../../components/ui/Icons.tsx";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import { resolveServerUrl } from "../../lib/server-origin.ts";
 import { writeStoredValue } from "../../lib/stored-json.ts";
 import {
@@ -76,28 +77,87 @@ function onboardingReducer(
 ): OnboardingState {
 	switch (action.type) {
 		case "stepChanged":
-			return { ...state, step: action.value };
-		case "connectingChanged":
+			return state.step === action.value
+				? state
+				: { ...state, step: action.value };
+		case "connectingChanged": {
+			const connecting = resolveStateValue(state.connecting, action.value);
+			if (state.connecting === connecting) return state;
 			return {
 				...state,
-				connecting: resolveStateValue(state.connecting, action.value),
+				connecting,
 			};
-		case "localFoldersChanged":
+		}
+		case "localFoldersChanged": {
+			const localFolders = resolveStateValue(state.localFolders, action.value);
+			if (state.localFolders === localFolders) return state;
 			return {
 				...state,
-				localFolders: resolveStateValue(state.localFolders, action.value),
+				localFolders,
 			};
-		case "isAddingFolderChanged":
+		}
+		case "isAddingFolderChanged": {
+			const isAddingFolder = resolveStateValue(
+				state.isAddingFolder,
+				action.value
+			);
+			if (state.isAddingFolder === isAddingFolder) return state;
 			return {
 				...state,
-				isAddingFolder: resolveStateValue(state.isAddingFolder, action.value),
+				isAddingFolder,
 			};
-		case "selectedReposChanged":
+		}
+		case "selectedReposChanged": {
+			const selectedRepos = resolveStateValue(
+				state.selectedRepos,
+				action.value
+			);
+			if (state.selectedRepos === selectedRepos) return state;
 			return {
 				...state,
-				selectedRepos: resolveStateValue(state.selectedRepos, action.value),
+				selectedRepos,
 			};
+		}
 	}
+}
+
+function areForgeAccountsEqual(prev: ForgeAccount[], next: ForgeAccount[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.provider !== b.provider ||
+			a.host !== b.host ||
+			a.login !== b.login ||
+			a.name !== b.name ||
+			a.avatarUrl !== b.avatarUrl ||
+			a.email !== b.email ||
+			a.active !== b.active
+		)
+			return false;
+	}
+	return true;
+}
+
+function areGithubReposEqual(prev: GithubRepo[], next: GithubRepo[]) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.name !== b.name ||
+			a.full_name !== b.full_name ||
+			a.description !== b.description ||
+			a.html_url !== b.html_url ||
+			a.language !== b.language ||
+			a.stargazers_count !== b.stargazers_count ||
+			a.updated_at !== b.updated_at ||
+			a.private !== b.private
+		)
+			return false;
+	}
+	return true;
 }
 
 const EASING = "cubic-bezier(.22,.82,.2,1)";
@@ -156,7 +216,9 @@ export function OnboardingPage() {
 		data: accounts,
 		setData: setAccounts,
 		loading: accountsLoading,
-	} = useAsyncResource(fetchForgeAccounts, []);
+	} = useAsyncResource(fetchForgeAccounts, [], {
+		isEqual: areForgeAccountsEqual,
+	});
 	const fetchRepos = useCallback(
 		async () => (accounts.length > 0 ? fetchGithubRepos() : []),
 		[accounts.length]
@@ -165,7 +227,9 @@ export function OnboardingPage() {
 		data: repos,
 		loading: reposLoading,
 		refresh: refreshRepos,
-	} = useAsyncResource(fetchRepos, []);
+	} = useAsyncResource(fetchRepos, [], {
+		isEqual: areGithubReposEqual,
+	});
 	const refreshAccounts = async () => {
 		invalidateForgeAccountsCache();
 		setAccounts(await fetchForgeAccounts(true));
@@ -226,7 +290,7 @@ export function OnboardingPage() {
 		writeStoredValue(ONBOARDING_DONE_KEY, "true");
 		// Default to grid layout
 		writeStoredValue("terminal-layout-mode", "grid");
-		writeStoredValue("terminal-main-view", "chat");
+		writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, "chat");
 		// New users land directly in the multi-agent chat grid.
 		if (!(await loadCanonicalTerminalState())) {
 			saveSyncedTerminalState(
