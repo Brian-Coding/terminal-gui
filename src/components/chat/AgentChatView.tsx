@@ -625,13 +625,8 @@ export const AgentChatView = memo(
 		);
 		const gitBranch = providedGitBranch ?? gitProjects[0]?.branch ?? null;
 
-		const {
-			chatUiState,
-			chatUiStateRef,
-			setChatUiState,
-			setExpandedTools,
-			setLoadingState,
-		} = useChatUiState(paneId, onStatusChange);
+		const { chatUiState, setChatUiState, setExpandedTools, setLoadingState } =
+			useChatUiState(paneId, onStatusChange);
 		const { isLoading, status, startTime, expandedTools, liveActivities } =
 			chatUiState;
 		const inputContainerRef = useRef<HTMLDivElement>(null);
@@ -652,6 +647,7 @@ export const AgentChatView = memo(
 			queuedMessages,
 			queueMessage,
 			shiftQueuedMessage,
+			replaceQueuedMessages,
 			removeQueuedMessage,
 			updateQueuedMessage,
 			editingQueueId,
@@ -694,64 +690,60 @@ export const AgentChatView = memo(
 			inputContainerRef,
 			containerRef,
 		});
-		const sendNextQueuedMessageRef = useRef<() => void>(() => {});
 		const {
 			checkpoints,
 			clearCheckpoints,
 			resetStreamState,
 			revertCheckpoint,
 		} = useChatConnection({
-			chatUiStateRef,
 			enabled: renderVisibleChat,
 			messagesRef,
 			paneId,
+			replaceQueuedMessages,
 			saveMessagesNow,
-			sendNextQueuedMessage: () => sendNextQueuedMessageRef.current(),
 			setChatUiState,
 			setLoadingState,
 			setMessages,
 		});
-		const { handleKeyDown, sendNextQueuedMessage, sendUserMessage } =
-			useChatInputActions({
-				agentKind,
-				allCommands,
-				attachedImages,
-				cancelSpeechListening,
-				clearAttachedImages,
-				clearCheckpoints,
-				composerOnly,
-				consumePendingWorkspace,
-				cwd,
-				effectiveSelectedModel,
-				enabled: renderVisibleChat,
-				fileMenu,
-				fileResults,
-				filteredCommands,
-				incrementUsage,
-				input,
-				isLoading,
-				onSendStart: () => {
-					resetStreamState();
-					scheduleScrollToBottom("auto");
-				},
-				onExitComposerOnly,
-				paneId,
-				queueMessage,
-				referencePaths,
-				selectCommand,
-				selectFile,
-				selectedReasoningLevel,
-				setFileMenu,
-				setInput,
-				setLoadingState,
-				setMessages,
-				setSlashMenu,
-				showCommands,
-				slashMenu,
-				shiftQueuedMessage,
-				textareaRef,
-			});
-		sendNextQueuedMessageRef.current = sendNextQueuedMessage;
+		const { handleKeyDown, sendUserMessage } = useChatInputActions({
+			agentKind,
+			allCommands,
+			attachedImages,
+			cancelSpeechListening,
+			clearAttachedImages,
+			clearCheckpoints,
+			composerOnly,
+			consumePendingWorkspace,
+			cwd,
+			effectiveSelectedModel,
+			enabled: renderVisibleChat,
+			fileMenu,
+			fileResults,
+			filteredCommands,
+			incrementUsage,
+			input,
+			isLoading,
+			onSendStart: () => {
+				resetStreamState();
+				scheduleScrollToBottom("auto");
+			},
+			onExitComposerOnly,
+			paneId,
+			queueMessage,
+			referencePaths,
+			selectCommand,
+			selectFile,
+			selectedReasoningLevel,
+			setFileMenu,
+			setInput,
+			setLoadingState,
+			setMessages,
+			setSlashMenu,
+			showCommands,
+			slashMenu,
+			shiftQueuedMessage,
+			textareaRef,
+		});
 		const handleSendMessage = useCallback(
 			(text: string) =>
 				sendUserMessage({ text, workspaceOverride: consumePendingWorkspace() }),

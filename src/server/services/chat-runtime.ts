@@ -36,7 +36,7 @@ const sessions: Map<string, ChatSession> = _g.__inferay_chatSessions;
 export const chatRuntime = {
 	async ensureSession(
 		paneId: string,
-		ws: ServerWebSocket<any>,
+		ws: ServerWebSocket<any> | undefined,
 		agentKind: ChatAgentKind,
 		cwd: string,
 		referencePaths: string[],
@@ -47,7 +47,7 @@ export const chatRuntime = {
 		let session = sessions.get(paneId);
 		if (session) {
 			this.clearCleanupTimer(session);
-			session.clients.add(ws);
+			if (ws) session.clients.add(ws);
 			return session;
 		}
 
@@ -60,7 +60,7 @@ export const chatRuntime = {
 			model,
 			reasoningLevel,
 			sessionId,
-			clients: new Set([ws]),
+			clients: ws ? new Set([ws]) : new Set(),
 			currentHandle: null,
 			cwd,
 			referencePaths,

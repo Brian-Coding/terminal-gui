@@ -215,6 +215,13 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 		return next;
 	}, [setQueuedMessages]);
 
+	const replaceQueuedMessages = useCallback(
+		(messages: QueuedMessageInfo[]) => {
+			setQueuedMessages(messages);
+		},
+		[setQueuedMessages]
+	);
+
 	const removeQueuedMessage = useCallback(
 		(id: string) => {
 			if (!queueRef.current.some((item) => item.id === id)) return;
@@ -336,6 +343,7 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 		queuedMessages,
 		queueMessage,
 		shiftQueuedMessage,
+		replaceQueuedMessages,
 		removeQueuedMessage,
 		updateQueuedMessage,
 		editingQueueId,

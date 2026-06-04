@@ -1,5 +1,4 @@
 import { createCollection, localStorageCollectionOptions } from "@tanstack/db";
-import { flushPendingClientStorageSync } from "../../lib/client-storage-sync.ts";
 import { hasRole, isString, noop } from "../../lib/data.ts";
 import { postJson, sendJson } from "../../lib/fetch-json.ts";
 import {
@@ -520,7 +519,6 @@ export function saveStoredQueue<T>(paneId: string, queue: T[]) {
 	else writePaneJson(QUEUE_KEY_PREFIX, paneId, queue);
 	savePreference(storageKey(QUEUE_KEY_PREFIX, paneId), queue);
 	saveLatestFileBackedQueue(paneId, queue);
-	flushPendingClientStorageSync();
 }
 
 export function clearAgentChatPaneState(paneId: string) {

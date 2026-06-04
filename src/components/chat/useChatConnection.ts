@@ -16,6 +16,7 @@ import {
 	type CheckpointInfo,
 	isChatServerMessage,
 	nextId,
+	type QueuedMessageInfo,
 	type ToolActivity,
 	trimMessages,
 } from "../../features/chat/agent-chat-shared.ts";
@@ -55,22 +56,20 @@ function cancelFrame(id: number) {
 }
 
 export function useChatConnection({
-	chatUiStateRef,
 	enabled = true,
 	messagesRef,
 	paneId,
+	replaceQueuedMessages,
 	saveMessagesNow,
-	sendNextQueuedMessage,
 	setChatUiState,
 	setLoadingState,
 	setMessages,
 }: {
-	chatUiStateRef: MutableRefObject<ChatUiState>;
 	enabled?: boolean;
 	messagesRef: MutableRefObject<ChatMessage[]>;
 	paneId: string;
+	replaceQueuedMessages: (messages: QueuedMessageInfo[]) => void;
 	saveMessagesNow: (messages: ChatMessage[]) => ChatMessage[];
-	sendNextQueuedMessage: () => void;
 	setChatUiState: Dispatch<SetStateAction<ChatUiState>>;
 	setLoadingState: (
 		value: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
@@ -85,10 +84,6 @@ export function useChatConnection({
 	const hasStreamedRef = useRef(false);
 	const pendingContentRef = useRef<Map<string, string>>(new Map());
 	const flushFrameRef = useRef<number | null>(null);
-	const sendNextQueuedMessageRef = useRef(sendNextQueuedMessage);
-	const reconnectSyncPendingRef = useRef(false);
-	const queuedDrainFrameRef = useRef<number | null>(null);
-	sendNextQueuedMessageRef.current = sendNextQueuedMessage;
 	const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>(() =>
 		loadStoredCheckpoints<CheckpointInfo>(paneId)
 	);
@@ -121,20 +116,6 @@ export function useChatConnection({
 			flushFrameRef.current = null;
 		}
 		pendingContentRef.current = new Map();
-	}, []);
-	const scheduleQueuedDrain = useCallback(() => {
-		if (queuedDrainFrameRef.current !== null) {
-			cancelFrame(queuedDrainFrameRef.current);
-		}
-		queuedDrainFrameRef.current = scheduleFrame(() => {
-			queuedDrainFrameRef.current = null;
-			sendNextQueuedMessageRef.current();
-		});
-	}, []);
-	const cancelQueuedDrain = useCallback(() => {
-		if (queuedDrainFrameRef.current === null) return;
-		cancelFrame(queuedDrainFrameRef.current);
-		queuedDrainFrameRef.current = null;
 	}, []);
 	const queueMessageContent = useCallback(
 		(targetId: string, content: string) => {
@@ -347,7 +328,6 @@ export function useChatConnection({
 				});
 				resetStreamState();
 				wsClient.send({ type: "chat:reconnect", paneId });
-				scheduleQueuedDrain();
 			} else if (msg.type === "chat:user_message") {
 				setChatUiState(clearLiveActivities);
 				setLoadingState((prev) => ({
@@ -360,7 +340,6 @@ export function useChatConnection({
 				flushPendingContent();
 				setMessages((prev) => appendSystemMessage(prev, msg.error));
 				setLoadingState({ isLoading: false, status: "error", startTime: null });
-				sendNextQueuedMessageRef.current();
 			} else if (msg.type === "chat:system") {
 				setMessages((prev) => appendSystemMessage(prev, msg.message));
 			} else if (msg.type === "chat:status") {
@@ -406,7 +385,6 @@ export function useChatConnection({
 					saveMessagesNow(serverMessages);
 				}
 				if (msg.isStreaming) {
-					reconnectSyncPendingRef.current = false;
 					setLoadingState((prev) => ({
 						isLoading: true,
 						status: "responding",
@@ -423,9 +401,6 @@ export function useChatConnection({
 					);
 					if (lastTool) currentToolRef.current = lastTool.id;
 				} else {
-					const wasLoading = chatUiStateRef.current.isLoading;
-					const shouldDrainReconnectQueue = reconnectSyncPendingRef.current;
-					reconnectSyncPendingRef.current = false;
 					setLoadingState({
 						isLoading: false,
 						status: "idle",
@@ -433,8 +408,9 @@ export function useChatConnection({
 					});
 					setChatUiState(clearLiveActivities);
 					resetStreamState();
-					if (wasLoading && shouldDrainReconnectQueue) scheduleQueuedDrain();
 				}
+			} else if (msg.type === "chat:queue" && Array.isArray(msg.queue)) {
+				replaceQueuedMessages(msg.queue);
 			} else if (msg.type === "chat:btw:start") {
 				const id = nextId();
 				currentBtwRef.current = id;
@@ -513,29 +489,25 @@ export function useChatConnection({
 			}
 		});
 		const reconnectChat = () => {
-			reconnectSyncPendingRef.current = true;
 			wsClient.send({ type: "chat:reconnect", paneId });
 		};
 		reconnectChat();
 		const cleanupReconnect = wsClient.onReconnect(reconnectChat);
 		return () => {
 			clearPendingContent();
-			cancelQueuedDrain();
 			cleanupReconnect();
 			cleanup();
 		};
 	}, [
-		cancelQueuedDrain,
-		chatUiStateRef,
 		clearPendingContent,
 		enabled,
 		messagesRef,
 		paneId,
 		flushPendingContent,
 		queueMessageContent,
+		replaceQueuedMessages,
 		resetStreamState,
 		saveMessagesNow,
-		scheduleQueuedDrain,
 		setChatUiState,
 		setLoadingState,
 		setMessages,

@@ -1,6 +1,9 @@
 import type { ServerWebSocket } from "bun";
 import type { ChatAgentKind } from "../../features/agents/agents.ts";
-import type { ChatServerMessage } from "../../features/chat/agent-chat-shared.ts";
+import type {
+	ChatServerMessage,
+	QueuedMessageInfo,
+} from "../../features/chat/agent-chat-shared.ts";
 import { isChatStreamEvent } from "../../features/chat/agent-chat-shared.ts";
 import {
 	createAgentEnv,
@@ -24,6 +27,11 @@ import {
 	parseGoalCommand,
 	stripGoalMarkers,
 } from "./chat-goals.ts";
+import {
+	deleteChatQueue,
+	loadChatQueue,
+	saveChatQueue,
+} from "./chat-queues.ts";
 import { type ChatSession, chatRuntime } from "./chat-runtime.ts";
 import { readChatTranscript } from "./chat-transcripts.ts";
 import { CheckpointService } from "./checkpoint.ts";
@@ -47,11 +55,30 @@ type SendChatMessageInput = {
 	paneId: string;
 	reasoningLevel?: string;
 	referencePaths?: string[];
+	displayText?: string;
 	text: string;
-	ws: ServerWebSocket<any>;
+	ws?: ServerWebSocket<any>;
 };
 
 type EmitChatMessage = (message: ChatServerMessage) => void;
+
+function isQueuedMessageInfo(value: unknown): value is QueuedMessageInfo {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as {
+		id?: unknown;
+		text?: unknown;
+		displayText?: unknown;
+		images?: unknown;
+	};
+	return (
+		typeof candidate.id === "string" &&
+		typeof candidate.text === "string" &&
+		typeof candidate.displayText === "string" &&
+		(candidate.images === undefined ||
+			(Array.isArray(candidate.images) &&
+				candidate.images.every((image) => typeof image === "string")))
+	);
+}
 
 function normalizeChatReferencePaths(paths?: string[]): string[] {
 	if (!Array.isArray(paths)) return [];
@@ -337,6 +364,35 @@ function sendChatStatus(
 	chatRuntime.send(target, { type: "chat:status", paneId, status, isLoading });
 }
 
+async function saveAndBroadcastQueue(
+	session: ChatSession,
+	paneId: string,
+	queue: QueuedMessageInfo[]
+) {
+	if (queue.length === 0) await deleteChatQueue(paneId);
+	else await saveChatQueue(paneId, queue);
+	chatRuntime.send(session, { type: "chat:queue", paneId, queue });
+}
+
+async function drainNextQueuedMessage(session: ChatSession, paneId: string) {
+	if (session.currentHandle) return;
+	const queue = (await loadChatQueue(paneId)).filter(isQueuedMessageInfo);
+	const [next, ...rest] = queue;
+	if (!next) return;
+	await saveAndBroadcastQueue(session, paneId, rest);
+	void ChatService.sendMessage({
+		agentKind: session.agentKind,
+		clientSessionId: session.sessionId,
+		cwd: session.cwd,
+		model: session.model,
+		paneId,
+		reasoningLevel: session.reasoningLevel,
+		referencePaths: session.referencePaths,
+		displayText: next.displayText,
+		text: next.text,
+	});
+}
+
 function createSystemPrefix(
 	session: ChatSession,
 	includeWorkspace: boolean,
@@ -431,14 +487,16 @@ export const ChatService = {
 		paneId,
 		reasoningLevel,
 		referencePaths,
+		displayText,
 		text,
 		ws,
 	}: SendChatMessageInput) {
 		const nextReferencePaths = normalizeChatReferencePaths(referencePaths);
 		const nextCwd = normalizeChatCwd(cwd);
+		const existingSession = chatRuntime.getSession(paneId);
 		const session = await chatRuntime.ensureSession(
 			paneId,
-			ws,
+			ws ?? Array.from(existingSession?.clients ?? [])[0],
 			agentKind,
 			nextCwd,
 			nextReferencePaths,
@@ -454,7 +512,7 @@ export const ChatService = {
 		session.agentKind = agentKind;
 		session.model = resolveAgentModel(agentKind, model);
 		if (reasoningLevel !== undefined) session.reasoningLevel = reasoningLevel;
-		session.clients.add(ws);
+		if (ws) session.clients.add(ws);
 		if (cwd) session.cwd = nextCwd;
 		if (referencePaths) session.referencePaths = nextReferencePaths;
 		if (!session.sessionId && clientSessionId)
@@ -465,7 +523,7 @@ export const ChatService = {
 			agentKindChanged
 		);
 
-		session.messageBuffer.pushUser(text);
+		session.messageBuffer.pushUser(displayText || text);
 		chatRuntime.persistTranscript(session, paneId);
 		chatRuntime.send(
 			session,
@@ -478,11 +536,13 @@ export const ChatService = {
 		);
 
 		if (session.currentHandle) {
-			chatRuntime.send(ws, {
-				type: "chat:error",
-				paneId,
-				error: `${getAgentAdapter(session.agentKind).displayName} is still responding`,
-			});
+			if (ws) {
+				chatRuntime.send(ws, {
+					type: "chat:error",
+					paneId,
+					error: `${getAgentAdapter(session.agentKind).displayName} is still responding`,
+				});
+			}
 			return;
 		}
 		session.cancelled = false;
@@ -555,6 +615,7 @@ export const ChatService = {
 			);
 			ensureVisibleTurnCompletion(session, paneId, changedFileCount, emit);
 			chatRuntime.finalizeTurn(session);
+			await drainNextQueuedMessage(session, paneId);
 		} catch (e) {
 			session.currentHandle = null;
 			const errMsg =
@@ -569,6 +630,7 @@ export const ChatService = {
 			});
 			await finalizeChatCheckpoint(session, paneId, checkpointId, emit);
 			chatRuntime.scheduleCleanup(session);
+			await drainNextQueuedMessage(session, paneId);
 		}
 	},
 
