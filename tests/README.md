@@ -6,9 +6,9 @@ This repository had no `tests/` directory before this audit, so no executable in
 
 - `security-and-git-input.test.ts`
   - Protects local path normalization and traversal rejection in `src/server/security.ts`.
-  - Protects Git route query normalization in `src/server/routes/git-route-input.ts`, including cwd/file/staged parsing, hash validation, and limit clamping.
+  - Protects Git route query normalization in `src/server/routes/git.ts`, including cwd/file/staged parsing, hash validation, and limit clamping.
 - `prompts-and-config.test.ts`
-  - Protects prompt merge priority in `src/server/routes/prompts.ts`, especially bundled built-ins retaining local usage stats by id or command.
+  - Protects prompt merge priority in `src/server/routes/api.ts`, especially bundled built-ins retaining local usage stats by id or command.
   - Protects config merge semantics in `src/server/services/config-manager.ts`, where nested records merge and arrays/primitives replace.
 - `release-asset-selection.test.ts`
   - Protects release API URL mapping and GitHub asset selection in `packages/inferay/src/releases.js`.
@@ -44,23 +44,23 @@ This repository had no `tests/` directory before this audit, so no executable in
 
 High:
 
-- Prompt merge priority in `src/server/routes/prompts.ts`: covered. Protects user usage stats and built-in/custom conflict behavior.
-- Local path and Git input normalization in `src/server/security.ts` and `src/server/routes/git-route-input.ts`: covered. Protects filesystem and shell-adjacent boundaries.
+- Prompt merge priority in `src/server/routes/api.ts`: covered. Protects user usage stats and built-in/custom conflict behavior.
+- Local path and Git input normalization in `src/server/security.ts` and `src/server/routes/git.ts`: covered. Protects filesystem and shell-adjacent boundaries.
 - Config merge semantics in `src/server/services/config-manager.ts`: covered. Protects local config sync from silently dropping nested provider keys.
 - Release asset mapping in `packages/inferay/src/releases.js`: covered. Protects deploy/install workflows from selecting the wrong artifact.
 - Chat command/message behavior in `src/features/chat` and `src/components/chat`: covered. Protects prompt expansion, streaming updates, reconnect merge behavior, and history limits.
-- Agent stream tool input parity in `src/features/chat/chat-stream-events.ts`: covered. Protects Codex inline diff rendering when complete tool input arrives in the start event.
+- Agent stream tool input parity in `src/features/chat/agent-chat-shared.ts`: covered. Protects Codex inline diff rendering when complete tool input arrives in the start event.
 - Inline edit diff rendering helpers in `src/components/chat/chat-edit-diff-utils.ts` and `src/components/chat/chat-message-render-utils.ts`: covered. Protects fake Claude and Codex edit streams from producing empty edit cards.
-- Terminal and Git data behavior in `src/features/terminal/terminal-utils.ts` and `src/lib/git-file-utils.ts`: covered. Protects restored panes, status mapping, and change review ordering.
-- Client-storage sync normalization in `src/server/routes/client-storage.ts`: covered. Protects persisted local UI state from malformed renderer payloads.
-- Simulator device parsing in `src/server/services/simulator-service.ts`: covered. Protects the apps panel from dropping devices when `simctl` omits `isAvailable`.
+- Terminal and Git data behavior in `src/features/terminal/terminal-utils.ts` and `src/features/git/git-file-utils.ts`: covered. Protects restored panes, status mapping, and change review ordering.
+- Client-storage sync normalization in `src/server/routes/api.ts`: covered. Protects persisted local UI state from malformed renderer payloads.
+- Simulator device parsing in `src/server/routes/simulator.ts`: covered. Protects the apps panel from dropping devices when `simctl` omits `isAvailable`.
 
 Medium:
 
 - Config update file split in `ConfigManager.update`: useful, but needs injectable config paths or a temp-backed manager to avoid touching real app config.
 - Prompt create/update/delete write serialization: useful for partial-failure and idempotency, but needs temp-backed prompt paths or extracted store helpers.
 - `platformInfo` and existing app candidate priority in `packages/inferay/src/platform.js`: stable behavior, but current implementation reads live OS and filesystem state.
-- Automation save/load normalization in `src/server/routes/automations.ts`: cheap if extracted; current route imports app user-data paths.
+- Automation save/load normalization in `src/server/routes/api.ts`: cheap if extracted; current route imports app user-data paths.
 - Release script command planning in `scripts/release.ts`: valuable if deploy failures recur, but requires extracting shell command plans from side-effectful steps.
 
 Low/Defer:

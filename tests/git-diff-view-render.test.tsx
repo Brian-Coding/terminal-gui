@@ -180,6 +180,43 @@ describe("GitDiffView custom renderer", () => {
 			root.unmount();
 		}
 	});
+
+	test("keeps large split diffs windowed instead of rendering every row", async () => {
+		const { root, rootElement } = setupDom();
+		try {
+			const oldLines = Array.from({ length: 4_000 }, (_, index) => ({
+				number: index + 1,
+				content: `const oldValue${index} = ${index};`,
+				type: index % 25 === 0 ? ("remove" as const) : ("context" as const),
+			}));
+			const newLines = oldLines.map((line, index) => ({
+				number: index + 1,
+				content:
+					line.type === "remove"
+						? `const newValue${index} = ${index + 1};`
+						: line.content,
+				type: line.type === "remove" ? ("add" as const) : ("context" as const),
+			}));
+			const diff: HunkDiff = {
+				oldLines,
+				newLines,
+				isBinary: false,
+				isNew: false,
+			};
+
+			await renderDiff(root, rootElement, diff);
+
+			const renderedRows = rootElement.querySelectorAll(".diff-row").length;
+			expect(renderedRows).toBeGreaterThan(0);
+			expect(renderedRows).toBeLessThan(250);
+			expect(rootElement.textContent).toContain("const oldValue0 = 0;");
+			expect(rootElement.textContent).not.toContain(
+				"const oldValue3999 = 3999;"
+			);
+		} finally {
+			root.unmount();
+		}
+	});
 });
 
 function domWindow() {

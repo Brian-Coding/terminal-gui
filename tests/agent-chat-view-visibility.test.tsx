@@ -105,19 +105,17 @@ function setupDom() {
 			return 960;
 		},
 	});
-	dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
-		return {
-			bottom: 720,
-			height: 720,
-			left: 0,
-			right: 960,
-			top: 0,
-			width: 960,
-			x: 0,
-			y: 0,
-			toJSON: () => {},
-		};
-	};
+	dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+		bottom: 720,
+		height: 720,
+		left: 0,
+		right: 960,
+		top: 0,
+		width: 960,
+		x: 0,
+		y: 0,
+		toJSON: () => {},
+	});
 	const rootElement = dom.window.document.getElementById("root");
 	if (!rootElement) throw new Error("Missing root element");
 	return { root: createRoot(rootElement), rootElement };
@@ -127,7 +125,7 @@ function tick(ms = 20) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-test("hidden chat panes defer transcript hydration until visible", async () => {
+test("hidden chat panes do not restore legacy localStorage transcripts", async () => {
 	const previousFetch = globalThis.fetch;
 	globalThis.fetch = mock((input: RequestInfo | URL) => {
 		const url = String(input);
@@ -136,16 +134,17 @@ test("hidden chat panes defer transcript hydration until visible", async () => {
 			return Promise.resolve(Response.json({ queue: [] }));
 		}
 		return Promise.resolve(Response.json({ ok: true }));
-	}) as typeof fetch;
+	}) as unknown as typeof fetch;
 	const { root, rootElement } = setupDom();
 	try {
-		const { saveStoredMessages } =
-			await import("../src/features/chat/chat-session-store.ts");
 		const { AgentChatView } =
 			await import("../src/components/chat/AgentChatView.tsx");
-		saveStoredMessages("pane-deferred-visible-load", [
-			{ id: "m1", role: "assistant", content: "old transcript" },
-		]);
+		localStorage.setItem(
+			"inferay-chat-pane-deferred-visible-load",
+			JSON.stringify([
+				{ id: "m1", role: "assistant", content: "old transcript" },
+			])
+		);
 
 		root.render(
 			<AgentChatView
@@ -157,9 +156,12 @@ test("hidden chat panes defer transcript hydration until visible", async () => {
 			/>
 		);
 		await tick();
-		saveStoredMessages("pane-deferred-visible-load", [
-			{ id: "m1", role: "assistant", content: "new transcript" },
-		]);
+		localStorage.setItem(
+			"inferay-chat-pane-deferred-visible-load",
+			JSON.stringify([
+				{ id: "m1", role: "assistant", content: "new transcript" },
+			])
+		);
 
 		root.render(
 			<AgentChatView
@@ -172,7 +174,7 @@ test("hidden chat panes defer transcript hydration until visible", async () => {
 		);
 		await tick(50);
 
-		expect(rootElement.textContent).toContain("new transcript");
+		expect(rootElement.textContent).not.toContain("new transcript");
 		expect(rootElement.textContent).not.toContain("old transcript");
 	} finally {
 		root.unmount();

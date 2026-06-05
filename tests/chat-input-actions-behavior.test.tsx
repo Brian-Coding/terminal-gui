@@ -82,14 +82,13 @@ test("hidden chat input actions defer pending sends until visible", async () => 
 				input: "",
 				isLoading: false,
 				paneId,
-				queueMessage: () => {},
 				selectCommand: () => {},
 				selectFile: () => {},
 				selectedReasoningLevel: "medium",
 				setFileMenu: () => {},
 				setInput: () => {},
-				setLoadingState: () => {},
 				setMessages,
+				setRunStatus: () => {},
 				setSlashMenu: () => {},
 				showCommands: false,
 				slashMenu: {
@@ -98,7 +97,6 @@ test("hidden chat input actions defer pending sends until visible", async () => 
 					query: "",
 					slashIndex: -1,
 				},
-				shiftQueuedMessage: () => null,
 				textareaRef,
 			});
 			return (
@@ -129,15 +127,17 @@ test("hidden chat input actions defer pending sends until visible", async () => 
 	}
 });
 
-test("loading chat queues the live textarea value when React input is stale", async () => {
+test("loading chat sends the live textarea value to the server queue", async () => {
+	sendMock.mockClear();
 	const { root, rootElement } = setupDom();
 	const { useChatInputActions } =
 		await import("../src/components/chat/useChatInputActions.ts");
 	try {
-		let handleEnter: ((event: React.KeyboardEvent) => void) | null = null;
+		let handleEnter: (event: React.KeyboardEvent) => void = (_event) => {
+			throw new Error("handleKeyDown was not initialized");
+		};
 		function Harness() {
 			const [input, setInput] = useState("");
-			const [queued, setQueued] = useState(["first"]);
 			const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 			const { handleKeyDown } = useChatInputActions({
 				agentKind: "codex",
@@ -163,14 +163,13 @@ test("loading chat queues the live textarea value when React input is stale", as
 				input,
 				isLoading: true,
 				paneId: "pane-live-textarea-queue",
-				queueMessage: (text) => setQueued((prev) => [...prev, text]),
 				selectCommand: () => {},
 				selectFile: () => {},
 				selectedReasoningLevel: "medium",
 				setFileMenu: () => {},
 				setInput,
-				setLoadingState: () => {},
 				setMessages: () => {},
+				setRunStatus: () => {},
 				setSlashMenu: () => {},
 				showCommands: false,
 				slashMenu: {
@@ -179,7 +178,6 @@ test("loading chat queues the live textarea value when React input is stale", as
 					query: "",
 					slashIndex: -1,
 				},
-				shiftQueuedMessage: () => null,
 				textareaRef,
 			});
 			handleEnter = handleKeyDown;
@@ -188,7 +186,6 @@ test("loading chat queues the live textarea value when React input is stale", as
 					ref={textareaRef}
 					value={input}
 					onChange={(event) => setInput(event.currentTarget.value)}
-					data-queue={queued.join("|")}
 				/>
 			);
 		}
@@ -199,14 +196,21 @@ test("loading chat queues the live textarea value when React input is stale", as
 			rootElement.firstElementChild as HTMLTextAreaElement | null;
 		if (!textarea) throw new Error("Missing textarea");
 		textarea.value = "second";
-		handleEnter?.({
+		handleEnter({
 			key: "Enter",
 			preventDefault: () => {},
 			shiftKey: false,
 		} as React.KeyboardEvent);
 		await tick(20);
 
-		expect(textarea.getAttribute("data-queue")).toBe("first|second");
+		const calls = sendMock.mock.calls as unknown as Array<
+			[Record<string, unknown>]
+		>;
+		const payload = calls.at(-1)?.[0];
+		expect(payload?.type).toBe("chat:send");
+		expect(payload?.paneId).toBe("pane-live-textarea-queue");
+		expect(payload?.text).toBe("second");
+		expect(payload?.displayText).toBe("second");
 		expect(textarea.value).toBe("");
 	} finally {
 		root.unmount();

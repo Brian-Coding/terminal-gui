@@ -1,21 +1,33 @@
 import { describe, expect, test } from "bun:test";
 import {
+	appendLiveToolActivity,
+	clearCompletedChatUiState,
+} from "../src/components/chat/chat-agent-utils.ts";
+import {
 	applyInlineCompletion,
 	expandInlineCommandPrompts,
 	getCommandDisplayText,
 	getCommandPrompt,
 } from "../src/components/chat/chat-command-utils.ts";
 import {
+	appendBtwQuestionMessage,
 	appendMessageContent,
+	applyAssistantResultMessage,
+	applyPendingMessageContent,
+	createBtwQuestionMessage,
+	finishBtwMessage,
+	finishStreamingMessages,
 	mergeSyncedMessages,
 	patchMessageById,
+	windowChatMessagesForRender,
 } from "../src/components/chat/chat-state-utils.ts";
 import {
 	appendTrimmedMessage,
 	type ChatMessage,
+	prepareTranscriptForStorage,
+	type ToolActivity,
 	trimMessages,
 } from "../src/features/chat/agent-chat-shared.ts";
-import { prepareTranscriptForStorage } from "../src/server/services/chat-transcripts.ts";
 
 function message(
 	id: string,
@@ -47,6 +59,34 @@ describe("chat data behavior", () => {
 	});
 
 	/*
+	 * This protects the visible chat render window. Long sessions stay durable in
+	 * storage, but the active chat surface should render only the recent tail so
+	 * switching panes and typing do not scale with full transcript length.
+	 */
+	test("windows long chat rendering by recent rows and character budget", () => {
+		const shortMessages = Array.from({ length: 10 }, (_, index) =>
+			message(`short-${index}`, "short")
+		);
+		expect(windowChatMessagesForRender(shortMessages)).toBe(shortMessages);
+
+		const largeContentMessages = Array.from({ length: 1_000 }, (_, index) =>
+			message(`large-${index}`, `${index}:`.padEnd(2_000, "x"))
+		);
+		const largeWindow = windowChatMessagesForRender(largeContentMessages);
+		expect(largeWindow).toHaveLength(30);
+		expect(largeWindow[0]?.id).toBe("large-970");
+		expect(largeWindow.at(-1)?.id).toBe("large-999");
+
+		const tinyContentMessages = Array.from({ length: 1_000 }, (_, index) =>
+			message(`tiny-${index}`, "x")
+		);
+		const tinyWindow = windowChatMessagesForRender(tinyContentMessages);
+		expect(tinyWindow).toHaveLength(200);
+		expect(tinyWindow[0]?.id).toBe("tiny-800");
+		expect(tinyWindow.at(-1)?.id).toBe("tiny-999");
+	});
+
+	/*
 	 * This protects streamed message updates. Patching from the end updates the
 	 * latest duplicate id, append operations preserve immutable arrays, and a
 	 * missing id returns the original reference so React consumers avoid needless
@@ -72,6 +112,137 @@ describe("chat data behavior", () => {
 		expect(patchMessageById(messages, "missing", { content: "ignored" })).toBe(
 			messages
 		);
+	});
+
+	test("applies pending stream content and btw rows through chat state reducers", () => {
+		const messages: ChatMessage[] = [
+			{ id: "a1", role: "assistant", content: "hello" },
+			{ id: "t1", role: "tool", content: "{" },
+		];
+		const pending = new Map([
+			["a1", " world"],
+			["t1", '"path"}'],
+		]);
+
+		expect(applyPendingMessageContent(messages, pending)).toEqual([
+			{ id: "a1", role: "assistant", content: "hello world" },
+			{ id: "t1", role: "tool", content: '{"path"}' },
+		]);
+
+		const btw = createBtwQuestionMessage("Use the new file?");
+		expect(appendBtwQuestionMessage(messages, btw).at(-1)).toEqual(btw);
+		expect(finishBtwMessage([btw], btw.id, "yes")).toEqual([
+			{
+				...btw,
+				content: "yes",
+				isStreaming: false,
+			},
+		]);
+		expect(finishBtwMessage([btw], null, "ignored")).toEqual([btw]);
+	});
+
+	test("settles streaming assistant and tool rows by explicit stream ids", () => {
+		const messages: ChatMessage[] = [
+			{ id: "u1", role: "user", content: "prompt" },
+			{ id: "a1", role: "assistant", content: "partial", isStreaming: true },
+			{
+				id: "t1",
+				role: "tool",
+				content: '{"path"',
+				toolName: "Read",
+				isStreaming: true,
+			},
+		];
+
+		expect(
+			finishStreamingMessages(messages, { assistantId: "a1", toolId: "t1" })
+		).toEqual([
+			{ id: "u1", role: "user", content: "prompt" },
+			{ id: "a1", role: "assistant", content: "partial", isStreaming: false },
+			{
+				id: "t1",
+				role: "tool",
+				content: '{"path"',
+				toolName: "Read",
+				isStreaming: false,
+			},
+		]);
+		expect(
+			finishStreamingMessages(messages, {
+				assistantId: "missing",
+				toolId: null,
+			})
+		).toBe(messages);
+	});
+
+	test("applies final assistant result without duplicating settled output", () => {
+		const streaming: ChatMessage[] = [
+			{ id: "u1", role: "user", content: "prompt" },
+			{ id: "a1", role: "assistant", content: "partial", isStreaming: true },
+		];
+
+		expect(applyAssistantResultMessage(streaming, "a1", "final")).toEqual([
+			{ id: "u1", role: "user", content: "prompt" },
+			{ id: "a1", role: "assistant", content: "final", isStreaming: false },
+		]);
+
+		const settled: ChatMessage[] = [
+			{ id: "u1", role: "user", content: "prompt" },
+			{ id: "a1", role: "assistant", content: "final" },
+		];
+		expect(applyAssistantResultMessage(settled, null, "final")).toBe(settled);
+
+		const appended = applyAssistantResultMessage(
+			[{ id: "u1", role: "user", content: "prompt" }],
+			null,
+			"final"
+		);
+		expect(appended.at(-1)).toMatchObject({
+			role: "assistant",
+			content: "final",
+		});
+	});
+
+	test("projects live activity ui state without duplicating adjacent updates", () => {
+		const initial: {
+			expandedTools: Set<string>;
+			liveActivities: ToolActivity[];
+		} = {
+			expandedTools: new Set(["kept", "removed"]),
+			liveActivities: [],
+		};
+		const first = appendLiveToolActivity(
+			{ toolName: "Read", summary: "src/app.ts" },
+			initial
+		);
+		expect(first.liveActivities).toEqual([
+			{
+				id: "Read-0",
+				toolName: "Read",
+				summary: "src/app.ts",
+				isStreaming: true,
+			},
+		]);
+		expect(
+			appendLiveToolActivity({ toolName: "Read", summary: "src/app.ts" }, first)
+		).toBe(first);
+
+		let cappedState: {
+			expandedTools: Set<string>;
+			liveActivities: ToolActivity[];
+		} = { expandedTools: new Set(), liveActivities: [] };
+		for (let index = 0; index < 13; index++) {
+			cappedState = appendLiveToolActivity(
+				{ toolName: "Tool", summary: `step ${index}` },
+				cappedState
+			);
+		}
+		expect(cappedState.liveActivities).toHaveLength(12);
+		expect(cappedState.liveActivities[0]?.summary).toBe("step 1");
+
+		const completed = clearCompletedChatUiState(new Set(["kept"]), first);
+		expect([...completed.expandedTools]).toEqual(["kept"]);
+		expect(completed.liveActivities).toEqual([]);
 	});
 
 	/*

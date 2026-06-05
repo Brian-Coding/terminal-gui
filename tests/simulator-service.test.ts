@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseSimctlDevices } from "../src/server/services/simulator-service.ts";
+import { parseSimctlDevices } from "../src/server/routes/simulator.ts";
 
 describe("simulator service device parsing", () => {
 	/*

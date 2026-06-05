@@ -1,16 +1,24 @@
 import { expect, mock, test } from "bun:test";
 import { JSDOM } from "jsdom";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type {
+	ChatLoadingState,
 	ChatMessage,
-	ChatUiState,
+	ToolActivity,
 } from "../src/features/chat/agent-chat-shared.ts";
+
+type ChatActivityUiState = {
+	expandedTools: Set<string>;
+	liveActivities: ToolActivity[];
+};
 
 const subscribeCleanup = mock(() => {});
 const reconnectCleanup = mock(() => {});
-const subscribe = mock(() => subscribeCleanup);
-const onReconnect = mock(() => reconnectCleanup);
+const subscribe = mock(
+	(_paneId: string, _callback: (message: unknown) => void) => subscribeCleanup
+);
+const onReconnect = mock((_callback: () => void) => reconnectCleanup);
 const send = mock(() => {});
 
 mock.module("../src/lib/websocket.ts", () => ({
@@ -58,30 +66,25 @@ test("hidden chat views do not own websocket reconnects", async () => {
 		await import("../src/components/chat/useChatConnection.ts");
 
 	function Harness({ enabled }: { enabled: boolean }) {
-		const [uiState, setUiState] = useState<ChatUiState>({
+		const [, setUiState] = useState<ChatActivityUiState>({
 			expandedTools: new Set(),
-			isLoading: false,
 			liveActivities: [],
-			startTime: null,
-			status: "idle",
 		});
-		const uiStateRef = useRef(uiState);
-		const messagesRef = useRef<ChatMessage[]>([]);
-		uiStateRef.current = uiState;
+		const messageReadModel = useMemo(
+			() => ({
+				get: () => [],
+				saveNow: (messages: ChatMessage[]) => messages,
+				set: () => {},
+			}),
+			[]
+		);
 		useChatConnection({
-			chatUiStateRef: uiStateRef,
 			enabled,
-			messagesRef,
+			messageReadModel,
 			paneId: "pane-hidden",
-			saveMessagesNow: (messages) => messages,
-			sendNextQueuedMessage: () => {},
+			replaceQueuedMessages: () => {},
 			setChatUiState: setUiState,
-			setLoadingState: (value) =>
-				setUiState((prev) => ({
-					...prev,
-					...(typeof value === "function" ? value(prev) : value),
-				})),
-			setMessages: () => {},
+			setRunStatus: () => {},
 		});
 		return null;
 	}
@@ -111,33 +114,33 @@ test("hidden chat views do not own websocket reconnects", async () => {
 	}
 });
 
-test("live turn completion drains queued messages once across sync and done", async () => {
+test("live turn completion persists sync and reconnects after done", async () => {
 	subscribe.mockClear();
 	send.mockClear();
 	const { root } = setupDom();
 	const { useChatConnection } =
 		await import("../src/components/chat/useChatConnection.ts");
-	const drainQueue = mock(() => {});
-	let messagesAtDrain: ChatMessage[] = [];
 	let handleMessage: ((message: unknown) => void) | undefined;
-	subscribe.mockImplementationOnce((_paneId, cb) => {
-		handleMessage = cb as (message: unknown) => void;
+	let latestMessages: ChatMessage[] = [];
+	subscribe.mockImplementationOnce((_paneId, callback) => {
+		handleMessage = callback;
 		return subscribeCleanup;
 	});
 
 	function Harness() {
-		const [uiState, setUiState] = useState<ChatUiState>({
+		const [, setUiState] = useState<ChatActivityUiState>({
 			expandedTools: new Set(),
-			isLoading: true,
 			liveActivities: [],
+		});
+		const runStatusRef = useRef<ChatLoadingState>({
+			isLoading: true,
 			startTime: Date.now(),
 			status: "responding",
 		});
-		const uiStateRef = useRef(uiState);
 		const messagesRef = useRef<ChatMessage[]>([
 			{ id: "m1", role: "user", content: "first" },
 		]);
-		uiStateRef.current = uiState;
+		latestMessages = messagesRef.current;
 		const saveMessagesNow = useCallback(
 			(messages: ChatMessage[]) => messages,
 			[]
@@ -148,34 +151,33 @@ test("live turn completion drains queued messages once across sync and done", as
 			) => {
 				messagesRef.current =
 					typeof update === "function" ? update(messagesRef.current) : update;
+				latestMessages = messagesRef.current;
 			},
 			[]
 		);
-		const setLoadingState = useCallback(
+		const messageReadModel = useMemo(
+			() => ({
+				get: () => messagesRef.current,
+				saveNow: saveMessagesNow,
+				set: setMessages,
+			}),
+			[saveMessagesNow, setMessages]
+		);
+		const setRunStatus = useCallback(
 			(
-				value:
-					| Partial<ChatUiState>
-					| ((prev: ChatUiState) => Partial<ChatUiState>)
+				value: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
 			) =>
-				setUiState((prev) => ({
-					...prev,
-					...(typeof value === "function" ? value(prev) : value),
-				})),
+				(runStatusRef.current =
+					typeof value === "function" ? value(runStatusRef.current) : value),
 			[]
 		);
 		useChatConnection({
-			chatUiStateRef: uiStateRef,
 			enabled: true,
-			messagesRef,
+			messageReadModel,
 			paneId: "pane-drain-once",
-			saveMessagesNow,
-			sendNextQueuedMessage: () => {
-				messagesAtDrain = messagesRef.current;
-				drainQueue();
-			},
+			replaceQueuedMessages: () => {},
 			setChatUiState: setUiState,
-			setLoadingState,
-			setMessages,
+			setRunStatus,
 		});
 		return null;
 	}
@@ -190,7 +192,6 @@ test("live turn completion drains queued messages once across sync and done", as
 			isStreaming: true,
 		});
 		await tick();
-		drainQueue.mockClear();
 
 		handleMessage?.({
 			type: "chat:sync",
@@ -204,11 +205,14 @@ test("live turn completion drains queued messages once across sync and done", as
 		handleMessage?.({ type: "chat:done", paneId: "pane-drain-once" });
 		await tick();
 
-		expect(drainQueue).toHaveBeenCalledTimes(1);
-		expect(messagesAtDrain).toEqual([
+		expect(latestMessages).toEqual([
 			{ id: "m1", role: "user", content: "first" },
 			{ id: "m2", role: "assistant", content: "done" },
 		]);
+		expect(send).toHaveBeenCalledWith({
+			type: "chat:reconnect",
+			paneId: "pane-drain-once",
+		});
 	} finally {
 		root.unmount();
 	}

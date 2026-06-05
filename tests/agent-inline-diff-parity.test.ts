@@ -9,10 +9,10 @@ import {
 } from "../src/components/chat/chat-edit-diff-utils.ts";
 import {
 	buildRenderItems,
-	getEditFilePath,
 	type RenderChatMessage as ChatMessage,
+	getEditFilePath,
 } from "../src/components/chat/chat-message-render-utils.ts";
-import { getToolBlockInitialContent } from "../src/features/chat/chat-stream-events.ts";
+import { getToolBlockInitialContent } from "../src/features/chat/agent-chat-shared.ts";
 
 type FakeStreamEvent =
 	| {

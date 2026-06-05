@@ -1,8 +1,12 @@
 import { expect, mock, test } from "bun:test";
-import * as React from "react";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import * as React from "react";
 import { createRoot } from "react-dom/client";
-import type { PaneId } from "../src/features/terminal/terminal-utils.ts";
+import type {
+	PaneId,
+	TerminalTheme,
+} from "../src/features/terminal/terminal-utils.ts";
 
 mock.module("@stylexjs/stylex", () => ({
 	create: <T extends Record<string, unknown>>(styles: T) => styles,
@@ -16,6 +20,24 @@ const refit = mock(() => {});
 const terminalEnabledStates: boolean[] = [];
 const chatHandle = {};
 
+class MockResizeObserver {
+	constructor(private readonly callback: ResizeObserverCallback) {}
+
+	observe(target: Element) {
+		this.callback(
+			[
+				{
+					contentRect: { height: 600 } as DOMRectReadOnly,
+					target,
+				} as ResizeObserverEntry,
+			],
+			this as unknown as ResizeObserver
+		);
+	}
+
+	disconnect() {}
+}
+
 mock.module("../src/hooks/useXtermTerminal.ts", () => ({
 	useXtermTerminal: mock(({ enabled }: { enabled: boolean }) => {
 		terminalEnabledStates.push(enabled);
@@ -28,13 +50,25 @@ mock.module("../src/hooks/useXtermTerminal.ts", () => ({
 }));
 
 mock.module("../src/components/chat/AgentChatView.tsx", () => ({
-	AgentChatView: React.forwardRef(function MockAgentChatView(
-		_props: unknown,
-		ref: React.ForwardedRef<unknown>
-	) {
+	AgentChatView: function MockAgentChatView({
+		ref,
+	}: {
+		ref?: React.Ref<unknown>;
+	}) {
 		React.useImperativeHandle(ref, () => chatHandle, []);
-		return <div data-testid="agent-chat" />;
-	}),
+		return (
+			<div data-testid="agent-chat">
+				<div
+					data-testid="agent-chat-scroll"
+					style={{ overflowY: "auto", height: 100 }}
+				/>
+			</div>
+		);
+	},
+}));
+
+mock.module("../src/features/git/useGitStatus.ts", () => ({
+	useGitStatus: () => ({ projectMap: new Map() }),
 }));
 
 function setupDom() {
@@ -54,9 +88,26 @@ function setupDom() {
 		configurable: true,
 		value: dom.window.HTMLElement,
 	});
+	Object.defineProperty(globalThis, "Element", {
+		configurable: true,
+		value: dom.window.Element,
+	});
 	Object.defineProperty(globalThis, "SVGElement", {
 		configurable: true,
 		value: dom.window.SVGElement,
+	});
+	Object.defineProperty(globalThis, "ResizeObserver", {
+		configurable: true,
+		value: MockResizeObserver,
+	});
+	Object.defineProperty(globalThis, "requestAnimationFrame", {
+		configurable: true,
+		value: (callback: FrameRequestCallback) =>
+			dom.window.setTimeout(() => callback(Date.now()), 0),
+	});
+	Object.defineProperty(globalThis, "cancelAnimationFrame", {
+		configurable: true,
+		value: (handle: number) => dom.window.clearTimeout(handle),
 	});
 	const rootElement = dom.window.document.getElementById("root");
 	if (!rootElement) throw new Error("Missing root element");
@@ -66,6 +117,29 @@ function setupDom() {
 function tick() {
 	return new Promise((resolve) => setTimeout(resolve, 20));
 }
+
+function setScrollMetrics(
+	element: HTMLElement,
+	metrics: { clientHeight: number; scrollHeight: number }
+) {
+	Object.defineProperty(element, "clientHeight", {
+		configurable: true,
+		value: metrics.clientHeight,
+	});
+	Object.defineProperty(element, "scrollHeight", {
+		configurable: true,
+		value: metrics.scrollHeight,
+	});
+}
+
+const testTheme: TerminalTheme = {
+	id: "default",
+	name: "Test",
+	bg: "#000",
+	fg: "#fff",
+	cursor: "#fff",
+	separator: "#333",
+};
 
 test("terminal panes do not keep xterm live while their surface is hidden", async () => {
 	refit.mockClear();
@@ -88,7 +162,7 @@ test("terminal panes do not keep xterm live while their surface is hidden", asyn
 				pane={pane}
 				isSelected
 				isVisible={false}
-				theme={{ bg: "#000", fg: "#fff", cursor: "#fff", separator: "#333" }}
+				theme={testTheme}
 				fontSize={13}
 				fontFamily="SF Mono"
 				onSelect={() => {}}
@@ -105,7 +179,7 @@ test("terminal panes do not keep xterm live while their surface is hidden", asyn
 				pane={pane}
 				isSelected
 				isVisible
-				theme={{ bg: "#000", fg: "#fff", cursor: "#fff", separator: "#333" }}
+				theme={testTheme}
 				fontSize={13}
 				fontFamily="SF Mono"
 				onSelect={() => {}}
@@ -133,7 +207,6 @@ test("chat pane refs stay attached across parent rerenders", async () => {
 		paneType: "codex" as const,
 		cwd: "/tmp/project",
 	};
-	const theme = { bg: "#000", fg: "#fff", cursor: "#fff", separator: "#333" };
 	const chatRef = mock(() => {});
 	const noop = () => {};
 
@@ -143,7 +216,7 @@ test("chat pane refs stay attached across parent rerenders", async () => {
 				pane={pane}
 				isSelected
 				isVisible
-				theme={theme}
+				theme={testTheme}
 				fontSize={13}
 				fontFamily="SF Mono"
 				gitBranch="main"
@@ -154,14 +227,15 @@ test("chat pane refs stay attached across parent rerenders", async () => {
 		);
 		await tick();
 		expect(chatRef).toHaveBeenCalledTimes(1);
-		expect(chatRef.mock.calls[0]).toEqual(["chat-pane", chatHandle]);
+		const calls = chatRef.mock.calls as unknown as Array<[string, unknown]>;
+		expect(calls[0]).toEqual(["chat-pane", chatHandle]);
 
 		root.render(
 			<TerminalPaneView
 				pane={pane}
 				isSelected
 				isVisible
-				theme={theme}
+				theme={testTheme}
 				fontSize={13}
 				fontFamily="SF Mono"
 				gitBranch="feature"
@@ -172,6 +246,149 @@ test("chat pane refs stay attached across parent rerenders", async () => {
 		);
 		await tick();
 		expect(chatRef).toHaveBeenCalledTimes(1);
+	} finally {
+		root.unmount();
+	}
+});
+
+test("grid layout scrolls vertically when panes exceed visible rows", async () => {
+	const { root } = setupDom();
+	const { TerminalGrid } =
+		await import("../src/pages/Terminal/TerminalGrid.tsx");
+	const panes = Array.from({ length: 8 }, (_, index) => ({
+		id: `chat-pane-${index}` as PaneId,
+		title: `Codex ${index + 1}`,
+		agentKind: "codex" as const,
+		isClaude: false,
+		paneType: "codex" as const,
+		cwd: "/tmp/project",
+	}));
+	const noop = () => {};
+
+	try {
+		root.render(
+			<TerminalGrid
+				panes={panes}
+				selectedPaneId={panes[0]!.id}
+				columns={3}
+				rows={2}
+				layoutMode="grid"
+				theme={testTheme}
+				fontSize={13}
+				fontFamily="SF Mono"
+				onSelectPane={noop}
+				onClosePane={noop}
+				onDirectorySelect={noop}
+				onDirectoryCancel={noop}
+				onChatRef={noop}
+			/>
+		);
+		await tick();
+
+		expect(
+			document.querySelectorAll('[data-testid="agent-chat"]')
+		).toHaveLength(8);
+		const source = readFileSync("src/pages/Terminal/TerminalGrid.tsx", "utf8");
+		expect(source).toContain('overflowY: "auto"');
+		expect(source).toContain('overflowX: "hidden"');
+	} finally {
+		root.unmount();
+	}
+});
+
+test("grid layout owns wheel scrolling until a chat pane is clicked", async () => {
+	const { root } = setupDom();
+	const { TerminalGrid } =
+		await import("../src/pages/Terminal/TerminalGrid.tsx");
+	const panes = Array.from({ length: 8 }, (_, index) => ({
+		id: `chat-pane-${index}` as PaneId,
+		title: `Codex ${index + 1}`,
+		agentKind: "codex" as const,
+		isClaude: false,
+		paneType: "codex" as const,
+		cwd: "/tmp/project",
+	}));
+	const noop = () => {};
+
+	try {
+		root.render(
+			<TerminalGrid
+				panes={panes}
+				selectedPaneId={panes[0]!.id}
+				columns={3}
+				rows={2}
+				layoutMode="grid"
+				theme={testTheme}
+				fontSize={13}
+				fontFamily="SF Mono"
+				onSelectPane={noop}
+				onClosePane={noop}
+				onDirectorySelect={noop}
+				onDirectoryCancel={noop}
+				onChatRef={noop}
+			/>
+		);
+		await tick();
+
+		const grid = document.querySelector<HTMLElement>(
+			"[data-terminal-grid-scroll-area]"
+		);
+		const firstChat = document.querySelector<HTMLElement>(
+			'[data-testid="agent-chat"]'
+		);
+		const firstChatScroll = document.querySelector<HTMLElement>(
+			'[data-testid="agent-chat-scroll"]'
+		);
+		if (!grid || !firstChat || !firstChatScroll) {
+			throw new Error("Missing grid test elements");
+		}
+		setScrollMetrics(grid, { clientHeight: 600, scrollHeight: 1200 });
+		setScrollMetrics(firstChatScroll, { clientHeight: 100, scrollHeight: 400 });
+
+		firstChat.dispatchEvent(
+			new window.WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				deltaY: 120,
+			})
+		);
+		expect(grid.scrollTop).toBe(120);
+
+		firstChat.dispatchEvent(
+			new window.Event("pointerdown", {
+				bubbles: true,
+				cancelable: true,
+			})
+		);
+		firstChat.dispatchEvent(
+			new window.WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				deltaY: 120,
+			})
+		);
+		expect(grid.scrollTop).toBe(120);
+		expect(firstChatScroll.scrollTop).toBe(120);
+
+		firstChatScroll.scrollTop = 300;
+		firstChat.dispatchEvent(
+			new window.WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				deltaY: 120,
+			})
+		);
+		expect(grid.scrollTop).toBe(240);
+
+		firstChatScroll.scrollTop = 0;
+		firstChat.dispatchEvent(
+			new window.WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				deltaY: -120,
+			})
+		);
+		expect(grid.scrollTop).toBe(120);
 	} finally {
 		root.unmount();
 	}

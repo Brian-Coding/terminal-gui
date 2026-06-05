@@ -1,28 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import {
-	appendPaneToGroup,
-	compactTerminalState,
-	createDefaultAgentChatGroup,
-	getPaneTitle,
-	getStatusInfo,
-	migrateGroup,
-	reduceTerminalGroups,
-	reduceTerminalWorkspaceState,
-	type GroupId,
-	type PaneId,
-	type TerminalGroupModel,
-	type TerminalPaneModel,
-	type TerminalSavedState,
-} from "../src/features/terminal/terminal-utils.ts";
-import { summarizeHunkDiff } from "../src/features/git/useGitDiff.ts";
-import {
 	isUnstagedTrackedChange,
 	isUntrackedChange,
 	orderGitFiles,
 	orderProjectGitFiles,
 } from "../src/features/git/git-file-utils.ts";
+import { summarizeHunkDiff } from "../src/features/git/useGitDiff.ts";
+import {
+	appendPaneToGroup,
+	compactTerminalState,
+	createDefaultAgentChatGroup,
+	createTerminalViewSwitchHealth,
+	type GroupId,
+	getPaneTitle,
+	getPrimaryProductLoopContext,
+	getStatusInfo,
+	migrateGroup,
+	type PaneId,
+	PRIMARY_PRODUCT_LOOP,
+	reduceTerminalGroups,
+	reduceTerminalWorkspaceState,
+	type TerminalGroupModel,
+	type TerminalPaneModel,
+	type TerminalSavedState,
+} from "../src/features/terminal/terminal-utils.ts";
 import { isTerminalMainView } from "../src/lib/app-navigation.tsx";
-import { normalizeNumstatPath } from "../src/server/services/git.ts";
+import { normalizeNumstatPath } from "../src/server/routes/git.ts";
 
 const pane = (
 	id: string,
@@ -80,6 +83,81 @@ describe("terminal state and git change behavior", () => {
 		expect(group.selectedPaneId).toBe(group.panes[0]!.id);
 		expect(group.panes.every((item) => item.agentKind === "codex")).toBe(true);
 		expect(group.panes.every((item) => item.pendingCwd)).toBe(true);
+	});
+
+	test("defines the primary workspace to checkpoint or diff product loop", () => {
+		const group = createDefaultAgentChatGroup();
+		const selected = reduceTerminalWorkspaceState(
+			{
+				groups: [group],
+				selectedGroupId: group.id,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{
+				type: "directorySelected",
+				groupId: group.id,
+				paneId: group.panes[0]!.id,
+				path: "/Users/ray/Developer/inferay",
+			}
+		)!;
+		const context = getPrimaryProductLoopContext(selected);
+
+		expect(PRIMARY_PRODUCT_LOOP.map((step) => step.stage)).toEqual([
+			"workspace",
+			"pane",
+			"chatSession",
+			"checkpointOrDiff",
+		]);
+		expect(context).toEqual({
+			workspaceId: group.id,
+			paneId: group.panes[0]!.id,
+			chatSessionPaneId: group.panes[0]!.id,
+			workspacePath: "/Users/ray/Developer/inferay",
+			outcomeSurfaces: ["chat-checkpoints", "editor-git-diff"],
+		});
+	});
+
+	test("records terminal view switch product health with workspace context", () => {
+		const group = createDefaultAgentChatGroup();
+		const selected = reduceTerminalWorkspaceState(
+			{
+				groups: [group],
+				selectedGroupId: group.id,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{
+				type: "directorySelected",
+				groupId: group.id,
+				paneId: group.panes[0]!.id,
+				path: "/Users/ray/Developer/inferay",
+			}
+		)!;
+
+		expect(
+			createTerminalViewSwitchHealth({
+				context: getPrimaryProductLoopContext(selected),
+				from: "chat",
+				previousTimestamp: 100,
+				timestamp: 175,
+				to: "editor",
+			})
+		).toEqual({
+			type: "view_switch",
+			from: "chat",
+			to: "editor",
+			timestamp: 175,
+			elapsedMs: 75,
+			workspaceId: group.id,
+			paneId: group.panes[0]!.id,
+			chatSessionPaneId: group.panes[0]!.id,
+			workspacePath: "/Users/ray/Developer/inferay",
+		});
 	});
 
 	/*

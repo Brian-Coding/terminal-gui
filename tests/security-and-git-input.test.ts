@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import {
+	getDiffParams,
+	safeHash,
+	safeLimit,
+} from "../src/server/routes/git.ts";
+import {
 	isSafeRelativePath,
 	isWithinDirectory,
 	resolveAllowedChildPath,
 } from "../src/server/security.ts";
-import {
-	getDiffParams,
-	safeHash,
-	safeLimit,
-} from "../src/server/routes/git-route-input.ts";
 
 describe("local path and git route input normalization", () => {
 	/*

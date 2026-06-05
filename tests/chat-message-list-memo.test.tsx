@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 
 test("chat message list is memoized at the component boundary", async () => {
 	const source = readFileSync(
@@ -8,4 +8,5 @@ test("chat message list is memoized at the component boundary", async () => {
 	);
 
 	expect(source).toContain("export const ChatMessageList = React.memo(");
+	expect(source).toContain("getItemKey: getVirtualRowKey");
 });

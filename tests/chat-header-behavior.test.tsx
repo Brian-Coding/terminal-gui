@@ -83,7 +83,8 @@ test("branch dropdown loads branches only when opened", async () => {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
 		expect(fetchJsonOr).toHaveBeenCalledTimes(1);
-		expect(fetchJsonOr.mock.calls[0]?.[0]).toContain("/api/git/branches");
+		const calls = fetchJsonOr.mock.calls as unknown as Array<[string]>;
+		expect(calls[0]?.[0]).toContain("/api/git/branches");
 	} finally {
 		root.unmount();
 	}

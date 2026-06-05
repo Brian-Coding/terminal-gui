@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { extractToolActivities } from "../src/components/chat/chat-agent-utils.ts";
 import {
 	getToolBlockInitialContent,
 	stringifyToolInput,
-} from "../src/features/chat/chat-stream-events.ts";
-import { extractToolActivities } from "../src/components/chat/chat-agent-utils.ts";
+} from "../src/features/chat/agent-chat-shared.ts";
 
 describe("agent stream event normalization", () => {
 	/*

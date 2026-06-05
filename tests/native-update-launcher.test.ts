@@ -3,7 +3,7 @@ import { delimiter } from "node:path";
 import {
 	createInferayUpdateCommand,
 	createInferayUpdatePath,
-} from "../src/server/services/native-open.ts";
+} from "../src/server/routes/api.ts";
 
 describe("native update launcher", () => {
 	test("adds common user package manager locations to the update PATH", () => {
