@@ -1,13 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, stat } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { join, relative, resolve, sep } from "node:path";
 import { PROJECT_ROOT } from "../../lib/path-utils.ts";
 import { tryRoute } from "../../lib/route-helpers.ts";
-import {
-	isAllowedLocalPath,
-	isWithinDirectory,
-	resolveRealAllowedLocalPath,
-} from "../security.ts";
+import { isAllowedLocalPath, isWithinDirectory } from "../security.ts";
 
 const IMAGE_EXTENSIONS = new Set([
 	".png",
@@ -22,6 +18,30 @@ const IMAGE_EXTENSIONS = new Set([
 const TMP_DIR = resolve(PROJECT_ROOT, "data/.tmp");
 const MAX_TEMP_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_SERVED_FILE_BYTES = 20 * 1024 * 1024;
+
+function isAllowedInferayTempPath(pathname: string): boolean {
+	if (isWithinDirectory(pathname, TMP_DIR)) return true;
+	const marker = `${sep}Contents${sep}Resources${sep}app${sep}data${sep}.tmp`;
+	return pathname.includes(marker);
+}
+
+async function resolveServeableImagePath(
+	pathname: string
+): Promise<string | null> {
+	const resolved = resolve(pathname);
+	try {
+		const real = await realpath(resolved);
+		if (
+			isWithinDirectory(real, PROJECT_ROOT) ||
+			isAllowedInferayTempPath(real)
+		) {
+			return real;
+		}
+		return null;
+	} catch {
+		return null;
+	}
+}
 
 export function fileRoutes() {
 	return {
@@ -160,14 +180,8 @@ export function fileRoutes() {
 					return Response.json({ error: "No path provided" }, { status: 400 });
 				}
 
-				const resolvedPath = await resolveRealAllowedLocalPath(filePath);
+				const resolvedPath = await resolveServeableImagePath(filePath);
 				if (!resolvedPath) {
-					return Response.json({ error: "Access denied" }, { status: 403 });
-				}
-				if (
-					!isWithinDirectory(resolvedPath, TMP_DIR) &&
-					!isWithinDirectory(resolvedPath, PROJECT_ROOT)
-				) {
 					return Response.json({ error: "Access denied" }, { status: 403 });
 				}
 				const ext = resolvedPath

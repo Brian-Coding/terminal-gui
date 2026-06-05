@@ -56,10 +56,10 @@ import { useGitStatus } from "../../features/git/useGitStatus.ts";
 import {
 	dispatchTerminalShellChange,
 	loadTerminalState,
-	terminalStateKey,
 	type TerminalGroupModel,
 	type TerminalShellChangeDetail,
 	type ThemeId,
+	terminalStateKey,
 } from "../../features/terminal/terminal-utils.ts";
 import {
 	loadAppThemeId,
@@ -215,6 +215,7 @@ function loadZenMode() {
 }
 
 interface EditorPageProps {
+	active?: boolean;
 	groups?: TerminalGroupModel[];
 	selectedGroupId?: string | null;
 	themeId?: ThemeId;
@@ -227,6 +228,7 @@ interface EditorPageProps {
 }
 
 export function EditorPage({
+	active = true,
 	groups: liveGroups,
 	selectedGroupId: liveSelectedGroupId,
 	themeId: liveThemeId,
@@ -373,7 +375,7 @@ export function EditorPage({
 		projectMap,
 		refetch: refetchGit,
 		applyOptimistic,
-	} = useGitStatus(trackedDirs);
+	} = useGitStatus(trackedDirs, { enabled: active && trackedDirs.length > 0 });
 	const {
 		diff,
 		request,
@@ -431,10 +433,13 @@ export function EditorPage({
 		commits: graphCommits,
 		rows: graphRows,
 		loading: graphLoading,
-	} = useGitGraph(mainViewMode === "graph" ? session?.cwd : undefined, 100);
+	} = useGitGraph(
+		active && mainViewMode === "graph" ? session?.cwd : undefined,
+		100
+	);
 	const { details: commitDetails, loading: commitDetailsLoading } =
 		useCommitDetails(
-			mainViewMode === "graph" ? session?.cwd : undefined,
+			active && mainViewMode === "graph" ? session?.cwd : undefined,
 			selectedCommitHash ?? undefined
 		);
 
@@ -450,7 +455,7 @@ export function EditorPage({
 	);
 
 	const { checkPendingScroll } = useFileWatcher({
-		enabled: zenMode,
+		enabled: active && zenMode,
 		cwd: session?.cwd,
 		paneId: session?.paneId,
 		currentFile: request?.file,
@@ -525,6 +530,7 @@ export function EditorPage({
 	requestRef.current = request;
 
 	useEffect(() => {
+		if (!active) return;
 		if (!session?.cwd) {
 			clearDiff();
 			return;
@@ -556,7 +562,7 @@ export function EditorPage({
 		) {
 			loadDiff({ cwd: session.cwd, file: target.path, staged: target.staged });
 		}
-	}, [clearDiff, files, loadDiff, session, setSelectedFiles]);
+	}, [active, clearDiff, files, loadDiff, session, setSelectedFiles]);
 
 	const cycleFile = useCallback(
 		(dir: -1 | 1) => {
@@ -586,6 +592,7 @@ export function EditorPage({
 	);
 
 	useEffect(() => {
+		if (!active) return;
 		const onKey = (e: KeyboardEvent) => {
 			const target = e.target as HTMLElement;
 			const isEditable =
@@ -603,7 +610,7 @@ export function EditorPage({
 			}
 		};
 		return listenWindowEvent("keydown", onKey);
-	}, [cycleFile]);
+	}, [active, cycleFile]);
 
 	const closePane = useCallback(
 		(paneId: string) => {

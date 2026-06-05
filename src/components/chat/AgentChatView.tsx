@@ -31,6 +31,7 @@ import {
 	loadPendingWorkspacePaths,
 	loadStoredInput,
 	loadStoredMessages,
+	loadStoredMessagesAsync,
 	loadStoredModel,
 	loadStoredReasoningLevel,
 	savePendingWorkspacePaths,
@@ -87,8 +88,11 @@ export interface AgentChatHandle {
 	removeAttachedImage: (path: string) => void;
 }
 
-const MESSAGE_SAVE_INTERVAL_MS = 1000;
+const MESSAGE_SAVE_INTERVAL_MS = 2500;
 const EMPTY_CWD_LIST: string[] = [];
+const CHAT_RENDER_CHAR_WINDOW = 50_000;
+const CHAT_RENDER_MIN_MESSAGES = 30;
+const CHAT_RENDER_MAX_MESSAGES = 200;
 
 function loadDurableChatMessages(paneId: string) {
 	return dedupeChatMessagesById(
@@ -103,6 +107,27 @@ function prepareMessagesForStorage(messages: ChatMessage[]) {
 	return trimMessages(dedupeChatMessagesById(messages)).map((message) =>
 		message.isStreaming ? { ...message, isStreaming: false } : message
 	);
+}
+
+function windowChatMessagesForRender(messages: ChatMessage[]) {
+	if (messages.length <= CHAT_RENDER_MIN_MESSAGES) return messages;
+	let totalChars = 0;
+	let start = messages.length;
+	while (start > 0) {
+		const next = messages[start - 1]!;
+		const nextTotal = totalChars + next.content.length;
+		const selectedCount = messages.length - start;
+		if (
+			selectedCount >= CHAT_RENDER_MIN_MESSAGES &&
+			(nextTotal > CHAT_RENDER_CHAR_WINDOW ||
+				selectedCount >= CHAT_RENDER_MAX_MESSAGES)
+		) {
+			break;
+		}
+		totalChars = nextTotal;
+		start--;
+	}
+	return start <= 0 ? messages : messages.slice(start);
 }
 
 function usePersistentChatMessages(paneId: string, enabled = true) {
@@ -181,6 +206,23 @@ function usePersistentChatMessages(paneId: string, enabled = true) {
 		loadedPaneRef.current = paneId;
 		messagesRef.current = nextMessages;
 		setMessagesRaw(nextMessages);
+	}, [enabled, paneId]);
+	useEffect(() => {
+		if (!enabled) return;
+		let cancelled = false;
+		void loadStoredMessagesAsync<ChatMessage>(paneId).then((cachedMessages) => {
+			if (cancelled || cachedMessages.length === 0) return;
+			if (messagesRef.current.length > 0) return;
+			const nextMessages = dedupeChatMessagesById(
+				cachedMessages.map((message) => ({ ...message, isStreaming: false }))
+			);
+			if (nextMessages.length === 0) return;
+			messagesRef.current = nextMessages;
+			setMessagesRaw(nextMessages);
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [enabled, paneId]);
 	useEffect(() => () => flushPendingMessageSave(), [flushPendingMessageSave]);
 	useEffect(() => {
@@ -570,6 +612,10 @@ export const AgentChatView = memo(
 		const renderVisibleChat = composerOnly || isVisible;
 		const { messages, messagesRef, saveMessagesNow, setMessages } =
 			usePersistentChatMessages(paneId, renderVisibleChat);
+		const visibleMessages = useMemo(
+			() => windowChatMessagesForRender(messages),
+			[messages]
+		);
 		const {
 			agentKindOptions,
 			effectiveSelectedModel,
@@ -896,7 +942,7 @@ export const AgentChatView = memo(
 									</div>
 								)}
 							<ChatMessageList
-								messages={messages}
+								messages={visibleMessages}
 								scrollElementRef={scrollRef}
 								onVirtualizerReady={handleVirtualizerReady}
 								expandedTools={expandedTools}

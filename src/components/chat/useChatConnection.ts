@@ -82,6 +82,7 @@ export function useChatConnection({
 	const currentBtwRef = useRef<string | null>(null);
 	const currentToolRef = useRef<string | null>(null);
 	const hasStreamedRef = useRef(false);
+	const transcriptRevisionRef = useRef<number | null>(null);
 	const pendingContentRef = useRef<Map<string, string>>(new Map());
 	const flushFrameRef = useRef<number | null>(null);
 	const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>(() =>
@@ -372,6 +373,21 @@ export function useChatConnection({
 				});
 			} else if (msg.type === "chat:sync") {
 				flushPendingContent();
+				const revision = typeof msg.revision === "number" ? msg.revision : null;
+				if (
+					revision !== null &&
+					transcriptRevisionRef.current === revision &&
+					!msg.isStreaming
+				) {
+					setLoadingState({
+						isLoading: false,
+						status: "idle",
+						startTime: null,
+					});
+					setChatUiState(clearLiveActivities);
+					resetStreamState();
+					return;
+				}
 				const serverMessages: ChatMessage[] = dedupeChatMessagesById(
 					msg.messages
 				);
@@ -380,9 +396,10 @@ export function useChatConnection({
 						mergeSyncedMessages(messagesRef.current, serverMessages)
 					);
 					setMessages(mergedMessages);
-					saveMessagesNow(mergedMessages);
+					if (!msg.isStreaming) saveMessagesNow(mergedMessages);
 				}
 				if (msg.isStreaming) {
+					if (revision !== null) transcriptRevisionRef.current = revision;
 					setLoadingState((prev) => ({
 						isLoading: true,
 						status: "responding",
@@ -399,6 +416,7 @@ export function useChatConnection({
 					);
 					if (lastTool) currentToolRef.current = lastTool.id;
 				} else {
+					if (revision !== null) transcriptRevisionRef.current = revision;
 					setLoadingState({
 						isLoading: false,
 						status: "idle",

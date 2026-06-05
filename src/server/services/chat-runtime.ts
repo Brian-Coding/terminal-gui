@@ -165,6 +165,7 @@ export const chatRuntime = {
 			type: "chat:sync",
 			paneId: session.paneId,
 			messages: session.messageBuffer.getMessages(),
+			revision: session.messageBuffer.getRevision(),
 			isStreaming: false,
 		});
 		this.send(session, { type: "chat:done", paneId: session.paneId });

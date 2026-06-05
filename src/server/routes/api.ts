@@ -1,5 +1,6 @@
 import { agentAccountRoutes } from "./agent-accounts.ts";
 import { appInfoRoutes } from "./app-info.ts";
+import { chatEventRoutes } from "./chat-events.ts";
 import { chatQueueRoutes } from "./chat-queues.ts";
 import { checkpointRoutes } from "./checkpoint.ts";
 import { clientStorageRoutes } from "./client-storage.ts";
@@ -23,6 +24,7 @@ export function buildApiRoutes() {
 		...forgeRoutes(),
 		...nativeRoutes(),
 		...terminalRoutes(),
+		...chatEventRoutes(),
 		...chatQueueRoutes(),
 		...clientStorageRoutes(),
 		...checkpointRoutes(),

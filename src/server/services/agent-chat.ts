@@ -17,6 +17,7 @@ import {
 } from "../agents/stream-utils.ts";
 import type { AgentRunContext } from "../agents/types.ts";
 import { resolveAllowedLocalPath } from "../security.ts";
+import { appendChatEvent } from "./chat-events.ts";
 import {
 	CODEX_WORKFLOW_INSTRUCTIONS,
 	createGoalContinuationPrompt,
@@ -172,8 +173,10 @@ async function finalizeChatCheckpoint(
 			};
 			const stopEvent = { type: "content_block_stop" as const };
 			session.messageBuffer.applyEvent(startEvent);
+			appendChatEvent(paneId, "agent_event", startEvent);
 			emit({ type: "chat:event", paneId, event: startEvent });
 			session.messageBuffer.applyEvent(stopEvent);
+			appendChatEvent(paneId, "agent_event", stopEvent);
 			emit({ type: "chat:event", paneId, event: stopEvent });
 		}
 		return cpMeta.changedFileCount;
@@ -199,6 +202,7 @@ function ensureVisibleTurnCompletion(
 			: "Finished.";
 	const event = { type: "result" as const, result: text };
 	session.messageBuffer.applyEvent(event);
+	appendChatEvent(paneId, "agent_event", event);
 	emit({ type: "chat:event", paneId, event });
 }
 
@@ -309,6 +313,7 @@ async function runAgent(
 		updateSessionId: (nextSessionId) =>
 			chatRuntime.updateSessionId(session, nextSessionId),
 		emitChatEvent: (event) => {
+			appendChatEvent(paneId, "agent_event", event);
 			chatRuntime.send(session, { type: "chat:event", paneId, event });
 			session.messageBuffer.applyEvent(event);
 			chatRuntime.scheduleTranscriptPersist(session, paneId);
@@ -361,6 +366,7 @@ function emitSystemMessage(
 	message: string
 ) {
 	session.messageBuffer.pushSystem(message);
+	appendChatEvent(paneId, "system_message", { message });
 	chatRuntime.send(session, { type: "chat:system", paneId, message });
 }
 
@@ -380,6 +386,7 @@ async function saveAndBroadcastQueue(
 ) {
 	if (queue.length === 0) await deleteChatQueue(paneId);
 	else await saveChatQueue(paneId, queue);
+	appendChatEvent(paneId, "queue_changed", { queue });
 	chatRuntime.send(session, { type: "chat:queue", paneId, queue });
 }
 
@@ -555,6 +562,10 @@ export const ChatService = {
 		}
 
 		session.messageBuffer.pushUser(displayText || text);
+		appendChatEvent(paneId, "user_message", {
+			text,
+			displayText: displayText || text,
+		});
 		chatRuntime.persistTranscript(session, paneId);
 		chatRuntime.send(
 			session,
@@ -716,6 +727,7 @@ export const ChatService = {
 				type: "chat:sync",
 				paneId,
 				messages: transcript ?? [],
+				revision: 0,
 				isStreaming: false,
 			});
 			sendChatStatus(ws, paneId, "idle", false);
@@ -734,6 +746,7 @@ export const ChatService = {
 			type: "chat:sync",
 			paneId,
 			messages,
+			revision: session.messageBuffer.getRevision(),
 			isStreaming: session.messageBuffer.streaming,
 		});
 		sendChatStatus(

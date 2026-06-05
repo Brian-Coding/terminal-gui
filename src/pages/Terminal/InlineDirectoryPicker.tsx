@@ -132,13 +132,11 @@ export function InlineDirectoryPicker({
 	}, []);
 
 	const togglePath = (path: string) => {
-		setSelectedPaths((prev) => {
-			const next = prev.includes(path)
-				? prev.filter((p) => p !== path)
-				: [...prev, path];
-			onSelectionChange?.(next);
-			return next;
-		});
+		const next = selectedPaths.includes(path)
+			? selectedPaths.filter((p) => p !== path)
+			: [...selectedPaths, path];
+		setSelectedPaths(next);
+		onSelectionChange?.(next);
 	};
 
 	const handleItemClick = (path: string) => {

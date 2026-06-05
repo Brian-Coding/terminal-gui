@@ -12,6 +12,7 @@ export class ChatMessageBuffer {
 	private currentAssistantIdx = -1;
 	private currentToolIdx = -1;
 	private hasStreamed = false;
+	private revision = 0;
 
 	private push(
 		role: ChatTranscriptMessage["role"],
@@ -19,6 +20,7 @@ export class ChatMessageBuffer {
 		extra?: Partial<ChatTranscriptMessage>
 	) {
 		this.messages.push({ id: `s${++serverMsgId}`, role, content, ...extra });
+		this.revision++;
 		this.trim();
 	}
 
@@ -48,6 +50,7 @@ export class ChatMessageBuffer {
 		const idx = this[key];
 		if (idx < 0 || idx >= this.messages.length) return false;
 		this.messages[idx] = { ...this.messages[idx]!, ...patch };
+		this.revision++;
 		return true;
 	}
 
@@ -90,12 +93,14 @@ export class ChatMessageBuffer {
 				this.currentAssistantIdx >= 0
 			) {
 				this.messages[this.currentAssistantIdx]!.content += delta.text;
+				this.revision++;
 			} else if (
 				delta?.type === "input_json_delta" &&
 				delta.partial_json &&
 				this.currentToolIdx >= 0
 			) {
 				this.messages[this.currentToolIdx]!.content += delta.partial_json;
+				this.revision++;
 			}
 		} else if (event.type === "content_block_stop") {
 			this.patchCurrent("currentAssistantIdx", { isStreaming: false });
@@ -117,22 +122,34 @@ export class ChatMessageBuffer {
 	}
 
 	finalize() {
-		for (const message of this.messages) message.isStreaming = false;
+		let changed = false;
+		for (const message of this.messages) {
+			if (message.isStreaming) changed = true;
+			message.isStreaming = false;
+		}
 		this.currentAssistantIdx = -1;
 		this.currentToolIdx = -1;
 		this.hasStreamed = false;
+		if (changed) this.revision++;
 		this.trim();
 	}
 
 	replaceInAssistantMessages(replacer: (content: string) => string) {
 		for (const message of this.messages) {
 			if (message.role !== "assistant") continue;
-			message.content = replacer(message.content);
+			const nextContent = replacer(message.content);
+			if (nextContent === message.content) continue;
+			message.content = nextContent;
+			this.revision++;
 		}
 	}
 
 	getMessages(): ChatTranscriptMessage[] {
 		return this.messages;
+	}
+
+	getRevision(): number {
+		return this.revision;
 	}
 
 	get streaming(): boolean {
@@ -147,6 +164,7 @@ export class ChatMessageBuffer {
 		this.currentAssistantIdx = -1;
 		this.currentToolIdx = -1;
 		this.hasStreamed = false;
+		this.revision++;
 		this.trim();
 	}
 
@@ -155,6 +173,7 @@ export class ChatMessageBuffer {
 		this.messages = trimMessages(this.messages);
 		const drop = previous.length - this.messages.length;
 		if (drop <= 0) return;
+		this.revision++;
 		this.currentAssistantIdx =
 			this.currentAssistantIdx >= drop ? this.currentAssistantIdx - drop : -1;
 		this.currentToolIdx =

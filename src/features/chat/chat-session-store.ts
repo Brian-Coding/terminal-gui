@@ -8,7 +8,6 @@ import {
 	writeStoredJson,
 	writeStoredValue,
 } from "../../lib/stored-json.ts";
-import type { ChatMessage } from "./agent-chat-shared.ts";
 
 const STORAGE_KEY_PREFIX = "inferay-chat-";
 const SESSION_KEY_PREFIX = "inferay-chat-session-";
@@ -20,38 +19,15 @@ const PENDING_SEND_KEY_PREFIX = "inferay-chat-pending-send-";
 const SUMMARY_KEY_PREFIX = "inferay-chat-summary-";
 const PENDING_WORKSPACE_KEY_PREFIX = "inferay-chat-pending-workspace-";
 const QUEUE_KEY_PREFIX = "inferay-chat-queue-";
+const CHAT_CACHE_DB = "inferay-chat-cache";
+const CHAT_CONVERSATIONS_STORE = "conversations";
+const CHAT_MESSAGES_STORE = "messages";
 const pendingSummaryRequests = new Set<string>();
 const pendingQueueFileSaves = new Map<
 	string,
 	{ queue: unknown[]; inFlight: boolean }
 >();
-
-type DbConversation = {
-	id: string;
-	paneId: string;
-	agentKind: string;
-	title: string | null;
-	cwd: string | null;
-	createdAt: number;
-	updatedAt: number;
-	status: "idle" | "streaming" | "error";
-	syncState: "local" | "pending" | "synced" | "error";
-};
-
-type DbMessage = {
-	id: string;
-	conversationId: string;
-	role: ChatMessage["role"];
-	content: string;
-	toolName: string | null;
-	partsJson: string | null;
-	artifactsJson: string | null;
-	imagesJson: string | null;
-	isStreaming: boolean;
-	createdAt: number;
-	updatedAt: number;
-	syncState: "local" | "pending" | "synced" | "error";
-};
+let chatCacheDbPromise: Promise<IDBDatabase | null> | null = null;
 
 type DbPreference = {
 	id: string;
@@ -59,24 +35,125 @@ type DbPreference = {
 	updatedAt: number;
 };
 
-const conversationsCollection = createCollection(
-	localStorageCollectionOptions<DbConversation, string>({
-		storageKey: "inferay-db-conversations",
-		getKey: (conversation) => conversation.id,
-	})
-);
-const messagesCollection = createCollection(
-	localStorageCollectionOptions<DbMessage, string>({
-		storageKey: "inferay-db-messages",
-		getKey: (message) => message.id,
-	})
-);
 const preferencesCollection = createCollection(
 	localStorageCollectionOptions<DbPreference, string>({
 		storageKey: "inferay-db-preferences",
 		getKey: (preference) => preference.id,
 	})
 );
+
+for (const staleChatDbKey of [
+	"inferay-db-conversations",
+	"inferay-db-messages",
+]) {
+	removeStoredValue(staleChatDbKey);
+}
+
+function openChatCacheDb(): Promise<IDBDatabase | null> {
+	if (typeof indexedDB === "undefined") return Promise.resolve(null);
+	chatCacheDbPromise ??= new Promise((resolve) => {
+		const request = indexedDB.open(CHAT_CACHE_DB, 2);
+		request.onupgradeneeded = () => {
+			const db = request.result;
+			if (!db.objectStoreNames.contains(CHAT_CONVERSATIONS_STORE)) {
+				db.createObjectStore(CHAT_CONVERSATIONS_STORE, { keyPath: "paneId" });
+			}
+			if (!db.objectStoreNames.contains(CHAT_MESSAGES_STORE)) {
+				const messages = db.createObjectStore(CHAT_MESSAGES_STORE, {
+					keyPath: "storageId",
+				});
+				messages.createIndex("paneOrder", ["paneId", "order"]);
+				messages.createIndex("paneId", "paneId");
+			}
+		};
+		request.onsuccess = () => resolve(request.result);
+		request.onerror = () => resolve(null);
+		request.onblocked = () => resolve(null);
+	});
+	return chatCacheDbPromise;
+}
+
+async function readIndexedChatMessages<T>(paneId: string): Promise<T[]> {
+	const db = await openChatCacheDb();
+	if (!db) return [];
+	return new Promise((resolve) => {
+		const tx = db.transaction(CHAT_MESSAGES_STORE, "readonly");
+		const index = tx.objectStore(CHAT_MESSAGES_STORE).index("paneOrder");
+		const range = IDBKeyRange.bound([paneId, -Infinity], [paneId, Infinity]);
+		const request = index.getAll(range);
+		request.onsuccess = () => {
+			const rows = Array.isArray(request.result) ? request.result : [];
+			resolve(rows.map((row) => (row as { message: T }).message));
+		};
+		request.onerror = () => resolve([]);
+	});
+}
+
+async function writeIndexedChatMessages<T>(
+	paneId: string,
+	messages: T[]
+): Promise<void> {
+	const db = await openChatCacheDb();
+	if (!db) return;
+	await new Promise<void>((resolve) => {
+		const tx = db.transaction(
+			[CHAT_CONVERSATIONS_STORE, CHAT_MESSAGES_STORE],
+			"readwrite"
+		);
+		tx.objectStore(CHAT_CONVERSATIONS_STORE).put({
+			paneId,
+			messageCount: messages.length,
+			updatedAt: Date.now(),
+		});
+		const messageStore = tx.objectStore(CHAT_MESSAGES_STORE);
+		const paneIndex = messageStore.index("paneId");
+		const existingRequest = paneIndex.getAllKeys(paneId);
+		existingRequest.onsuccess = () => {
+			const nextIds = new Set<string>();
+			for (let order = 0; order < messages.length; order++) {
+				const message = messages[order] as { id?: unknown };
+				if (typeof message.id !== "string") continue;
+				const storageId = `${paneId}:${message.id}`;
+				nextIds.add(storageId);
+				messageStore.put({
+					storageId,
+					paneId,
+					messageId: message.id,
+					order,
+					message,
+				});
+			}
+			for (const key of existingRequest.result) {
+				if (typeof key === "string" && !nextIds.has(key)) {
+					messageStore.delete(key);
+				}
+			}
+		};
+		tx.oncomplete = () => resolve();
+		tx.onerror = () => resolve();
+		tx.onabort = () => resolve();
+	});
+}
+
+async function deleteIndexedChatMessages(paneId: string): Promise<void> {
+	const db = await openChatCacheDb();
+	if (!db) return;
+	await new Promise<void>((resolve) => {
+		const tx = db.transaction(
+			[CHAT_CONVERSATIONS_STORE, CHAT_MESSAGES_STORE],
+			"readwrite"
+		);
+		tx.objectStore(CHAT_CONVERSATIONS_STORE).delete(paneId);
+		const messageStore = tx.objectStore(CHAT_MESSAGES_STORE);
+		const request = messageStore.index("paneId").getAllKeys(paneId);
+		request.onsuccess = () => {
+			for (const key of request.result) messageStore.delete(key);
+		};
+		tx.oncomplete = () => resolve();
+		tx.onerror = () => resolve();
+		tx.onabort = () => resolve();
+	});
+}
 
 function storageKey(prefix: string, paneId: string): string {
 	return prefix + paneId;
@@ -112,36 +189,6 @@ function loadPreference<T>(id: string, fallback: T): T {
 	return value ? JSON.parse(value) : fallback;
 }
 
-function messageStorageId(conversationId: string, messageId: string) {
-	return `${conversationId}:${messageId}`;
-}
-
-function getStoredMessageId(message: DbMessage): string {
-	if (message.partsJson) {
-		try {
-			const parsed = JSON.parse(message.partsJson) as { id?: unknown };
-			if (typeof parsed.id === "string" && parsed.id) return parsed.id;
-		} catch {}
-	}
-	const prefix = `${message.conversationId}:`;
-	return message.id.startsWith(prefix)
-		? message.id.slice(prefix.length)
-		: message.id;
-}
-
-function dedupeMessagesById<
-	T extends {
-		id: string;
-	},
->(messages: T[]) {
-	const byId = new Map<string, T>();
-	for (const message of messages) {
-		if (byId.has(message.id)) byId.delete(message.id);
-		byId.set(message.id, message);
-	}
-	return [...byId.values()];
-}
-
 function savePreference(id: string, value: unknown) {
 	const valueJson = JSON.stringify(value);
 	const existing = preferencesCollection.get(id);
@@ -158,151 +205,16 @@ function removePreference(id: string) {
 	if (preferencesCollection.get(id)) preferencesCollection.delete(id);
 }
 
-function loadPaneMessages<T extends { id: string }>(paneId: string): T[] {
-	const conversation = conversationsCollection.toArray
-		.filter((item) => item.paneId === paneId)
-		.sort((a, b) => b.updatedAt - a.updatedAt)[0];
-	if (!conversation) return [];
-	return messagesCollection.toArray
-		.filter((message) => message.conversationId === conversation.id)
-		.sort((a, b) => a.createdAt - b.createdAt)
-		.map((message) =>
-			message.partsJson
-				? { ...JSON.parse(message.partsJson), isStreaming: false }
-				: {
-						id: message.id,
-						role: message.role,
-						content: message.content,
-						toolName: message.toolName ?? undefined,
-						isStreaming: false,
-						images: message.imagesJson
-							? JSON.parse(message.imagesJson)
-							: undefined,
-					}
-		) as unknown as T[];
-}
-
-function savePaneMessages<
-	T extends {
-		id: string;
-		role: DbMessage["role"];
-		content: string;
-		toolName?: string;
-		isStreaming?: boolean;
-		images?: string[];
-	},
->(paneId: string, messages: T[], agentKind = "codex") {
-	const now = Date.now();
-	const status = messages.some((message) => message.isStreaming)
-		? "streaming"
-		: "idle";
-	const conversation = conversationsCollection.toArray.find(
-		(item) => item.paneId === paneId
-	) ?? {
-		id: paneId,
-		paneId,
-		agentKind,
-		title: null,
-		cwd: null,
-		createdAt: now,
-		updatedAt: now,
-		status,
-		syncState: "pending" as const,
-	};
-	if (conversationsCollection.get(conversation.id)) {
-		if (
-			conversation.agentKind !== agentKind ||
-			conversation.status !== status ||
-			conversation.syncState !== "pending"
-		) {
-			conversationsCollection.update(conversation.id, (draft) => {
-				draft.agentKind = agentKind;
-				draft.updatedAt = now;
-				draft.status = status;
-				draft.syncState = "pending";
-			});
-		}
-	} else {
-		conversationsCollection.insert(conversation);
-	}
-	const existingRows = new Map(
-		messagesCollection.toArray
-			.filter((message) => message.conversationId === conversation.id)
-			.map((message) => [getStoredMessageId(message), message])
-	);
-	const dedupedMessages = dedupeMessagesById(messages);
-	const nextIds = new Set<string>();
-	for (let index = 0; index < dedupedMessages.length; index++) {
-		const message = dedupedMessages[index]!;
-		nextIds.add(message.id);
-		const partsJson = JSON.stringify(message);
-		const imagesJson = message.images?.length
-			? JSON.stringify(message.images)
-			: null;
-		const existing = existingRows.get(message.id);
-		const rowId = existing?.id ?? messageStorageId(conversation.id, message.id);
-		const row = {
-			id: rowId,
-			conversationId: conversation.id,
-			role: message.role,
-			content: message.content,
-			toolName: message.toolName ?? null,
-			partsJson,
-			artifactsJson: null,
-			imagesJson,
-			isStreaming: !!message.isStreaming,
-			createdAt: existing?.createdAt ?? now + index,
-			updatedAt: now,
-			syncState: "pending" as const,
-		};
-		if (existing || messagesCollection.get(rowId)) {
-			const current = existing ?? messagesCollection.get(rowId)!;
-			if (
-				current.conversationId === row.conversationId &&
-				current.role === row.role &&
-				current.content === row.content &&
-				current.toolName === row.toolName &&
-				current.partsJson === row.partsJson &&
-				current.imagesJson === row.imagesJson &&
-				current.isStreaming === row.isStreaming &&
-				current.syncState === row.syncState
-			) {
-				continue;
-			}
-			messagesCollection.update(rowId, (draft) => Object.assign(draft, row));
-		} else {
-			messagesCollection.insert(row);
-		}
-	}
-	for (const row of existingRows.values()) {
-		if (!nextIds.has(getStoredMessageId(row)))
-			messagesCollection.delete(row.id);
-	}
-}
-
-function clearPaneConversation(paneId: string) {
-	for (const conversation of conversationsCollection.toArray.filter(
-		(item) => item.paneId === paneId
-	)) {
-		for (const message of messagesCollection.toArray.filter(
-			(item) => item.conversationId === conversation.id
-		)) {
-			messagesCollection.delete(message.id);
-		}
-		conversationsCollection.delete(conversation.id);
-	}
-}
-
 export function loadStoredMessages<T>(paneId: string): T[] {
-	const messages = loadPaneMessages<T & { id: string }>(paneId);
-	return messages.length > 0
-		? messages
-		: readPaneJson(STORAGE_KEY_PREFIX, paneId, []);
+	return readPaneJson(STORAGE_KEY_PREFIX, paneId, []);
+}
+
+export function loadStoredMessagesAsync<T>(paneId: string): Promise<T[]> {
+	return readIndexedChatMessages<T>(paneId);
 }
 
 export function saveStoredMessages<T>(paneId: string, messages: T[]) {
-	writePaneJson(STORAGE_KEY_PREFIX, paneId, messages);
-	savePaneMessages(paneId, messages as Parameters<typeof savePaneMessages>[1]);
+	void writeIndexedChatMessages(paneId, messages);
 }
 
 export function loadStoredInput(paneId: string): string {
@@ -522,7 +434,6 @@ export function saveStoredQueue<T>(paneId: string, queue: T[]) {
 }
 
 export function clearAgentChatPaneState(paneId: string) {
-	clearPaneConversation(paneId);
 	for (const prefix of [
 		STORAGE_KEY_PREFIX,
 		SESSION_KEY_PREFIX,
@@ -533,5 +444,6 @@ export function clearAgentChatPaneState(paneId: string) {
 		removePaneValue(prefix, paneId);
 		removePreference(storageKey(prefix, paneId));
 	}
+	void deleteIndexedChatMessages(paneId);
 	saveStoredQueue(paneId, []);
 }

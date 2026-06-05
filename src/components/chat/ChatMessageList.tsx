@@ -1,4 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import React, {
 	useCallback,
 	useEffect,
@@ -401,6 +402,14 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		if (!isLoading || !startTime) return renderItems;
 		return [...renderItems, { type: "thinking", key: "thinking", startTime }];
 	}, [isLoading, renderItems, startTime]);
+	const rowVirtualizer = useVirtualizer({
+		count: renderRows.length,
+		getScrollElement: () => scrollElementRef.current,
+		estimateSize: () => 148,
+		overscan: 8,
+		gap: 8,
+	});
+	const virtualRows = rowVirtualizer.getVirtualItems();
 	const checkpointsByMessageId = useMemo(() => {
 		const byMessageId = new Map<string, CheckpointInfo>();
 		for (const checkpoint of checkpoints) {
@@ -414,9 +423,11 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 	useEffect(() => {
 		onVirtualizerReady?.({
 			scrollToEnd: (behavior = "smooth") => {
-				const el = scrollElementRef.current;
-				if (!el) return;
-				el.scrollTo({ top: el.scrollHeight, behavior });
+				if (renderRows.length === 0) return;
+				rowVirtualizer.scrollToIndex(renderRows.length - 1, {
+					align: "end",
+					behavior,
+				});
 			},
 			isAtEnd: () => {
 				const el = scrollElementRef.current;
@@ -430,26 +441,33 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 			},
 		});
 		return () => onVirtualizerReady?.(null);
-	}, [onVirtualizerReady, scrollElementRef]);
+	}, [onVirtualizerReady, renderRows.length, rowVirtualizer, scrollElementRef]);
 
 	useLayoutEffect(() => {
 		if (renderRows.length === 0) return;
 		const raf = requestAnimationFrame(() => {
-			const el = scrollElementRef.current;
-			if (el) el.scrollTop = el.scrollHeight;
+			rowVirtualizer.scrollToIndex(renderRows.length - 1, { align: "end" });
 		});
 		return () => cancelAnimationFrame(raf);
-	}, [renderRows.length, scrollElementRef]);
+	}, [renderRows.length, rowVirtualizer]);
 
 	return (
-		<div {...stylex.props(styles.messageList)}>
-			{renderRows.map((item, index) => {
+		<div
+			{...stylex.props(styles.messageList)}
+			style={{ height: rowVirtualizer.getTotalSize() }}
+		>
+			{virtualRows.map((virtualRow) => {
+				const index = virtualRow.index;
+				const item = renderRows[index];
 				if (!item) return null;
 				if (item.type === "thinking") {
 					return (
 						<div
 							key={getRowKey(item, index)}
+							data-index={index}
+							ref={rowVirtualizer.measureElement}
 							{...stylex.props(styles.messageRow)}
+							style={{ transform: `translateY(${virtualRow.start}px)` }}
 						>
 							<ThinkingIndicator startTime={item.startTime} />
 						</div>
@@ -459,7 +477,10 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 					return (
 						<div
 							key={getRowKey(item, index)}
+							data-index={index}
+							ref={rowVirtualizer.measureElement}
 							{...stylex.props(styles.messageRow)}
+							style={{ transform: `translateY(${virtualRow.start}px)` }}
 						>
 							<GroupedEditDiff filePath={item.filePath} edits={item.edits} />
 						</div>
@@ -473,7 +494,10 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 				return (
 					<div
 						key={getRowKey(item, index)}
+						data-index={index}
+						ref={rowVirtualizer.measureElement}
 						{...stylex.props(styles.messageRow)}
+						style={{ transform: `translateY(${virtualRow.start}px)` }}
 					>
 						<Bubble
 							msg={msg}
@@ -796,17 +820,18 @@ const styles = stylex.create({
 	},
 	messageList: {
 		boxSizing: "border-box",
-		display: "flex",
-		flexDirection: "column",
-		gap: controlSize._2,
 		minHeight: "100%",
 		minWidth: 0,
 		paddingBlock: `${controlSize._4} ${controlSize._8}`,
 		paddingInline: controlSize._5,
+		position: "relative",
 		width: "100%",
 	},
 	messageRow: {
 		boxSizing: "border-box",
-		width: "100%",
+		left: controlSize._5,
+		position: "absolute",
+		right: controlSize._5,
+		top: controlSize._4,
 	},
 });

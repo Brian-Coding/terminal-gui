@@ -51,11 +51,11 @@ import {
 	isTerminalMainView,
 	type TerminalMainView,
 } from "../../lib/app-navigation.tsx";
-import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import {
 	loadAppThemeId,
 	mapAppThemeToTerminalTheme,
 } from "../../lib/app-theme.ts";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import { hasId, isNonEmptyString } from "../../lib/data.ts";
 import {
 	listenWindowEvent,
@@ -622,12 +622,6 @@ export function TerminalPage() {
 		},
 		[]
 	);
-	const editorViewKey = useMemo(() => {
-		if (!currentGroup) return "none";
-		return `${currentGroup.id}:${currentGroup.panes
-			.map((pane) => `${pane.id}:${pane.cwd ?? ""}`)
-			.join(",")}`;
-	}, [currentGroup]);
 	const terminalGrid = currentGroup ? (
 		<TerminalGrid
 			active={mainView === "chat"}
@@ -682,23 +676,24 @@ export function TerminalPage() {
 									>
 										{terminalGrid}
 									</div>
-									{mainView === "editor" && (
-										<div
-											{...stylex.props(
-												styles.surfaceLayer,
-												styles.surfaceLayerVisible
-											)}
-										>
-											<EditorPage
-												key={editorViewKey}
-												groups={groups}
-												selectedGroupId={selectedGroupId}
-												themeId={themeId}
-												onSelectPane={selectPane}
-												onDirectoryChange={handleDirectorySelected}
-											/>
-										</div>
-									)}
+									<div
+										{...stylex.props(
+											styles.surfaceLayer,
+											mainView === "editor"
+												? styles.surfaceLayerVisible
+												: styles.surfaceLayerHidden
+										)}
+										aria-hidden={mainView !== "editor"}
+									>
+										<EditorPage
+											active={mainView === "editor"}
+											groups={groups}
+											selectedGroupId={selectedGroupId}
+											themeId={themeId}
+											onSelectPane={selectPane}
+											onDirectoryChange={handleDirectorySelected}
+										/>
+									</div>
 									{mainView === "graph" && (
 										<div
 											{...stylex.props(
