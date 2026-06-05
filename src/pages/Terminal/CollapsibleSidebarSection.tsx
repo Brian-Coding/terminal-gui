@@ -11,7 +11,7 @@ export const CollapsibleSidebarSection = memo(
 		icon,
 		label,
 		count,
-		countColor,
+		countTone = "muted",
 		expanded,
 		onToggle,
 		emptyMessage,
@@ -20,7 +20,7 @@ export const CollapsibleSidebarSection = memo(
 		icon: ReactNode;
 		label: string;
 		count: number;
-		countColor: string;
+		countTone?: "muted" | "danger" | "warning" | "accent";
 		expanded: boolean;
 		onToggle: () => void;
 		emptyMessage: string;
@@ -44,9 +44,9 @@ export const CollapsibleSidebarSection = memo(
 						<span
 							{...stylex.props(
 								styles.count,
-								countColor.includes("red") && styles.countDanger,
-								countColor.includes("amber") && styles.countWarning,
-								countColor.includes("accent") && styles.countAccent
+								countTone === "danger" && styles.countDanger,
+								countTone === "warning" && styles.countWarning,
+								countTone === "accent" && styles.countAccent
 							)}
 						>
 							{count}

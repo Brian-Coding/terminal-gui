@@ -2,7 +2,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useCallback, useMemo, useState } from "react";
 import type { GitFileEntry } from "../../features/git/types.ts";
 import { postJson } from "../../lib/fetch-json.ts";
-import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import {
 	color,
 	controlSize,
@@ -28,41 +27,7 @@ export interface SelectedFile {
 	staged: boolean;
 }
 
-/* ── Main reusable changes sidebar component ──────────── */
-
-export function ChangeFileSidebar({
-	fileViewMode,
-	onFileViewModeChange,
-	mainViewMode,
-	// Diff mode props
-	modified,
-	untracked,
-	staged,
-	selectedFile,
-	onSelectFile,
-	onStageFile,
-	onUnstageFile,
-	onStageAll,
-	onUnstageAll,
-	hasProject,
-	// Graph mode props
-	selectedCommitHash,
-	commitDetailsLoading,
-	commitDetails,
-	files,
-	branch,
-	// Commit props
-	commitMessage,
-	onCommitMessageChange,
-	onCommit,
-	isCommitting,
-	amendMode,
-	onAmendModeChange,
-	cwd,
-	showFileActions = true,
-	showCommitSection = true,
-	onCollapse,
-}: {
+interface ChangeFileSidebarProps {
 	cwd?: string;
 	fileViewMode: "path" | "tree";
 	onFileViewModeChange: (mode: "path" | "tree") => void;
@@ -102,7 +67,41 @@ export function ChangeFileSidebar({
 	showFileActions?: boolean;
 	showCommitSection?: boolean;
 	onCollapse?: () => void;
-}) {
+}
+
+/* ── Main reusable changes sidebar component ──────────── */
+
+export function ChangeFileSidebar(props: ChangeFileSidebarProps) {
+	const {
+		fileViewMode,
+		onFileViewModeChange,
+		mainViewMode,
+		modified,
+		untracked,
+		staged,
+		selectedFile,
+		onSelectFile,
+		onStageFile,
+		onUnstageFile,
+		onStageAll,
+		onUnstageAll,
+		hasProject,
+		selectedCommitHash,
+		commitDetailsLoading,
+		commitDetails,
+		files,
+		branch,
+		commitMessage,
+		onCommitMessageChange,
+		onCommit,
+		isCommitting,
+		amendMode,
+		onAmendModeChange,
+		cwd,
+		showFileActions = true,
+		showCommitSection = true,
+		onCollapse,
+	} = props;
 	return (
 		<div {...stylex.props(styles.root)}>
 			<ChangeFileSidebarHeader
@@ -160,8 +159,11 @@ export function ChangeFileSidebar({
 								</span>
 							</div>
 							<div {...stylex.props(styles.listPad)}>
-								{files.map((f, i) => (
-									<div key={i} {...stylex.props(styles.commitFileRow)}>
+								{files.map((f) => (
+									<div
+										key={`${f.path}:${f.status}`}
+										{...stylex.props(styles.commitFileRow)}
+									>
 										<FileStatusIcon status={f.status} />
 										<span {...stylex.props(styles.fileName)}>{f.path}</span>
 									</div>
@@ -788,6 +790,18 @@ const styles = stylex.create({
 			":hover": color.surfaceSubtle,
 		},
 	},
+	treeNodeButton: {
+		alignItems: "center",
+		backgroundColor: "transparent",
+		cursor: "pointer",
+		display: "flex",
+		flex: 1,
+		gap: controlSize._1,
+		height: "100%",
+		minWidth: 0,
+		padding: 0,
+		textAlign: "left",
+	},
 	fileRowActive: {
 		borderLeftColor: "var(--color-inferay-accent)",
 		backgroundColor: "rgba(29, 185, 84, 0.08)",
@@ -1195,9 +1209,9 @@ function CommitDetailsPanel({
 			</div>
 
 			<div {...stylex.props(styles.scrollArea)}>
-				{details.files.map((file, i) => (
+				{details.files.map((file) => (
 					<div
-						key={i}
+						key={file.path}
 						{...stylex.props(styles.commitFileRow, styles.cursorPointer)}
 					>
 						<FileStatusIcon status={file.status} />
@@ -1301,7 +1315,7 @@ interface TreeNode {
 }
 
 function sortTreeChildren(node: TreeNode): TreeNode[] {
-	return [...node.children.values()].sort((a, b) => {
+	return Array.from(node.children.values()).toSorted((a, b) => {
 		const aIsDir = a.children.size > 0 && !a.file;
 		const bIsDir = b.children.size > 0 && !b.file;
 		if (aIsDir && !bIsDir) return -1;
@@ -1393,8 +1407,6 @@ function TreeNodeRow({
 	return (
 		<>
 			<div
-				role="button"
-				tabIndex={0}
 				{...stylex.props(styles.treeRow, active && styles.fileRowActive)}
 				style={{ paddingLeft: `${4 + depth * 9}px`, paddingRight: 6 }}
 				onMouseEnter={() => {
@@ -1402,61 +1414,62 @@ function TreeNodeRow({
 					onActionHover(file.path);
 				}}
 				onMouseLeave={() => file && onActionHover(null)}
-				onClick={selectTreeNode}
-				onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
-					null,
-					selectTreeNode
-				)}
 			>
-				{isDir ? (
-					<>
-						<IconChevronRight
-							size={10}
-							{...stylex.props(
-								styles.chevron,
-								isExpanded && styles.chevronOpen
-							)}
-						/>
-						<IconFolderFill
-							size={12}
-							{...stylex.props(
-								styles.folderIcon,
-								isExpanded && styles.folderIconOpen
-							)}
-						/>
-						<span {...stylex.props(styles.treeName)}>{node.name}</span>
-					</>
-				) : file ? (
-					<>
-						<span {...stylex.props(styles.treeIndentSpacer)} />
-						<FileStatusIcon status={file.status} />
-						<span
-							{...stylex.props(
-								styles.treeFileName,
-								active && styles.activeText
-							)}
-						>
-							{node.name}
-						</span>
-						<FileDiffStats file={file} />
-						{onAction && (
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									onAction(file.path);
-								}}
+				<button
+					type="button"
+					{...stylex.props(styles.treeNodeButton)}
+					onClick={selectTreeNode}
+				>
+					{isDir ? (
+						<>
+							<IconChevronRight
+								size={10}
 								{...stylex.props(
-									styles.rowAction,
-									hoveredActionPath === file.path && styles.rowActionVisible
+									styles.chevron,
+									isExpanded && styles.chevronOpen
 								)}
-								title={`${actionLabel} ${file.path}`}
+							/>
+							<IconFolderFill
+								size={12}
+								{...stylex.props(
+									styles.folderIcon,
+									isExpanded && styles.folderIconOpen
+								)}
+							/>
+							<span {...stylex.props(styles.treeName)}>{node.name}</span>
+						</>
+					) : file ? (
+						<>
+							<span {...stylex.props(styles.treeIndentSpacer)} />
+							<FileStatusIcon status={file.status} />
+							<span
+								{...stylex.props(
+									styles.treeFileName,
+									active && styles.activeText
+								)}
 							>
-								<FileActionIcon actionLabel={actionLabel} />
-							</button>
+								{node.name}
+							</span>
+							<FileDiffStats file={file} />
+						</>
+					) : null}
+				</button>
+				{file && onAction && (
+					<button
+						type="button"
+						onClick={(e) => {
+							e.stopPropagation();
+							onAction(file.path);
+						}}
+						{...stylex.props(
+							styles.rowAction,
+							hoveredActionPath === file.path && styles.rowActionVisible
 						)}
-					</>
-				) : null}
+						title={`${actionLabel} ${file.path}`}
+					>
+						<FileActionIcon actionLabel={actionLabel} />
+					</button>
+				)}
 			</div>
 			{isDir &&
 				isExpanded &&

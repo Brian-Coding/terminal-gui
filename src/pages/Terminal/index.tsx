@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import {
+	type ReactNode,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -23,12 +24,15 @@ import {
 	type AgentKind,
 	cacheTerminalState,
 	createTerminalPane,
+	createTerminalViewSwitchHealth,
 	DEFAULT_FONT_FAMILY,
 	DEFAULT_FONT_SIZE,
 	DEFAULT_OPACITY,
 	DEFAULT_ROWS,
+	dispatchTerminalShellChange,
 	type GroupId,
 	getInitialGroups,
+	getPrimaryProductLoopContext,
 	getThemeById,
 	loadCanonicalTerminalState,
 	loadTerminalLayoutMode,
@@ -41,6 +45,7 @@ import {
 	syncTerminalLayoutMode,
 	type TerminalGroupsAction,
 	type TerminalLayoutMode,
+	type TerminalSavedState,
 	type TerminalShellChangeDetail,
 	type ThemeId,
 	terminalStateKey,
@@ -65,6 +70,279 @@ import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize } from "../../tokens.stylex.ts";
 
 const EMPTY_GRAPH_CWDS: string[] = [];
+
+type GraphSelection = {
+	readonly cwd: string | null;
+	readonly source: "pane" | "user";
+};
+
+type MutableRef<T> = {
+	current: T;
+};
+
+type TerminalAppearance = {
+	readonly themeId: ThemeId;
+	readonly fontSize: number;
+	readonly fontFamily: string;
+	readonly opacity: number;
+};
+
+type TerminalPersistenceArgs = TerminalAppearance & {
+	readonly groups: TerminalSavedState["groups"];
+	readonly latestStateRef: MutableRef<TerminalSavedState>;
+	readonly mainView: TerminalMainView;
+	readonly mainViewHealthRef: MutableRef<{
+		timestamp: number | null;
+		view: TerminalMainView;
+	}>;
+	readonly mainViewRef: MutableRef<TerminalMainView>;
+	readonly restoreSavedState: (state: TerminalSavedState | null) => void;
+	readonly selectedGroupId: GroupId | null;
+	readonly setAppearance: (
+		value:
+			| TerminalAppearance
+			| ((previous: TerminalAppearance) => TerminalAppearance)
+	) => void;
+	readonly setLayoutMode: (value: TerminalLayoutMode) => void;
+	readonly setMainView: (value: TerminalMainView) => void;
+	readonly setSelectedGroupId: (value: GroupId | null) => void;
+};
+
+function getGraphCwds(
+	panes: readonly { readonly cwd?: string }[] = []
+): string[] {
+	const seen = new Set<string>();
+	const cwds: string[] = [];
+	for (const pane of panes) {
+		if (!isNonEmptyString(pane.cwd) || seen.has(pane.cwd)) continue;
+		seen.add(pane.cwd);
+		cwds.push(pane.cwd);
+	}
+	return cwds;
+}
+
+function getSelectedPaneCwd(
+	group: {
+		readonly panes: readonly { readonly id: string; readonly cwd?: string }[];
+		readonly selectedPaneId: string | null;
+	} | null
+): string | null {
+	return (
+		group?.panes.find((pane) => pane.id === group.selectedPaneId)?.cwd ?? null
+	);
+}
+
+function useTerminalPersistence({
+	fontFamily,
+	fontSize,
+	groups,
+	latestStateRef,
+	mainView,
+	mainViewHealthRef,
+	mainViewRef,
+	opacity,
+	restoreSavedState,
+	selectedGroupId,
+	setAppearance,
+	setLayoutMode,
+	setMainView,
+	setSelectedGroupId,
+	themeId,
+}: TerminalPersistenceArgs): void {
+	const pendingSaveRef = useRef(false);
+	const startupRestoreCompleteRef = useRef(false);
+	const canonicalShellKeyRef = useRef<string | null>(null);
+	const latestStateKey = terminalStateKey({
+		groups,
+		selectedGroupId,
+		themeId,
+		fontSize,
+		fontFamily,
+		opacity,
+	});
+	useEffect(() => {
+		const nextState = {
+			groups,
+			selectedGroupId,
+			themeId,
+			fontSize,
+			fontFamily,
+			opacity,
+		};
+		const canonicalShellKey = canonicalShellKeyRef.current;
+		if (
+			canonicalShellKey &&
+			terminalStateKey(nextState) !== canonicalShellKey &&
+			terminalStateScore(nextState) < terminalStateScore(latestStateRef.current)
+		) {
+			return;
+		}
+		latestStateRef.current = nextState;
+		cacheTerminalState(latestStateRef.current);
+	}, [
+		fontFamily,
+		fontSize,
+		groups,
+		latestStateRef,
+		opacity,
+		selectedGroupId,
+		themeId,
+	]);
+	useEffect(() => {
+		void latestStateKey;
+		pendingSaveRef.current = true;
+		const id = setTimeout(() => {
+			if (!startupRestoreCompleteRef.current) {
+				pendingSaveRef.current = false;
+				return;
+			}
+			const saved = loadTerminalState();
+			if (
+				saved &&
+				terminalStateScore(latestStateRef.current) < terminalStateScore(saved)
+			) {
+				pendingSaveRef.current = false;
+				return;
+			}
+			saveSyncedTerminalState(
+				latestStateRef.current,
+				"terminal-page-save",
+				"canonical"
+			);
+			pendingSaveRef.current = false;
+		}, 100);
+		return () => clearTimeout(id);
+	}, [latestStateKey, latestStateRef]);
+	useEffect(() => {
+		writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, mainView);
+		const previous = mainViewHealthRef.current;
+		const timestamp = Date.now();
+		if (previous.timestamp === null) {
+			mainViewHealthRef.current = { timestamp, view: mainView };
+			return;
+		}
+		if (previous.view === mainView) return;
+		dispatchTerminalShellChange({
+			source: "view",
+			reason: "main-view-switch",
+			productHealth: createTerminalViewSwitchHealth({
+				context: getPrimaryProductLoopContext(latestStateRef.current),
+				from: previous.view,
+				previousTimestamp: previous.timestamp,
+				timestamp,
+				to: mainView,
+			}),
+		});
+		mainViewHealthRef.current = { timestamp, view: mainView };
+	}, [latestStateRef, mainView, mainViewHealthRef]);
+	useEffect(
+		() => () => {
+			if (!startupRestoreCompleteRef.current) return;
+			const saved = loadTerminalState();
+			if (
+				saved &&
+				terminalStateScore(latestStateRef.current) < terminalStateScore(saved)
+			) {
+				return;
+			}
+			saveSyncedTerminalState(
+				latestStateRef.current,
+				"terminal-page-unmount",
+				"canonical"
+			);
+		},
+		[latestStateRef]
+	);
+	useEffect(() => {
+		let cancelled = false;
+		const restoreCanonicalState = async () => {
+			const canonicalState = await loadCanonicalTerminalState();
+			if (cancelled) return;
+			if (!canonicalState) {
+				startupRestoreCompleteRef.current = true;
+				return;
+			}
+			const currentState = latestStateRef.current;
+			const canonicalKey = terminalStateKey(canonicalState);
+			const currentKey = terminalStateKey(currentState);
+			if (
+				canonicalKey !== currentKey &&
+				terminalStateScore(canonicalState) >= terminalStateScore(currentState)
+			) {
+				canonicalShellKeyRef.current = canonicalKey;
+				latestStateRef.current = canonicalState;
+				restoreSavedState(canonicalState);
+				saveSyncedTerminalState(
+					canonicalState,
+					"startup-canonical-restore",
+					"canonical"
+				);
+			}
+			startupRestoreCompleteRef.current = true;
+		};
+		restoreCanonicalState().catch(() => {
+			startupRestoreCompleteRef.current = true;
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [latestStateRef, restoreSavedState]);
+	const handleShellChange = useCallback(
+		(event: Event) => {
+			const currentState = latestStateRef.current;
+			const detail = (event as CustomEvent<TerminalShellChangeDetail>).detail;
+			const saved =
+				normalizeTerminalState(detail?.state) ??
+				(detail?.source === "canonical" ? loadTerminalState() : null);
+			if (saved?.themeId && saved.themeId !== currentState.themeId) {
+				setAppearance((prev) => ({ ...prev, themeId: saved.themeId }));
+			}
+			const savedState = saved;
+			if (
+				savedState?.selectedGroupId &&
+				savedState.selectedGroupId !== currentState.selectedGroupId
+			) {
+				setSelectedGroupId(savedState.selectedGroupId);
+				latestStateRef.current = {
+					...latestStateRef.current,
+					selectedGroupId: savedState.selectedGroupId,
+				};
+			}
+			if (savedState) {
+				const savedShellKey = terminalStateKey(savedState);
+				const currentShellKey = terminalStateKey(latestStateRef.current);
+				if (savedShellKey !== currentShellKey) {
+					latestStateRef.current = savedState;
+					restoreSavedState(savedState);
+					pendingSaveRef.current = false;
+				}
+			}
+			if (pendingSaveRef.current) {
+				return;
+			}
+			const storedView = readStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY);
+			const nextMainView = isTerminalMainView(storedView)
+				? storedView
+				: DEFAULT_TERMINAL_MAIN_VIEW;
+			if (nextMainView !== mainViewRef.current) {
+				setMainView(nextMainView);
+			}
+			syncTerminalLayoutMode(setLayoutMode);
+		},
+		[
+			latestStateRef,
+			mainViewRef,
+			restoreSavedState,
+			setAppearance,
+			setLayoutMode,
+			setMainView,
+			setSelectedGroupId,
+		]
+	);
+	useEffect(() => {
+		return listenWindowEvent("terminal-shell-change", handleShellChange);
+	}, [handleShellChange]);
+}
 
 function GraphEmptyState({ message }: { message: string }) {
 	return (
@@ -206,326 +484,49 @@ function terminalViewReducer(
 	}
 }
 
-export function TerminalPage() {
-	useEffect(() => {
-		return wsClient.connect();
-	}, []);
-	const [viewState, viewDispatch] = useReducer(
-		terminalViewReducer,
-		undefined,
-		getInitialTerminalViewState
-	);
-	const { layoutMode, mainView } = viewState;
-	const setLayoutMode = useCallback(
-		(value: TerminalLayoutMode) =>
-			viewDispatch({ type: "layoutModeChanged", value }),
-		[]
-	);
-	const setMainView = useCallback(
-		(value: TerminalMainView) =>
-			viewDispatch({ type: "mainViewChanged", value }),
-		[]
-	);
-	useEffect(() => {
-		writeStoredValue("terminal-layout-mode", layoutMode);
-	}, [layoutMode]);
-	useEffect(() => {
-		writeStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY, mainView);
-	}, [mainView]);
-	const initialState = useMemo(() => loadTerminalState(), []);
-	const initGroups = useMemo(() => getInitialGroups(), []);
-	const [groups, groupsDispatch] = useReducer(reduceTerminalGroups, initGroups);
-	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
-		() => initialState?.selectedGroupId ?? initGroups[0]?.id ?? null
-	);
-	const [showSettings, setShowSettings] = useState(false);
-	const [appearance, setAppearance] = useState(() => ({
-		themeId: (initialState?.themeId ??
-			mapAppThemeToTerminalTheme(loadAppThemeId())) as ThemeId,
-		fontSize: initialState?.fontSize ?? DEFAULT_FONT_SIZE,
-		fontFamily: initialState?.fontFamily ?? DEFAULT_FONT_FAMILY,
-		opacity: initialState?.opacity ?? DEFAULT_OPACITY,
-	}));
-	const { themeId, fontSize, fontFamily, opacity } = appearance;
-	const chatRefs = useRef<Map<string, AgentChatHandle>>(new Map());
-	const theme = useMemo(() => getThemeById(themeId), [themeId]);
-	const currentGroup = useMemo(
-		() => groups.find(hasId.bind(null, selectedGroupId)),
-		[groups, selectedGroupId]
-	);
-	const graphCwds = useMemo(
-		() =>
-			Array.from(
-				new Set(
-					(currentGroup?.panes ?? [])
-						.map((pane) => pane.cwd)
-						.filter(isNonEmptyString)
-				)
-			),
-		[currentGroup]
-	);
-	const [activeGraphCwd, setActiveGraphCwd] = useState<string | null>(null);
-	useEffect(() => {
-		const selectedPaneCwd =
-			currentGroup?.panes.find(
-				(pane) => pane.id === currentGroup.selectedPaneId
-			)?.cwd ?? null;
-		if (selectedPaneCwd && graphCwds.includes(selectedPaneCwd)) {
-			setActiveGraphCwd(selectedPaneCwd);
-			return;
-		}
-		setActiveGraphCwd((current) =>
-			current && graphCwds.includes(current) ? current : (graphCwds[0] ?? null)
-		);
-	}, [currentGroup, graphCwds]);
-	const graphStatusCwds = mainView === "graph" ? graphCwds : EMPTY_GRAPH_CWDS;
-	const { projectMap } = useGitStatus(graphStatusCwds, {
-		enabled: mainView === "graph" && graphCwds.length > 0,
-	});
-	const activeGraphProject = activeGraphCwd
-		? (projectMap.get(activeGraphCwd) ?? null)
-		: null;
-	const restoreSavedState = useCallback(
-		(s: ReturnType<typeof loadTerminalState>) => {
-			const normalized = normalizeTerminalState(s);
-			if (!normalized) return;
-			groupsDispatch({
-				type: "replaceAll",
-				groups: normalized.groups.map(migrateGroup),
-			});
-			setSelectedGroupId(normalized.selectedGroupId);
-			setAppearance({
-				themeId: normalized.themeId,
-				fontSize: normalized.fontSize,
-				fontFamily: normalized.fontFamily,
-				opacity: normalized.opacity,
-			});
-		},
-		[]
-	);
-	const cleanupPane = useCallback((paneId: string) => {
-		wsClient.send({ type: "terminal:destroy", paneId });
-		chatRefs.current.delete(paneId);
-		clearAgentChatPaneState(paneId);
-	}, []);
-	const withSelectedGroup = useCallback(
-		(fn: (groupId: string) => void) => {
-			if (selectedGroupId) fn(selectedGroupId);
-		},
-		[selectedGroupId]
-	);
-	const dispatchTerminalGroupAction = useCallback(
-		(action: TerminalGroupsAction, reason?: string) => {
-			groupsDispatch(action);
-			if (!reason) return;
-			switch (action.type) {
-				case "directorySelected":
-				case "selectPane":
-				case "setPaneAgentKind":
-					void mutateTerminalWorkspaceState(action, reason);
-					return;
-				case "addPane":
-					if ("pane" in action) {
-						void mutateTerminalWorkspaceState(
-							{
-								type: "addPane",
-								groupId: action.groupId,
-								pane: action.pane,
-							},
-							reason
-						);
-					}
-					return;
-				case "removePane":
-					void mutateTerminalWorkspaceState(
-						{
-							type: "removePane",
-							groupId: action.groupId,
-							paneId: action.paneId,
-						},
-						reason
-					);
-					return;
-			}
-		},
-		[]
-	);
-	const latestStateRef = useRef({
-		groups,
-		selectedGroupId,
-		themeId,
-		fontSize,
-		fontFamily,
-		opacity,
-	});
-	const mainViewRef = useRef(mainView);
-	mainViewRef.current = mainView;
-	const pendingSaveRef = useRef(false);
-	const startupRestoreCompleteRef = useRef(false);
-	const canonicalShellKeyRef = useRef<string | null>(null);
-	const latestStateKey = terminalStateKey({
-		groups,
-		selectedGroupId,
-		themeId,
-		fontSize,
-		fontFamily,
-		opacity,
-	});
-	useEffect(() => {
-		const nextState = {
-			groups,
-			selectedGroupId,
-			themeId,
-			fontSize,
-			fontFamily,
-			opacity,
-		};
-		const canonicalShellKey = canonicalShellKeyRef.current;
-		if (
-			canonicalShellKey &&
-			terminalStateKey(nextState) !== canonicalShellKey &&
-			terminalStateScore(nextState) < terminalStateScore(latestStateRef.current)
-		) {
-			return;
-		}
-		latestStateRef.current = {
-			groups,
-			selectedGroupId,
-			themeId,
-			fontSize,
-			fontFamily,
-			opacity,
-		};
-		cacheTerminalState(latestStateRef.current);
-	}, [groups, selectedGroupId, themeId, fontSize, fontFamily, opacity]);
-	useEffect(() => {
-		void latestStateKey;
-		pendingSaveRef.current = true;
-		const id = setTimeout(() => {
-			if (!startupRestoreCompleteRef.current) {
-				pendingSaveRef.current = false;
-				return;
-			}
-			const saved = loadTerminalState();
-			if (
-				saved &&
-				terminalStateScore(latestStateRef.current) < terminalStateScore(saved)
-			) {
-				pendingSaveRef.current = false;
-				return;
-			}
-			saveSyncedTerminalState(
-				latestStateRef.current,
-				"terminal-page-save",
-				"canonical"
-			);
-			pendingSaveRef.current = false;
-		}, 100);
-		return () => clearTimeout(id);
-	}, [latestStateKey]);
-	useEffect(
-		() => () => {
-			if (!startupRestoreCompleteRef.current) return;
-			const saved = loadTerminalState();
-			if (
-				saved &&
-				terminalStateScore(latestStateRef.current) < terminalStateScore(saved)
-			) {
-				return;
-			}
-			saveSyncedTerminalState(
-				latestStateRef.current,
-				"terminal-page-unmount",
-				"canonical"
-			);
-		},
-		[]
-	);
-	useEffect(() => {
-		let cancelled = false;
-		const restoreCanonicalState = async () => {
-			const canonicalState = await loadCanonicalTerminalState();
-			if (cancelled) return;
-			if (!canonicalState) {
-				startupRestoreCompleteRef.current = true;
-				return;
-			}
-			const currentState = latestStateRef.current;
-			const canonicalKey = terminalStateKey(canonicalState);
-			const currentKey = terminalStateKey(currentState);
-			if (
-				canonicalKey !== currentKey &&
-				terminalStateScore(canonicalState) >= terminalStateScore(currentState)
-			) {
-				canonicalShellKeyRef.current = canonicalKey;
-				latestStateRef.current = canonicalState;
-				restoreSavedState(canonicalState);
-				saveSyncedTerminalState(
-					canonicalState,
-					"startup-canonical-restore",
-					"canonical"
-				);
-			}
-			startupRestoreCompleteRef.current = true;
-		};
-		restoreCanonicalState().catch(() => {
-			startupRestoreCompleteRef.current = true;
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [restoreSavedState]);
-	useEffect(() => {
-		const handleShellChange = (event: Event) => {
-			const currentState = latestStateRef.current;
-			const detail = (event as CustomEvent<TerminalShellChangeDetail>).detail;
-			const saved =
-				normalizeTerminalState(detail?.state) ??
-				(detail?.source === "canonical" ? loadTerminalState() : null);
-			if (saved?.themeId && saved.themeId !== currentState.themeId) {
-				setAppearance((prev) => ({ ...prev, themeId: saved.themeId }));
-			}
-			const savedState = saved;
-			// Always allow selectedGroupId changes (workspace switching) even during pending saves
-			if (
-				savedState?.selectedGroupId &&
-				savedState.selectedGroupId !== currentState.selectedGroupId
-			) {
-				setSelectedGroupId(savedState.selectedGroupId);
-				// Sync the ref immediately so the pending save doesn't revert
-				latestStateRef.current = {
-					...latestStateRef.current,
-					selectedGroupId: savedState.selectedGroupId,
-				};
-			}
-			if (savedState) {
-				const savedShellKey = terminalStateKey(savedState);
-				const currentShellKey = terminalStateKey(latestStateRef.current);
-				if (savedShellKey !== currentShellKey) {
-					latestStateRef.current = savedState;
-					restoreSavedState(savedState);
-					pendingSaveRef.current = false;
-				}
-			}
-			// Skip the remaining external sync work during a pending save. Shell state
-			// has already been reconciled above so a queued save cannot erase it.
-			if (pendingSaveRef.current) {
-				return;
-			}
-			const storedView = readStoredValue(TERMINAL_MAIN_VIEW_STORAGE_KEY);
-			const nextMainView = isTerminalMainView(storedView)
-				? storedView
-				: DEFAULT_TERMINAL_MAIN_VIEW;
-			if (nextMainView !== mainViewRef.current) {
-				setMainView(nextMainView);
-			}
-			syncTerminalLayoutMode(setLayoutMode);
-		};
-		return listenWindowEvent("terminal-shell-change", handleShellChange);
-	}, [restoreSavedState, setLayoutMode, setMainView]);
-	useEffect(() => {
-		return setupTerminalThemePanelShortcut(setShowSettings);
-	}, []);
+type TerminalMainSurfaceProps = {
+	readonly graphView: ReactNode;
+	readonly groups: TerminalSavedState["groups"];
+	readonly hasCurrentPanes: boolean;
+	readonly mainView: TerminalMainView;
+	readonly onDirectoryChange: (
+		paneId: string,
+		path: string | null,
+		referencePaths?: string[]
+	) => void;
+	readonly onSelectPane: (paneId: string) => void;
+	readonly selectedGroupId: GroupId | null;
+	readonly setAppearance: TerminalPersistenceArgs["setAppearance"];
+	readonly setShowSettings: (value: boolean) => void;
+	readonly showSettings: boolean;
+	readonly terminalGrid: ReactNode;
+	readonly themeId: ThemeId;
+};
+
+type TerminalPaneActionsArgs = {
+	readonly chatRefs: MutableRef<Map<string, AgentChatHandle> | null>;
+	readonly cleanupPane: (paneId: string) => void;
+	readonly currentGroup: TerminalSavedState["groups"][number] | undefined;
+	readonly dispatchTerminalGroupAction: (
+		action: TerminalGroupsAction,
+		reason?: string
+	) => void;
+	readonly groups: TerminalSavedState["groups"];
+	readonly selectedGroupId: GroupId | null;
+	readonly setGraphSelection: (selection: GraphSelection) => void;
+	readonly withSelectedGroup: (fn: (groupId: string) => void) => void;
+};
+
+function useTerminalPaneActions({
+	chatRefs,
+	cleanupPane,
+	currentGroup,
+	dispatchTerminalGroupAction,
+	groups,
+	selectedGroupId,
+	setGraphSelection,
+	withSelectedGroup,
+}: TerminalPaneActionsArgs) {
 	const handleAddPane = useCallback(
 		(agentKind: AgentKind) =>
 			withSelectedGroup((groupId) => {
@@ -590,7 +591,10 @@ export function TerminalPage() {
 		[dispatchTerminalGroupAction, withSelectedGroup]
 	);
 	const handleDirectorySelected = useCallback(
-		(paneId: string, path: string | null, referencePaths?: string[]) =>
+		(paneId: string, path: string | null, referencePaths?: string[]) => {
+			if (path) {
+				setGraphSelection({ cwd: path, source: "pane" });
+			}
 			withSelectedGroup((groupId) =>
 				dispatchTerminalGroupAction(
 					{
@@ -602,59 +606,68 @@ export function TerminalPage() {
 					},
 					"directory-selected"
 				)
-			),
-		[dispatchTerminalGroupAction, withSelectedGroup]
+			);
+		},
+		[dispatchTerminalGroupAction, setGraphSelection, withSelectedGroup]
 	);
 	const selectPane = useCallback(
-		(paneId: string) =>
+		(paneId: string) => {
+			const pane =
+				currentGroup?.panes.find((item) => item.id === paneId) ?? null;
+			if (pane?.cwd) {
+				setGraphSelection({ cwd: pane.cwd, source: "pane" });
+			}
 			withSelectedGroup((groupId) =>
 				dispatchTerminalGroupAction(
 					{ type: "selectPane", groupId, paneId },
 					"select-pane"
 				)
-			),
-		[dispatchTerminalGroupAction, withSelectedGroup]
+			);
+		},
+		[
+			currentGroup,
+			dispatchTerminalGroupAction,
+			setGraphSelection,
+			withSelectedGroup,
+		]
 	);
 	const handleChatRef = useCallback(
 		(paneId: string, handle: AgentChatHandle | null) => {
-			if (handle) chatRefs.current.set(paneId, handle);
-			else chatRefs.current.delete(paneId);
+			if (handle) chatRefs.current?.set(paneId, handle);
+			else chatRefs.current?.delete(paneId);
 		},
-		[]
+		[chatRefs]
 	);
-	const terminalGrid = currentGroup ? (
-		<TerminalGrid
-			active={mainView === "chat"}
-			panes={currentGroup.panes}
-			selectedPaneId={currentGroup.selectedPaneId}
-			columns={currentGroup.columns}
-			rows={currentGroup.rows ?? DEFAULT_ROWS}
-			layoutMode={layoutMode}
-			theme={theme}
-			fontSize={fontSize}
-			fontFamily={fontFamily}
-			onSelectPane={selectPane}
-			onClosePane={removePane}
-			onDirectorySelect={handleDirectorySelected}
-			onDirectoryCancel={removePane}
-			onChatRef={handleChatRef}
-			onReorderPanes={reorderPanes}
-			onAddPane={handleAddPane}
-			onSetPaneAgentKind={handleSetPaneAgentKind}
-		/>
-	) : null;
-	const hasCurrentPanes = !!currentGroup && currentGroup.panes.length > 0;
-	const graphView =
-		graphCwds.length === 0 ? (
-			<GraphEmptyState message="Open a project directory in one of this group's panes to populate the file graph." />
-		) : (
-			<ProjectFileGraphView
-				cwds={graphCwds}
-				activeCwd={activeGraphCwd}
-				onSelectCwd={setActiveGraphCwd}
-				project={activeGraphProject}
-			/>
-		);
+	const handleSelectGraphCwd = useCallback(
+		(cwd: string) => setGraphSelection({ cwd, source: "user" }),
+		[setGraphSelection]
+	);
+	return {
+		handleAddPane,
+		handleChatRef,
+		handleDirectorySelected,
+		handleSelectGraphCwd,
+		handleSetPaneAgentKind,
+		removePane,
+		reorderPanes,
+		selectPane,
+	};
+}
+
+function TerminalMainSurface({
+	graphView,
+	groups,
+	hasCurrentPanes,
+	mainView,
+	onDirectoryChange,
+	onSelectPane,
+	selectedGroupId,
+	setAppearance,
+	setShowSettings,
+	showSettings,
+	terminalGrid,
+	themeId,
+}: TerminalMainSurfaceProps) {
 	return (
 		<div {...stylex.props(styles.appRoot, styles.fullHeight)}>
 			<div {...stylex.props(styles.appFrame)}>
@@ -690,8 +703,8 @@ export function TerminalPage() {
 											groups={groups}
 											selectedGroupId={selectedGroupId}
 											themeId={themeId}
-											onSelectPane={selectPane}
-											onDirectoryChange={handleDirectorySelected}
+											onSelectPane={onSelectPane}
+											onDirectoryChange={onDirectoryChange}
 										/>
 									</div>
 									{mainView === "graph" && (
@@ -720,5 +733,249 @@ export function TerminalPage() {
 				</div>
 			</div>
 		</div>
+	);
+}
+
+export function TerminalPage() {
+	useEffect(() => {
+		return wsClient.connect();
+	}, []);
+	const [viewState, viewDispatch] = useReducer(
+		terminalViewReducer,
+		undefined,
+		getInitialTerminalViewState
+	);
+	const { layoutMode, mainView } = viewState;
+	const setLayoutMode = useCallback(
+		(value: TerminalLayoutMode) =>
+			viewDispatch({ type: "layoutModeChanged", value }),
+		[]
+	);
+	const setMainView = useCallback(
+		(value: TerminalMainView) =>
+			viewDispatch({ type: "mainViewChanged", value }),
+		[]
+	);
+	useEffect(() => {
+		writeStoredValue("terminal-layout-mode", layoutMode);
+	}, [layoutMode]);
+	const initialState = useMemo(() => loadTerminalState(), []);
+	const initGroups = useMemo(() => getInitialGroups(), []);
+	const [groups, groupsDispatch] = useReducer(reduceTerminalGroups, initGroups);
+	const [selectedGroupId, setSelectedGroupId] = useState<GroupId | null>(
+		() => initialState?.selectedGroupId ?? initGroups[0]?.id ?? null
+	);
+	const [showSettings, setShowSettings] = useState(false);
+	const [appearance, setAppearance] = useState(() => ({
+		themeId: (initialState?.themeId ??
+			mapAppThemeToTerminalTheme(loadAppThemeId())) as ThemeId,
+		fontSize: initialState?.fontSize ?? DEFAULT_FONT_SIZE,
+		fontFamily: initialState?.fontFamily ?? DEFAULT_FONT_FAMILY,
+		opacity: initialState?.opacity ?? DEFAULT_OPACITY,
+	}));
+	const { themeId, fontSize, fontFamily, opacity } = appearance;
+	const chatRefs = useRef<Map<string, AgentChatHandle> | null>(null);
+	if (chatRefs.current === null) {
+		chatRefs.current = new Map();
+	}
+	const theme = useMemo(() => getThemeById(themeId), [themeId]);
+	const currentGroup = useMemo(
+		() => groups.find(hasId.bind(null, selectedGroupId)),
+		[groups, selectedGroupId]
+	);
+	const graphCwds = useMemo(
+		() => getGraphCwds(currentGroup?.panes),
+		[currentGroup]
+	);
+	const selectedPaneCwd = getSelectedPaneCwd(currentGroup ?? null);
+	const [graphSelection, setGraphSelection] = useState<GraphSelection>({
+		cwd: null,
+		source: "pane",
+	});
+	const activeGraphCwd = useMemo(() => {
+		if (graphSelection.cwd && graphCwds.includes(graphSelection.cwd)) {
+			return graphSelection.cwd;
+		}
+		if (selectedPaneCwd && graphCwds.includes(selectedPaneCwd)) {
+			return selectedPaneCwd;
+		}
+		return graphCwds[0] ?? null;
+	}, [graphCwds, graphSelection.cwd, selectedPaneCwd]);
+	const graphStatusCwds = mainView === "graph" ? graphCwds : EMPTY_GRAPH_CWDS;
+	const { projectMap } = useGitStatus(graphStatusCwds, {
+		enabled: mainView === "graph" && graphCwds.length > 0,
+	});
+	const activeGraphProject = activeGraphCwd
+		? (projectMap.get(activeGraphCwd) ?? null)
+		: null;
+	const restoreSavedState = useCallback(
+		(s: ReturnType<typeof loadTerminalState>) => {
+			const normalized = normalizeTerminalState(s);
+			if (!normalized) return;
+			groupsDispatch({
+				type: "replaceAll",
+				groups: normalized.groups.map(migrateGroup),
+			});
+			setSelectedGroupId(normalized.selectedGroupId);
+			setAppearance({
+				themeId: normalized.themeId,
+				fontSize: normalized.fontSize,
+				fontFamily: normalized.fontFamily,
+				opacity: normalized.opacity,
+			});
+		},
+		[]
+	);
+	const cleanupPane = useCallback((paneId: string) => {
+		wsClient.send({ type: "terminal:destroy", paneId });
+		chatRefs.current?.delete(paneId);
+		clearAgentChatPaneState(paneId);
+	}, []);
+	const withSelectedGroup = useCallback(
+		(fn: (groupId: string) => void) => {
+			if (selectedGroupId) fn(selectedGroupId);
+		},
+		[selectedGroupId]
+	);
+	const dispatchTerminalGroupAction = useCallback(
+		(action: TerminalGroupsAction, reason?: string) => {
+			groupsDispatch(action);
+			if (!reason) return;
+			switch (action.type) {
+				case "directorySelected":
+				case "selectPane":
+				case "setPaneAgentKind":
+					void mutateTerminalWorkspaceState(action, reason);
+					return;
+				case "addPane":
+					if ("pane" in action) {
+						void mutateTerminalWorkspaceState(
+							{
+								type: "addPane",
+								groupId: action.groupId,
+								pane: action.pane,
+							},
+							reason
+						);
+					}
+					return;
+				case "removePane":
+					void mutateTerminalWorkspaceState(
+						{
+							type: "removePane",
+							groupId: action.groupId,
+							paneId: action.paneId,
+						},
+						reason
+					);
+					return;
+			}
+		},
+		[]
+	);
+	const latestStateRef = useRef({
+		groups,
+		selectedGroupId,
+		themeId,
+		fontSize,
+		fontFamily,
+		opacity,
+	});
+	const mainViewRef = useRef(mainView);
+	mainViewRef.current = mainView;
+	const mainViewHealthRef = useRef<{
+		timestamp: number | null;
+		view: TerminalMainView;
+	}>({
+		timestamp: null,
+		view: mainView,
+	});
+	useTerminalPersistence({
+		fontFamily,
+		fontSize,
+		groups,
+		latestStateRef,
+		mainView,
+		mainViewHealthRef,
+		mainViewRef,
+		opacity,
+		restoreSavedState,
+		selectedGroupId,
+		setAppearance,
+		setLayoutMode,
+		setMainView,
+		setSelectedGroupId,
+		themeId,
+	});
+	useEffect(() => {
+		return setupTerminalThemePanelShortcut(setShowSettings);
+	}, []);
+	const {
+		handleAddPane,
+		handleChatRef,
+		handleDirectorySelected,
+		handleSelectGraphCwd,
+		handleSetPaneAgentKind,
+		removePane,
+		reorderPanes,
+		selectPane,
+	} = useTerminalPaneActions({
+		chatRefs,
+		cleanupPane,
+		currentGroup,
+		dispatchTerminalGroupAction,
+		groups,
+		selectedGroupId,
+		setGraphSelection,
+		withSelectedGroup,
+	});
+	const terminalGrid = currentGroup ? (
+		<TerminalGrid
+			active={mainView === "chat"}
+			panes={currentGroup.panes}
+			selectedPaneId={currentGroup.selectedPaneId}
+			columns={currentGroup.columns}
+			rows={currentGroup.rows ?? DEFAULT_ROWS}
+			layoutMode={layoutMode}
+			theme={theme}
+			fontSize={fontSize}
+			fontFamily={fontFamily}
+			onSelectPane={selectPane}
+			onClosePane={removePane}
+			onDirectorySelect={handleDirectorySelected}
+			onDirectoryCancel={removePane}
+			onChatRef={handleChatRef}
+			onReorderPanes={reorderPanes}
+			onAddPane={handleAddPane}
+			onSetPaneAgentKind={handleSetPaneAgentKind}
+		/>
+	) : null;
+	const hasCurrentPanes = !!currentGroup && currentGroup.panes.length > 0;
+	const graphView =
+		graphCwds.length === 0 ? (
+			<GraphEmptyState message="Open a project directory in one of this group's panes to populate the file graph." />
+		) : (
+			<ProjectFileGraphView
+				cwds={graphCwds}
+				activeCwd={activeGraphCwd}
+				onSelectCwd={handleSelectGraphCwd}
+				project={activeGraphProject}
+			/>
+		);
+	return (
+		<TerminalMainSurface
+			graphView={graphView}
+			groups={groups}
+			hasCurrentPanes={hasCurrentPanes}
+			mainView={mainView}
+			onDirectoryChange={handleDirectorySelected}
+			onSelectPane={selectPane}
+			selectedGroupId={selectedGroupId}
+			setAppearance={setAppearance}
+			setShowSettings={setShowSettings}
+			showSettings={showSettings}
+			terminalGrid={terminalGrid}
+			themeId={themeId}
+		/>
 	);
 }

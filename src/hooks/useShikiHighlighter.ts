@@ -49,6 +49,11 @@ const loadedLanguages = new Set<string>();
 const loadedThemes = new Set<BundledTheme>(["github-dark-default"]);
 
 export type SyntaxHighlightTheme = BundledTheme;
+export interface ShikiLineToken {
+	bgColor?: string;
+	color?: string;
+	content: string;
+}
 
 export const DEFAULT_SYNTAX_HIGHLIGHT_THEME: SyntaxHighlightTheme =
 	"github-dark-default";
@@ -73,6 +78,21 @@ const FALLBACK_TOKEN_COLORS = {
 	number: "#b5cea8",
 	comment: "#6a9955",
 };
+
+function createLineContentKey(lines: string[]): string {
+	let hash = 2166136261;
+	let totalLength = 0;
+	for (const line of lines) {
+		totalLength += line.length;
+		for (let i = 0; i < line.length; i++) {
+			hash ^= line.charCodeAt(i);
+			hash = Math.imul(hash, 16777619);
+		}
+		hash ^= 10;
+		hash = Math.imul(hash, 16777619);
+	}
+	return `${lines.length}:${totalLength}:${hash >>> 0}`;
+}
 
 function normalizeSyntaxTheme(theme: string | null): SyntaxHighlightTheme {
 	return (
@@ -263,6 +283,45 @@ function highlightLineRange(
 	}
 }
 
+function highlightLineTokenRange(
+	hl: Highlighter,
+	lines: string[],
+	start: number,
+	end: number,
+	language: BundledLanguage,
+	theme: BundledTheme
+) {
+	const from = Math.max(0, start - HIGHLIGHT_CONTEXT_LINES);
+	const to = Math.min(lines.length - 1, end);
+	if (to < start) return new Map<number, ShikiLineToken[]>();
+
+	try {
+		const tokenLines = hl.codeToTokensBase(
+			lines.slice(from, to + 1).join("\n"),
+			{
+				lang: language,
+				theme,
+			}
+		);
+		const highlighted = new Map<number, ShikiLineToken[]>();
+
+		for (let lineIdx = start; lineIdx <= to; lineIdx++) {
+			const tokens = tokenLines[lineIdx - from] ?? [];
+			highlighted.set(
+				lineIdx,
+				tokens.map((token) => ({
+					bgColor: token.bgColor,
+					color: token.color,
+					content: token.content,
+				}))
+			);
+		}
+		return highlighted;
+	} catch {
+		return new Map<number, ShikiLineToken[]>();
+	}
+}
+
 function splitRenderedLines(codeHtml: string) {
 	const parts = codeHtml.split(LINE_SPAN_PREFIX).slice(1);
 	return parts.map((part) => {
@@ -289,7 +348,7 @@ export interface UseShikiHighlighterOptions {
 
 export interface ShikiHighlighterAPI {
 	ensureHighlightedRange: (start: number, end: number) => boolean;
-	getHighlightedLine: (lineIdx: number) => string | undefined;
+	getHighlightedLineTokens: (lineIdx: number) => ShikiLineToken[] | undefined;
 	isReady: boolean;
 	language: string | null;
 }
@@ -303,10 +362,16 @@ export function useShikiHighlighter({
 }: UseShikiHighlighterOptions): ShikiHighlighterAPI {
 	// Detect language from file path
 	const language = getLanguageFromPath(filePath);
-	const highlightKey = `${enabled}\0${filePath}\0${language ?? ""}\0${theme}\0${lines.length}`;
+	const lineContentKey = useMemo(
+		() => (enabled ? createLineContentKey(lines) : String(lines.length)),
+		[enabled, lines]
+	);
+	const highlightKey = `${enabled}\0${filePath}\0${language ?? ""}\0${theme}\0${lineContentKey}`;
+	const visibleStart = visibleRange[0];
+	const visibleEnd = visibleRange[1];
 	const [readyKey, setReadyKey] = useState<string | null>(null);
 	const [, setHighlightVersion] = useState(0); // Force re-render when highlighting completes
-	const cacheRef = useRef<Map<number, string>>(new Map());
+	const cacheRef = useRef<Map<number, ShikiLineToken[]>>(new Map());
 	const highlighterRef = useRef<Highlighter | null>(null);
 	const langRef = useRef<BundledLanguage | null>(null);
 
@@ -345,7 +410,7 @@ export function useShikiHighlighter({
 
 				const [start, end] = visibleRangeRef.current;
 				const currentLines = linesRef.current;
-				const highlighted = highlightLineRange(
+				const highlighted = highlightLineTokenRange(
 					hl,
 					currentLines,
 					start,
@@ -353,8 +418,8 @@ export function useShikiHighlighter({
 					resolvedLanguage,
 					theme
 				);
-				for (const [lineIdx, html] of highlighted) {
-					cacheRef.current.set(lineIdx, html);
+				for (const [lineIdx, tokens] of highlighted) {
+					cacheRef.current.set(lineIdx, tokens);
 				}
 
 				setReadyKey(highlightKey);
@@ -367,7 +432,7 @@ export function useShikiHighlighter({
 		init();
 
 		return controller.abort.bind(controller);
-	}, [enabled, filePath, highlightKey, language, lines, theme]);
+	}, [enabled, highlightKey, language, theme]);
 
 	// Keep normal scrolling responsive; programmatic jumps call
 	// ensureHighlightedRange before moving the viewport.
@@ -375,7 +440,6 @@ export function useShikiHighlighter({
 		if (!isReady || !highlighterRef.current || !langRef.current) return;
 
 		return scheduleHighlightWork(() => {
-			const [start, end] = visibleRangeRef.current;
 			const currentLines = linesRef.current;
 			const hl = highlighterRef.current;
 			const lang = langRef.current;
@@ -384,14 +448,18 @@ export function useShikiHighlighter({
 			let missingStart = Number.POSITIVE_INFINITY;
 			let missingEnd = -1;
 
-			for (let i = start; i <= end && i < currentLines.length; i++) {
+			for (
+				let i = visibleStart;
+				i <= visibleEnd && i < currentLines.length;
+				i++
+			) {
 				if (cacheRef.current.has(i)) continue;
 				missingStart = Math.min(missingStart, i);
 				missingEnd = Math.max(missingEnd, i);
 			}
 
 			if (missingEnd >= missingStart) {
-				const highlighted = highlightLineRange(
+				const highlighted = highlightLineTokenRange(
 					hl,
 					currentLines,
 					missingStart,
@@ -399,16 +467,17 @@ export function useShikiHighlighter({
 					lang,
 					theme
 				);
-				for (const [lineIdx, html] of highlighted) {
-					cacheRef.current.set(lineIdx, html);
+				for (const [lineIdx, tokens] of highlighted) {
+					cacheRef.current.set(lineIdx, tokens);
 				}
 				setHighlightVersion(incrementNumber);
 			}
 		});
-	}, [isReady, visibleRange, lines, theme]);
+	}, [isReady, theme, visibleStart, visibleEnd]);
 
-	const getHighlightedLine = useCallback(
-		(lineIdx: number): string | undefined => cacheRef.current.get(lineIdx),
+	const getHighlightedLineTokens = useCallback(
+		(lineIdx: number): ShikiLineToken[] | undefined =>
+			cacheRef.current.get(lineIdx),
 		[]
 	);
 	const ensureHighlightedRange = useCallback(
@@ -431,7 +500,7 @@ export function useShikiHighlighter({
 
 			if (missingEnd < missingStart) return true;
 
-			const highlighted = highlightLineRange(
+			const highlighted = highlightLineTokenRange(
 				hl,
 				currentLines,
 				missingStart,
@@ -439,8 +508,8 @@ export function useShikiHighlighter({
 				lang,
 				theme
 			);
-			for (const [lineIdx, html] of highlighted) {
-				cacheRef.current.set(lineIdx, html);
+			for (const [lineIdx, tokens] of highlighted) {
+				cacheRef.current.set(lineIdx, tokens);
 			}
 			setHighlightVersion(incrementNumber);
 			return true;
@@ -450,7 +519,7 @@ export function useShikiHighlighter({
 
 	return {
 		ensureHighlightedRange,
-		getHighlightedLine,
+		getHighlightedLineTokens,
 		isReady,
 		language,
 	};

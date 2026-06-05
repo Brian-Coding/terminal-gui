@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Single line in a diff view
 export interface DiffLine {
@@ -265,7 +265,7 @@ function diffCacheKey(req: DiffRequest): string {
 }
 
 // Hook for loading and managing git diff state
-export function useGitDiff() {
+export function useGitDiff(autoRequest: DiffRequest | null = null) {
 	const [loading, setLoading] = useState(false);
 	const [diff, setDiff] = useState<HunkDiff | null>(null);
 	const [request, setRequest] = useState<DiffRequest | null>(null);
@@ -340,6 +340,15 @@ export function useGitDiff() {
 		setRequest(null);
 		setLoading(false);
 	}, []);
+
+	useEffect(() => {
+		if (!autoRequest) {
+			clear();
+			return;
+		}
+		if (areDiffRequestsEqual(request, autoRequest)) return;
+		loadDiff(autoRequest);
+	}, [autoRequest, clear, loadDiff, request]);
 
 	return { diff, request, loading, loadDiff, clear };
 }

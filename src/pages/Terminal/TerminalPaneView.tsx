@@ -16,8 +16,8 @@ import type {
 	TerminalTheme,
 } from "../../features/terminal/terminal-utils.ts";
 import { useXtermTerminal } from "../../hooks/useXtermTerminal.ts";
-import { APP_REGION_NO_DRAG_CLASS } from "../../lib/app-region.ts";
-import { activateOnEnterOrSpace, focusRef } from "../../lib/react-events.ts";
+import { APP_REGION_NO_DRAG_CLASS } from "../../lib/app-theme.ts";
+import { focusRef } from "../../lib/react-events.ts";
 import { color, font } from "../../tokens.stylex.ts";
 
 interface TerminalPaneViewProps {
@@ -112,12 +112,6 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	const focusTerminal = useCallback(() => {
 		focusRef(termRef);
 	}, [termRef]);
-	const handleTerminalKeyDown = useCallback(
-		(event: React.KeyboardEvent) => {
-			activateOnEnterOrSpace(focusTerminal, event);
-		},
-		[focusTerminal]
-	);
 	const handleDirectoryChange = useCallback(
 		(pid: string, cwd: string | null, refs?: string[]) => {
 			if (pane.pendingCwd && !isChatAgentKind(pane.agentKind)) {
@@ -210,10 +204,9 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 					overflow: "hidden",
 					padding: 0,
 				}}
-				onClick={focusTerminal}
-				onKeyDown={handleTerminalKeyDown}
-				tabIndex={0}
-				role="button"
+				onPointerDown={focusTerminal}
+				role="application"
+				aria-label={pane.title || "Terminal"}
 			/>
 			{isAgentChatPane && (
 				<div {...stylex.props(styles.agentPane)}>

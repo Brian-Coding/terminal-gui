@@ -45,12 +45,12 @@ export const ClaudeProcessesSidebar = memo(function ClaudeProcessesSidebar({
 			icon={<IconRobot size={12} />}
 			label="Processes"
 			count={processes.length}
-			countColor={
+			countTone={
 				processes.length > 5
-					? "text-red-400"
+					? "danger"
 					: processes.length > 0
-						? "text-amber-400"
-						: "text-inferay-muted-gray"
+						? "warning"
+						: "muted"
 			}
 			expanded={expanded}
 			onToggle={onToggle}

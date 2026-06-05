@@ -329,6 +329,61 @@ export interface TerminalSavedState {
 	opacity: number;
 }
 
+export type PrimaryProductLoopStage =
+	| "workspace"
+	| "pane"
+	| "chatSession"
+	| "checkpointOrDiff";
+
+export interface PrimaryProductLoopStep {
+	readonly stage: PrimaryProductLoopStage;
+	readonly owner: string;
+	readonly outcome: string;
+}
+
+export interface PrimaryProductLoopContext {
+	readonly workspaceId: GroupId | null;
+	readonly paneId: PaneId | null;
+	readonly chatSessionPaneId: PaneId | null;
+	readonly workspacePath: string | null;
+	readonly outcomeSurfaces: readonly ["chat-checkpoints", "editor-git-diff"];
+}
+
+export interface TerminalViewSwitchHealth {
+	readonly type: "view_switch";
+	readonly from: string | null;
+	readonly to: string;
+	readonly timestamp: number;
+	readonly elapsedMs: number | null;
+	readonly workspaceId: GroupId | null;
+	readonly paneId: PaneId | null;
+	readonly chatSessionPaneId: PaneId | null;
+	readonly workspacePath: string | null;
+}
+
+export const PRIMARY_PRODUCT_LOOP = [
+	{
+		stage: "workspace",
+		owner: "TerminalGroupModel",
+		outcome: "select a durable project workspace",
+	},
+	{
+		stage: "pane",
+		owner: "TerminalPaneModel",
+		outcome: "focus a chat-capable pane inside that workspace",
+	},
+	{
+		stage: "chatSession",
+		owner: "ChatService",
+		outcome: "run the agent session against the pane workspace context",
+	},
+	{
+		stage: "checkpointOrDiff",
+		owner: "ChatCheckpointReadModel + GitDiffView",
+		outcome: "review checkpoint cards and editor/git diffs from the run",
+	},
+] as const satisfies readonly PrimaryProductLoopStep[];
+
 const TERMINAL_STORAGE_KEY = "inferay-terminal-state" as const;
 const TERMINAL_SHELL_CHANGE_EVENT = "terminal-shell-change" as const;
 
@@ -341,6 +396,7 @@ export type TerminalStateChangeSource =
 export interface TerminalShellChangeDetail {
 	source: TerminalStateChangeSource;
 	reason?: string;
+	productHealth?: TerminalViewSwitchHealth;
 	stateKey?: string;
 	state?: TerminalSavedState;
 }
@@ -412,6 +468,61 @@ export function terminalStateScore(
 				10
 		);
 	}, 0);
+}
+
+export function getPrimaryProductLoopContext(
+	state: Pick<TerminalSavedState, "groups" | "selectedGroupId"> | null
+): PrimaryProductLoopContext {
+	const workspace =
+		state?.groups.find(hasId.bind(null, state.selectedGroupId)) ??
+		state?.groups[0] ??
+		null;
+	const selectedPane =
+		workspace?.panes.find(hasId.bind(null, workspace.selectedPaneId)) ??
+		workspace?.panes[0] ??
+		null;
+	const chatPane =
+		selectedPane && isChatAgentKind(selectedPane.agentKind)
+			? selectedPane
+			: (workspace?.panes.find((pane) => isChatAgentKind(pane.agentKind)) ??
+				null);
+	const workspacePath = chatPane?.cwd ?? selectedPane?.cwd ?? null;
+	return {
+		workspaceId: workspace?.id ?? null,
+		paneId: selectedPane?.id ?? null,
+		chatSessionPaneId: chatPane?.id ?? null,
+		workspacePath,
+		outcomeSurfaces: ["chat-checkpoints", "editor-git-diff"],
+	};
+}
+
+export function createTerminalViewSwitchHealth({
+	context,
+	from,
+	previousTimestamp = null,
+	timestamp = Date.now(),
+	to,
+}: {
+	context: PrimaryProductLoopContext;
+	from: string | null;
+	previousTimestamp?: number | null;
+	timestamp?: number;
+	to: string;
+}): TerminalViewSwitchHealth {
+	return {
+		type: "view_switch",
+		from,
+		to,
+		timestamp,
+		elapsedMs:
+			previousTimestamp === null
+				? null
+				: Math.max(0, timestamp - previousTimestamp),
+		workspaceId: context.workspaceId,
+		paneId: context.paneId,
+		chatSessionPaneId: context.chatSessionPaneId,
+		workspacePath: context.workspacePath,
+	};
 }
 
 let _cachedTerminalState: TerminalSavedState | null = null;
@@ -927,9 +1038,7 @@ export type StatusIconType =
 
 export interface StatusInfo {
 	readonly label: string;
-	readonly color: string;
-	readonly textColor: string;
-	readonly iconColor: string;
+	readonly tone: "idle" | "thinking" | "responding" | "error" | "tool";
 	readonly iconType: StatusIconType;
 	readonly isActive: boolean;
 	readonly toolName?: string;
@@ -938,42 +1047,32 @@ export interface StatusInfo {
 const STATUS_CONFIG: Record<BaseStatus, Omit<StatusInfo, "toolName">> = {
 	idle: {
 		label: "Idle",
-		color: "bg-zinc-500",
-		textColor: "text-zinc-400",
-		iconColor: "text-zinc-400",
+		tone: "idle",
 		iconType: "circle",
 		isActive: false,
 	},
 	thinking: {
 		label: "Thinking...",
-		color: "bg-yellow-500 animate-pulse",
-		textColor: "text-yellow-500",
-		iconColor: "text-yellow-500",
+		tone: "thinking",
 		iconType: "sparkles",
 		isActive: true,
 	},
 	responding: {
 		label: "Responding...",
-		color: "bg-blue-500 animate-pulse",
-		textColor: "text-blue-400",
-		iconColor: "text-blue-400",
+		tone: "responding",
 		iconType: "message",
 		isActive: true,
 	},
 	error: {
 		label: "Error",
-		color: "bg-red-500",
-		textColor: "text-red-400",
-		iconColor: "text-red-500",
+		tone: "error",
 		iconType: "alert",
 		isActive: false,
 	},
 };
 
 const TOOL_STATUS_CONFIG: Omit<StatusInfo, "toolName" | "label"> = {
-	color: "bg-orange-500 animate-pulse",
-	textColor: "text-orange-400",
-	iconColor: "text-orange-400",
+	tone: "tool",
 	iconType: "wrench",
 	isActive: true,
 };
@@ -988,9 +1087,7 @@ export function getStatusInfo(status: string): StatusInfo {
 		};
 	return {
 		label: status,
-		color: "bg-zinc-500",
-		textColor: "text-zinc-400",
-		iconColor: "text-zinc-400",
+		tone: "idle",
 		iconType: "circle",
 		isActive: false,
 	};

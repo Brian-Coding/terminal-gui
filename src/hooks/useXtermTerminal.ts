@@ -37,13 +37,6 @@ export function useXtermTerminal({
 		initializedRef.current = false;
 		const term = new Terminal({
 			cursorBlink: true,
-			fontSize,
-			fontFamily: `"${fontFamily}", monospace`,
-			theme: {
-				background: theme.bg,
-				foreground: theme.fg,
-				cursor: theme.cursor,
-			},
 			allowProposedApi: true,
 			scrollback: 1000,
 			scrollOnUserInput: true,

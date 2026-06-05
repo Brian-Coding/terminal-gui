@@ -1,5 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import type { GraphNode, GraphRow } from "../../features/git/useGitGraph";
 import { toggleBoolean } from "../../lib/data.ts";
 import { readStoredJson, writeStoredJson } from "../../lib/stored-json.ts";
@@ -268,20 +268,21 @@ function HeaderRow({
 const WipRow = memo(function WipRow({
 	graphWidth,
 	selected,
-	onClick,
+	onSelect,
 	fileCount,
 	branch,
 	columns,
 }: {
 	graphWidth: number;
 	selected: boolean;
-	onClick: () => void;
+	onSelect?: (hash: string) => void;
 	fileCount: number;
 	branch?: string;
 	columns: ColumnVisibility;
 }) {
 	const nodeLeft = GRAPH_PADDING + COLUMN_WIDTH / 2 - AVATAR_SIZE / 2;
 	const nodeTop = ROW_HEIGHT / 2 - AVATAR_SIZE / 2;
+	const handleClick = useCallback(() => onSelect?.("wip"), [onSelect]);
 
 	return (
 		<button
@@ -293,7 +294,7 @@ const WipRow = memo(function WipRow({
 					? "rgba(249,115,22,0.08)"
 					: "rgba(249,115,22,0.025)",
 			}}
-			onClick={onClick}
+			onClick={handleClick}
 		>
 			{selected && <div {...stylex.props(styles.wipAccentBar)} />}
 
@@ -309,12 +310,7 @@ const WipRow = memo(function WipRow({
 					style={{
 						left: nodeLeft,
 						top: nodeTop,
-						width: AVATAR_SIZE,
-						height: AVATAR_SIZE,
 						borderColor: "#f97316",
-						backgroundColor: "var(--color-inferay-black)",
-						boxShadow: "0 0 6px rgba(249,115,22,0.2)",
-						zIndex: 3,
 					}}
 				>
 					<div
@@ -362,14 +358,14 @@ const CommitRow = memo(function CommitRow({
 	commit,
 	graphWidth,
 	selected,
-	onClick,
+	onSelect,
 	columns,
 	index,
 }: {
 	commit: GraphNode;
 	graphWidth: number;
 	selected: boolean;
-	onClick: () => void;
+	onSelect?: (hash: string) => void;
 	columns: ColumnVisibility;
 	index: number;
 }) {
@@ -380,6 +376,10 @@ const CommitRow = memo(function CommitRow({
 		AVATAR_SIZE / 2;
 	const nodeTop = ROW_HEIGHT / 2 - AVATAR_SIZE / 2;
 	const hasRefs = commit.refs.length > 0;
+	const handleClick = useCallback(
+		() => onSelect?.(commit.hash),
+		[commit.hash, onSelect]
+	);
 
 	return (
 		<button
@@ -393,7 +393,7 @@ const CommitRow = memo(function CommitRow({
 						? "rgba(255,255,255,0.012)"
 						: undefined,
 			}}
-			onClick={onClick}
+			onClick={handleClick}
 		>
 			{/* Selected accent bar */}
 			{selected && (
@@ -417,12 +417,8 @@ const CommitRow = memo(function CommitRow({
 					style={{
 						left: nodeLeft,
 						top: nodeTop,
-						width: AVATAR_SIZE,
-						height: AVATAR_SIZE,
 						border: `2.5px solid ${commit.color}`,
-						backgroundColor: "var(--color-inferay-black)",
 						boxShadow: `0 0 6px ${hexToRgba(commit.color, 0.25)}`,
-						zIndex: 3,
 					}}
 				/>
 			</div>
@@ -631,7 +627,7 @@ export const CommitGraph = memo(function CommitGraph({
 					<WipRow
 						graphWidth={graphWidth}
 						selected={selectedHash === "wip"}
-						onClick={() => onSelect?.("wip")}
+						onSelect={onSelect}
 						fileCount={wipFiles.length}
 						branch={branch}
 						columns={columns}
@@ -643,7 +639,7 @@ export const CommitGraph = memo(function CommitGraph({
 						commit={commit}
 						graphWidth={graphWidth}
 						selected={selectedHash === commit.hash}
-						onClick={() => onSelect?.(commit.hash)}
+						onSelect={onSelect}
 						columns={columns}
 						index={i}
 					/>
@@ -867,9 +863,14 @@ const styles = stylex.create({
 		display: "flex",
 		alignItems: "center",
 		justifyContent: "center",
+		width: AVATAR_SIZE,
+		height: AVATAR_SIZE,
 		borderWidth: 2,
 		borderStyle: "dashed",
 		borderRadius: "999px",
+		backgroundColor: "var(--color-inferay-black)",
+		boxShadow: "0 0 6px rgba(249,115,22,0.2)",
+		zIndex: 3,
 	},
 	wipNodeInner: {
 		width: controlSize._2,
@@ -952,7 +953,11 @@ const styles = stylex.create({
 	},
 	graphAvatar: {
 		position: "absolute",
+		width: AVATAR_SIZE,
+		height: AVATAR_SIZE,
 		borderRadius: "999px",
+		backgroundColor: "var(--color-inferay-black)",
+		zIndex: 3,
 	},
 	authorAvatar: {
 		width: controlSize._4,
