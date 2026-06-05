@@ -14,7 +14,8 @@
 		"release:resume": "bun scripts/release.ts --resume",
 		"format": "bunx biome format --write ./src",
 		"format:prettier": "prettier . --write",
-		"check": "bunx biome check --write ./src"
+		"check": "bunx biome check --write ./src",
+		"check:architecture": "bash scripts/check-architecture.sh"
 	},
 	"lint-staged": {
 		"*": "prettier --write --ignore-unknown"

@@ -13,13 +13,20 @@ import {
 } from "../../tokens.stylex.ts";
 import { IconChevronDown } from "./Icons.tsx";
 
-interface DropdownOption {
+export interface DropdownOption {
 	id: string;
 	label: string;
 	detail?: string;
 	status?: string;
 	icon?: React.ReactNode;
 }
+
+type DropdownOptionRenderer =
+	| React.ComponentType<{
+			option: DropdownOption;
+			isSelected: boolean;
+	  }>
+	| ((option: DropdownOption, isSelected: boolean) => React.ReactNode);
 
 interface DropdownButtonProps {
 	value: string | null;
@@ -30,7 +37,7 @@ interface DropdownButtonProps {
 	emptyLabel?: string;
 	minWidth?: number;
 	fullWidth?: boolean;
-	renderOption?: (opt: DropdownOption, isSelected: boolean) => React.ReactNode;
+	renderOption?: DropdownOptionRenderer;
 	buttonClassName?: string;
 	labelClassName?: string;
 	menuPlacement?: "auto" | "top" | "bottom";
@@ -55,17 +62,27 @@ function DropdownCustomOption({
 }: {
 	opt: DropdownOption;
 	isSelected: boolean;
-	renderOption: (opt: DropdownOption, isSelected: boolean) => React.ReactNode;
+	renderOption: DropdownOptionRenderer;
 	onChange: (id: string) => void;
 	setOpen: (v: boolean) => void;
 }) {
+	const OptionContent = renderOption as React.ComponentType<{
+		option: DropdownOption;
+		isSelected: boolean;
+	}>;
+	const content =
+		renderOption.length >= 2 ? (
+			Reflect.apply(renderOption, undefined, [opt, isSelected])
+		) : (
+			<OptionContent option={opt} isSelected={isSelected} />
+		);
 	return (
 		<button
 			type="button"
 			onClick={selectDropdownOption.bind(null, onChange, setOpen, opt.id)}
-			className="cursor-pointer"
+			{...stylex.props(styles.customOption)}
 		>
-			{renderOption(opt, isSelected)}
+			{content}
 		</button>
 	);
 }
@@ -90,6 +107,11 @@ export function DropdownButton({
 	const btnRef = useRef<HTMLButtonElement>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
+	const eventHandlersRef = useRef({
+		handleDocumentPointerDown: (_event: MouseEvent) => {},
+		handleWindowScroll: (_event: Event) => {},
+		handleDocumentKeyDown: (_event: KeyboardEvent) => {},
+	});
 	const [pos, setPos] = useState({
 		top: 0,
 		bottom: 0,
@@ -98,31 +120,39 @@ export function DropdownButton({
 		maxH: 300,
 		placement: "bottom" as "top" | "bottom",
 	});
-	useEffect(() => {
-		if (!open) return;
-		const handleClick = (e: MouseEvent) => {
+	eventHandlersRef.current = {
+		handleDocumentPointerDown(event) {
 			if (
 				menuRef.current &&
-				!menuRef.current.contains(e.target as Node) &&
-				!btnRef.current?.contains(e.target as Node)
+				!menuRef.current.contains(event.target as Node) &&
+				!btnRef.current?.contains(event.target as Node)
 			) {
 				setOpen(false);
 			}
-		};
-		const handleScroll = (e: Event) => {
-			if (menuRef.current?.contains(e.target as Node)) return;
+		},
+		handleWindowScroll(event) {
+			if (menuRef.current?.contains(event.target as Node)) return;
 			setOpen(false);
-		};
-		const handleKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") setOpen(false);
-		};
-		document.addEventListener("mousedown", handleClick);
-		window.addEventListener("scroll", handleScroll, true);
-		document.addEventListener("keydown", handleKey);
+		},
+		handleDocumentKeyDown(event) {
+			if (event.key === "Escape") setOpen(false);
+		},
+	};
+	useEffect(() => {
+		if (!open) return;
+		const handleDocumentPointerDown = (event: MouseEvent) =>
+			eventHandlersRef.current.handleDocumentPointerDown(event);
+		const handleWindowScroll = (event: Event) =>
+			eventHandlersRef.current.handleWindowScroll(event);
+		const handleDocumentKeyDown = (event: KeyboardEvent) =>
+			eventHandlersRef.current.handleDocumentKeyDown(event);
+		document.addEventListener("mousedown", handleDocumentPointerDown);
+		window.addEventListener("scroll", handleWindowScroll, true);
+		document.addEventListener("keydown", handleDocumentKeyDown);
 		return () => {
-			document.removeEventListener("mousedown", handleClick);
-			window.removeEventListener("scroll", handleScroll, true);
-			document.removeEventListener("keydown", handleKey);
+			document.removeEventListener("mousedown", handleDocumentPointerDown);
+			window.removeEventListener("scroll", handleWindowScroll, true);
+			document.removeEventListener("keydown", handleDocumentKeyDown);
 		};
 	}, [open]);
 	const updateMenuPosition = useCallback(() => {
@@ -161,10 +191,6 @@ export function DropdownButton({
 		}
 		setOpen(!open);
 	};
-	useEffect(() => {
-		if (!open) return;
-		updateMenuPosition();
-	}, [open, updateMenuPosition]);
 	const selected = useMemo(
 		() => options.find(hasId.bind(null, value)),
 		[options, value]
@@ -238,27 +264,24 @@ export function DropdownButton({
 							)}
 						>
 							{opt.icon && (
-								<span className="shrink-0 text-inferay-muted-gray [&_svg]:h-3 [&_svg]:w-3">
-									{opt.icon}
-								</span>
+								<span {...stylex.props(styles.optionIcon)}>{opt.icon}</span>
 							)}
-							<div className="min-w-0">
-								<span className="block truncate font-medium">{opt.label}</span>
+							<div {...stylex.props(styles.optionContent)}>
+								<span {...stylex.props(styles.optionLabel)}>{opt.label}</span>
 								{opt.detail && (
 									<span
-										className={`ml-1.5 rounded px-1 py-0.5 text-[8px] font-medium ${
-											opt.detail.includes("★")
-												? "bg-inferay-white/[0.08] text-inferay-soft-white"
-												: opt.detail.includes("Best")
-													? "bg-inferay-white/[0.08] text-inferay-soft-white"
-													: "bg-inferay-white/[0.06] text-inferay-muted-gray"
-										}`}
+										{...stylex.props(
+											styles.detailBadge,
+											(opt.detail.includes("★") ||
+												opt.detail.includes("Best")) &&
+												styles.detailBadgeFeatured
+										)}
 									>
 										{opt.detail}
 									</span>
 								)}
 								{opt.status && (
-									<span className="ml-1.5 text-[9px] text-inferay-muted-gray">
+									<span {...stylex.props(styles.optionStatus)}>
 										{opt.status}
 									</span>
 								)}
@@ -278,19 +301,32 @@ export function DropdownButton({
 				{...(buttonClassName ? {} : buttonProps)}
 				className={
 					buttonClassName
-						? `${buttonProps.className ?? ""} flex items-center text-xs transition-colors ${fullWidth ? "w-full" : ""} ${buttonClassName}`
+						? `${buttonProps.className ?? ""} ${buttonClassName}`
 						: buttonProps.className
 				}
 			>
 				{icon}
 				<span
-					className={`${fullWidth ? "flex-1 truncate text-left" : ""} ${selected ? "text-inferay-white" : "text-inferay-muted-gray"} ${labelClassName}`}
+					{...stylex.props(
+						styles.buttonLabel,
+						fullWidth && styles.buttonLabelFull,
+						selected ? styles.buttonLabelSelected : styles.buttonLabelMuted
+					)}
+					className={`${
+						stylex.props(
+							styles.buttonLabel,
+							fullWidth && styles.buttonLabelFull,
+							selected ? styles.buttonLabelSelected : styles.buttonLabelMuted
+						).className ?? ""
+					} ${labelClassName}`}
 				>
 					{selected?.label || placeholder}
 				</span>
 				<IconChevronDown
 					size={10}
-					className={`shrink-0 text-inferay-muted-gray transition-transform ${open ? "rotate-180" : ""}`}
+					className={
+						stylex.props(styles.chevron, open && styles.chevronOpen).className
+					}
 				/>
 			</button>
 			{open &&
@@ -310,7 +346,7 @@ export function DropdownButton({
 							<>
 								{optionsBox}
 								{searchBox && (
-									<div className="border-t border-inferay-gray-border">
+									<div {...stylex.props(styles.topSearchDivider)}>
 										{searchBox}
 									</div>
 								)}
@@ -345,6 +381,34 @@ const styles = stylex.create({
 			"background-color, background-image, border-color, box-shadow, color",
 		transitionTimingFunction: "ease",
 		userSelect: "none",
+	},
+	buttonLabel: {
+		fontSize: font.size_2,
+		transitionProperty: "color",
+		transitionDuration: "150ms",
+	},
+	buttonLabelFull: {
+		flex: 1,
+		overflow: "hidden",
+		textAlign: "left",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+	},
+	buttonLabelSelected: {
+		color: color.textMain,
+	},
+	buttonLabelMuted: {
+		color: color.textMuted,
+	},
+	chevron: {
+		color: color.textMuted,
+		flexShrink: 0,
+		transitionDuration: "150ms",
+		transitionProperty: "transform",
+		transitionTimingFunction: "ease",
+	},
+	chevronOpen: {
+		transform: "rotate(180deg)",
 	},
 	buttonClosed: {
 		backgroundColor: {
@@ -429,6 +493,9 @@ const styles = stylex.create({
 		paddingInline: controlSize._3,
 		textAlign: "center",
 	},
+	customOption: {
+		cursor: "pointer",
+	},
 	option: {
 		alignItems: "center",
 		backgroundColor: {
@@ -456,10 +523,48 @@ const styles = stylex.create({
 		userSelect: "none",
 		width: "100%",
 	},
+	optionIcon: {
+		color: color.textMuted,
+		flexShrink: 0,
+	},
+	optionContent: {
+		minWidth: 0,
+	},
+	optionLabel: {
+		display: "block",
+		fontWeight: font.weight_5,
+		overflow: "hidden",
+		textOverflow: "ellipsis",
+		whiteSpace: "nowrap",
+	},
+	detailBadge: {
+		backgroundColor: "rgba(255, 255, 255, 0.06)",
+		borderRadius: 4,
+		color: color.textMuted,
+		fontSize: "0.5rem",
+		fontWeight: font.weight_5,
+		marginLeft: controlSize._1_5,
+		paddingBlock: "0.125rem",
+		paddingInline: controlSize._1,
+	},
+	detailBadgeFeatured: {
+		backgroundColor: "rgba(255, 255, 255, 0.08)",
+		color: color.textSoft,
+	},
+	optionStatus: {
+		color: color.textMuted,
+		fontSize: "0.5625rem",
+		marginLeft: controlSize._1_5,
+	},
 	optionSelected: {
 		backgroundColor: color.controlActive,
 		backgroundImage:
 			"linear-gradient(90deg, rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.018))",
 		color: color.textMain,
+	},
+	topSearchDivider: {
+		borderTopColor: color.border,
+		borderTopStyle: "solid",
+		borderTopWidth: 1,
 	},
 });

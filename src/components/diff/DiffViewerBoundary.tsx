@@ -1,5 +1,7 @@
+import * as stylex from "@stylexjs/stylex";
 import type React from "react";
 import { Component } from "react";
+import { color, controlSize, font } from "../../tokens.stylex.ts";
 
 interface DiffViewerBoundaryProps {
 	children: React.ReactNode;
@@ -8,53 +10,41 @@ interface DiffViewerBoundaryProps {
 
 interface DiffViewerBoundaryState {
 	error: Error | null;
+	resetKey: string;
 }
 
 export class DiffViewerBoundary extends Component<
 	DiffViewerBoundaryProps,
 	DiffViewerBoundaryState
 > {
-	override state: DiffViewerBoundaryState = { error: null };
+	override state: DiffViewerBoundaryState = {
+		error: null,
+		resetKey: this.props.resetKey,
+	};
 
 	static getDerivedStateFromError(error: Error) {
 		return { error };
 	}
 
-	override componentDidUpdate(prevProps: DiffViewerBoundaryProps) {
-		if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
-			this.setState({ error: null });
+	static getDerivedStateFromProps(
+		props: DiffViewerBoundaryProps,
+		state: DiffViewerBoundaryState
+	) {
+		if (props.resetKey !== state.resetKey) {
+			return { error: null, resetKey: props.resetKey };
 		}
+		return null;
 	}
 
 	override render() {
 		if (this.state.error) {
 			return (
-				<div
-					style={{
-						alignItems: "center",
-						background: "#0f1115",
-						color: "#e6edf3",
-						display: "flex",
-						fontFamily: "var(--font-body)",
-						height: "100%",
-						justifyContent: "center",
-						minHeight: 240,
-						padding: 24,
-						textAlign: "center",
-					}}
-				>
+				<div {...stylex.props(styles.fallback)}>
 					<div>
-						<div style={{ fontSize: 14, fontWeight: 600 }}>
+						<div {...stylex.props(styles.title)}>
 							Diff viewer could not render this file.
 						</div>
-						<div
-							style={{
-								color: "#8b949e",
-								fontSize: 12,
-								marginTop: 8,
-								maxWidth: 520,
-							}}
-						>
+						<div {...stylex.props(styles.description)}>
 							Select another file, then return to this one. The raw git diff is
 							still available from the terminal.
 						</div>
@@ -66,3 +56,28 @@ export class DiffViewerBoundary extends Component<
 		return this.props.children;
 	}
 }
+
+const styles = stylex.create({
+	fallback: {
+		alignItems: "center",
+		backgroundColor: color.background,
+		color: color.textMain,
+		display: "flex",
+		fontFamily: "var(--font-body)",
+		height: "100%",
+		justifyContent: "center",
+		minHeight: 240,
+		padding: controlSize._6,
+		textAlign: "center",
+	},
+	title: {
+		fontSize: font.size_4,
+		fontWeight: font.weight_6,
+	},
+	description: {
+		color: color.textMuted,
+		fontSize: font.size_2,
+		marginTop: controlSize._2,
+		maxWidth: 520,
+	},
+});

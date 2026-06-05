@@ -16,23 +16,26 @@ import {
 	IconUser,
 	IconX,
 } from "../../components/ui/Icons.tsx";
-import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
-import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
-import { resolveServerUrl } from "../../lib/server-origin.ts";
-import { writeStoredValue } from "../../lib/stored-json.ts";
-import {
-	createDefaultTerminalState,
-	loadCanonicalTerminalState,
-	saveSyncedTerminalState,
-} from "../../features/terminal/terminal-utils.ts";
-import { lacksValue } from "../../lib/data.ts";
-import { fetchJsonOr, sendJsonWithBusy } from "../../lib/fetch-json.ts";
 import {
 	fetchForgeAccounts,
 	fetchGithubRepos,
 	invalidateForgeAccountsCache,
 } from "../../features/forge/forge-client.ts";
 import type { ForgeAccount, GithubRepo } from "../../features/forge/types.ts";
+import {
+	createDefaultTerminalState,
+	loadCanonicalTerminalState,
+	saveSyncedTerminalState,
+} from "../../features/terminal/terminal-utils.ts";
+import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
+import { lacksValue } from "../../lib/data.ts";
+import {
+	fetchJsonOr,
+	resolveServerUrl,
+	sendJsonWithBusy,
+} from "../../lib/fetch-json.ts";
+import { writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 
 export const ONBOARDING_DONE_KEY = "inferay-onboarding-done";
@@ -163,18 +166,14 @@ function areGithubReposEqual(prev: GithubRepo[], next: GithubRepo[]) {
 const EASING = "cubic-bezier(.22,.82,.2,1)";
 const logoUrl = resolveServerUrl("/logo.png");
 
-/* ─── Transition helpers ─── */
+type StepPhase = "active" | "before" | "after";
 
-function stepClass(
-	current: Step,
-	target: Step,
-	{ active, before, after }: { active: string; before: string; after: string }
-) {
+function getStepPhase(current: Step, target: Step): StepPhase {
 	const order: Step[] = ["intro", "github", "projects", "complete"];
 	const ci = order.indexOf(current);
 	const ti = order.indexOf(target);
-	if (ci === ti) return active;
-	return ci < ti ? before : after;
+	if (ci === ti) return "active";
+	return ci < ti ? "before" : "after";
 }
 
 /* ─── Main component ─── */
@@ -312,25 +311,15 @@ export function OnboardingPage() {
 			{/* Grid background — like Helmor */}
 			<div
 				aria-hidden
-				className={`pointer-events-none absolute inset-0 transition-opacity duration-700 ${step === "complete" ? "opacity-0" : "opacity-[0.09]"}`}
-				style={{
-					backgroundImage:
-						"linear-gradient(to right, var(--color-inferay-white) 1px, transparent 1px), linear-gradient(to bottom, var(--color-inferay-white) 1px, transparent 1px)",
-					backgroundSize: "42px 42px",
-					maskImage:
-						"radial-gradient(ellipse 82% 68% at 50% 42%, black 15%, transparent 78%)",
-					transitionTimingFunction: EASING,
-				}}
+				{...stylex.props(
+					styles.gridBackdrop,
+					step === "complete"
+						? styles.gridBackdropHidden
+						: styles.gridBackdropVisible
+				)}
 			/>
 			{/* Bottom fade */}
-			<div
-				aria-hidden
-				{...stylex.props(styles.bottomFade)}
-				style={{
-					background:
-						"linear-gradient(to top, var(--color-inferay-black), transparent)",
-				}}
-			/>
+			<div aria-hidden {...stylex.props(styles.bottomFade)} />
 
 			{/* All steps rendered simultaneously — CSS transitions only */}
 			<IntroStep
@@ -378,17 +367,18 @@ function IntroStep({
 	onNext: () => void;
 	onSkip: () => void;
 }) {
-	const vis = stepClass(step, "intro", {
-		active: "translate-x-0 translate-y-0 opacity-100",
-		before: "pointer-events-none translate-x-[40vw] opacity-0",
-		after: "pointer-events-none -translate-x-[40vw] opacity-0",
-	});
+	const phase = getStepPhase(step, "intro");
 
 	return (
 		<section
 			aria-hidden={step !== "intro"}
-			className={`absolute inset-0 z-10 flex items-center justify-center transition-all duration-700 ${vis}`}
-			style={{ transitionTimingFunction: EASING }}
+			{...stylex.props(
+				styles.stepSurface,
+				styles.stepSurfaceStandard,
+				phase === "active" && styles.stepActive,
+				phase === "before" && styles.introBefore,
+				phase === "after" && styles.introAfter
+			)}
 		>
 			<div {...stylex.props(styles.introStack)}>
 				<div {...stylex.props(styles.logoFrame)}>
@@ -444,19 +434,18 @@ function GithubStep({
 	onBack: () => void;
 	onNext: () => void;
 }) {
-	const vis = stepClass(step, "github", {
-		active: "translate-x-0 translate-y-0 opacity-100",
-		before:
-			"pointer-events-none translate-x-[40vw] translate-y-[8vh] opacity-0 blur-sm",
-		after:
-			"pointer-events-none -translate-x-[40vw] translate-y-[8vh] opacity-0 blur-sm",
-	});
+	const phase = getStepPhase(step, "github");
 
 	return (
 		<section
 			aria-hidden={step !== "github"}
-			className={`absolute inset-0 z-10 flex items-center justify-center transition-all duration-700 ${vis}`}
-			style={{ transitionTimingFunction: EASING }}
+			{...stylex.props(
+				styles.stepSurface,
+				styles.stepSurfaceStandard,
+				phase === "active" && styles.stepActive,
+				phase === "before" && styles.forwardBefore,
+				phase === "after" && styles.forwardAfter
+			)}
 		>
 			<div {...stylex.props(styles.stepPanel)}>
 				<div {...stylex.props(styles.centerText)}>
@@ -588,19 +577,18 @@ function ProjectsStep({
 }) {
 	const totalProjects = selected.size + localFolders.length;
 
-	const vis = stepClass(step, "projects", {
-		active: "translate-x-0 translate-y-0 opacity-100",
-		before:
-			"pointer-events-none translate-x-[40vw] translate-y-[8vh] opacity-0 blur-sm",
-		after:
-			"pointer-events-none -translate-x-[18vw] -translate-y-[16vh] scale-[1.08] opacity-0 blur-sm",
-	});
+	const phase = getStepPhase(step, "projects");
 
 	return (
 		<section
 			aria-hidden={step !== "projects"}
-			className={`absolute inset-0 z-10 flex items-center justify-center transition-all duration-1000 ${vis}`}
-			style={{ transitionTimingFunction: EASING }}
+			{...stylex.props(
+				styles.stepSurface,
+				styles.stepSurfaceSlow,
+				phase === "active" && styles.stepActive,
+				phase === "before" && styles.forwardBefore,
+				phase === "after" && styles.projectsAfter
+			)}
 		>
 			<div {...stylex.props(styles.projectPanel)}>
 				<div {...stylex.props(styles.centerText)}>
@@ -771,12 +759,83 @@ const styles = stylex.create({
 			"ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
 		WebkitFontSmoothing: "antialiased",
 	},
+	gridBackdrop: {
+		backgroundImage:
+			"linear-gradient(to right, var(--color-inferay-white) 1px, transparent 1px), linear-gradient(to bottom, var(--color-inferay-white) 1px, transparent 1px)",
+		backgroundSize: "42px 42px",
+		inset: 0,
+		maskImage:
+			"radial-gradient(ellipse 82% 68% at 50% 42%, black 15%, transparent 78%)",
+		pointerEvents: "none",
+		position: "absolute",
+		transitionDuration: "700ms",
+		transitionProperty: "opacity",
+		transitionTimingFunction: EASING,
+	},
+	gridBackdropVisible: {
+		opacity: 0.09,
+	},
+	gridBackdropHidden: {
+		opacity: 0,
+	},
 	bottomFade: {
+		background:
+			"linear-gradient(to top, var(--color-inferay-black), transparent)",
 		position: "absolute",
 		insetInline: 0,
 		bottom: 0,
 		height: "50%",
 		pointerEvents: "none",
+	},
+	stepSurface: {
+		alignItems: "center",
+		display: "flex",
+		inset: 0,
+		justifyContent: "center",
+		position: "absolute",
+		transitionProperty: "filter, opacity, transform",
+		transitionTimingFunction: EASING,
+		zIndex: 10,
+	},
+	stepSurfaceStandard: {
+		transitionDuration: "700ms",
+	},
+	stepSurfaceSlow: {
+		transitionDuration: "1000ms",
+	},
+	stepActive: {
+		filter: "blur(0)",
+		opacity: 1,
+		pointerEvents: "auto",
+		transform: "translate3d(0, 0, 0) scale(1)",
+	},
+	introBefore: {
+		opacity: 0,
+		pointerEvents: "none",
+		transform: "translate3d(40vw, 0, 0)",
+	},
+	introAfter: {
+		opacity: 0,
+		pointerEvents: "none",
+		transform: "translate3d(-40vw, 0, 0)",
+	},
+	forwardBefore: {
+		filter: "blur(4px)",
+		opacity: 0,
+		pointerEvents: "none",
+		transform: "translate3d(40vw, 8vh, 0)",
+	},
+	forwardAfter: {
+		filter: "blur(4px)",
+		opacity: 0,
+		pointerEvents: "none",
+		transform: "translate3d(-40vw, 8vh, 0)",
+	},
+	projectsAfter: {
+		filter: "blur(4px)",
+		opacity: 0,
+		pointerEvents: "none",
+		transform: "translate3d(-18vw, -16vh, 0) scale(1.08)",
 	},
 	introStack: {
 		display: "flex",

@@ -1,15 +1,5 @@
 import * as stylex from "@stylexjs/stylex";
-import {
-	APP_REGION_DRAG_CLASS,
-	APP_REGION_NO_DRAG_CLASS,
-} from "../../lib/app-region.ts";
-import {
-	type ReactNode,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
 	loadDefaultChatSettings,
@@ -32,11 +22,12 @@ import {
 	TERMINAL_MAIN_VIEWS,
 	type TerminalMainView,
 } from "../../lib/app-navigation.tsx";
-import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
 import {
-	listenDocumentEvent,
-	listenWindowEvent,
-} from "../../lib/react-events.ts";
+	APP_REGION_DRAG_CLASS,
+	APP_REGION_NO_DRAG_CLASS,
+} from "../../lib/app-theme.ts";
+import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "../../lib/client-storage-keys.ts";
+import { listenWindowEvent } from "../../lib/react-events.ts";
 import { readStoredValue, writeStoredValue } from "../../lib/stored-json.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { Button } from "../ui/Button.tsx";
@@ -101,8 +92,6 @@ export function TerminalShellHeader() {
 	const location = useLocation();
 	const navigate = useNavigate();
 	const [shellState, setShellState] = useState(loadShellState);
-	const [showNewMenu, setShowNewMenu] = useState(false);
-	const newMenuRef = useRef<HTMLDivElement>(null);
 	const [layoutMode, setLayoutMode] = useState(loadTerminalLayoutMode);
 
 	const refreshShellState = useCallback(() => {
@@ -122,19 +111,6 @@ export function TerminalShellHeader() {
 		return listenTerminalLayoutMode(setLayoutMode);
 	}, []);
 
-	useEffect(() => {
-		if (!showNewMenu) return;
-		const handleClick = (event: MouseEvent) => {
-			if (
-				newMenuRef.current &&
-				!newMenuRef.current.contains(event.target as Node)
-			) {
-				setShowNewMenu(false);
-			}
-		};
-		return listenDocumentEvent("mousedown", handleClick);
-	}, [showNewMenu]);
-
 	const updateMainView = useCallback(
 		(view: TerminalMainView) => {
 			if (shellState.mainView !== view) {
@@ -144,9 +120,9 @@ export function TerminalShellHeader() {
 				);
 				dispatchTerminalShellChange({ source: "view", reason: "main-view" });
 			}
-			if (location.pathname !== "/terminal") navigate("/terminal");
+			if (window.location.hash !== "#/terminal") navigate("/terminal");
 		},
-		[location.pathname, navigate, shellState.mainView]
+		[navigate, shellState.mainView]
 	);
 
 	const addPaneToSelectedGroup = useCallback(
@@ -157,7 +133,6 @@ export function TerminalShellHeader() {
 				"add-pane",
 				{ createIfMissing: true }
 			);
-			setShowNewMenu(false);
 			navigate("/terminal");
 		},
 		[navigate]

@@ -14,6 +14,34 @@ const RIPPLE_RING_5 = [
 
 const BASE_CYCLE_MS = 2400;
 const RIPPLE_CYCLE_MS = 1500;
+const rippleEcho = stylex.keyframes({
+	"0%, 100%": { opacity: 0.1 },
+	"28%": { opacity: 0.98 },
+	"56%": { opacity: 0.32 },
+	"78%": { opacity: 0.78 },
+});
+const spiralFade = stylex.keyframes({
+	"0%, 100%": { opacity: 0.15 },
+	"8%": { opacity: 1 },
+	"16%": { opacity: 0.73 },
+	"24%": { opacity: 0.56 },
+	"32%": { opacity: 0.4 },
+	"40%": { opacity: 0.22 },
+});
+const weaveStrand = stylex.keyframes({
+	"0%, 100%": {
+		opacity: 0.08,
+		transform: "scale(0.72)",
+	},
+	"45%": {
+		opacity: 1,
+		transform: "scale(1)",
+	},
+	"76%": {
+		opacity: 0.34,
+		transform: "scale(0.88)",
+	},
+});
 
 interface DotMatrixLoaderProps {
 	dotSize?: number;
@@ -38,10 +66,9 @@ function DotMatrixLoader({
 		: { role: "presentation", "aria-hidden": true as const };
 	return (
 		<div
+			{...stylex.props(styles.matrixGrid)}
 			style={
 				{
-					display: "grid",
-					flexShrink: 0,
 					gridTemplateColumns: `repeat(5, ${dotSize}px)`,
 					gridTemplateRows: `repeat(5, ${dotSize}px)`,
 					gap: `${gap}px`,
@@ -52,7 +79,7 @@ function DotMatrixLoader({
 			{SPIRAL_ORDER_5.map((order, i) => (
 				<span
 					key={i}
-					className="dmx-spiral-dot"
+					{...stylex.props(styles.spiralDot)}
 					style={
 						{
 							width: `${dotSize}px`,
@@ -79,10 +106,9 @@ export function DotMatrixRipple({
 		: { role: "presentation", "aria-hidden": true as const };
 	return (
 		<div
+			{...stylex.props(styles.matrixGrid)}
 			style={
 				{
-					display: "grid",
-					flexShrink: 0,
 					gridTemplateColumns: `repeat(5, ${dotSize}px)`,
 					gridTemplateRows: `repeat(5, ${dotSize}px)`,
 					gap: `${gap}px`,
@@ -93,7 +119,7 @@ export function DotMatrixRipple({
 			{RIPPLE_RING_5.map((ring, i) => (
 				<span
 					key={i}
-					className="dmx-ripple-dot"
+					{...stylex.props(styles.rippleDot)}
 					style={
 						{
 							width: `${dotSize}px`,
@@ -146,15 +172,13 @@ export function DotMatrixWeave({
 					const row = Math.floor(index / 5);
 					const col = index % 5;
 					const peak = col === 1 || col === 3;
-					const dotProps = stylex.props(
-						styles.weaveDot,
-						peak ? styles.weaveDotPeak : styles.weaveDotBase
-					);
 					return (
 						<span
 							key={index}
-							{...dotProps}
-							className={`${dotProps.className ?? ""} dmx-weave-dot`}
+							{...stylex.props(
+								styles.weaveDot,
+								peak ? styles.weaveDotPeak : styles.weaveDotBase
+							)}
 							style={
 								{
 									height: dotSize,
@@ -179,18 +203,46 @@ export function ThinkingIndicator({ startTime }: { startTime: number }) {
 	}, []);
 	const elapsed = formatElapsedMs(now - startTime);
 	return (
-		<div
+		<output
 			{...stylex.props(styles.thinkingRow)}
 			aria-live="polite"
 			aria-label={`Working, ${elapsed} elapsed`}
 		>
 			<DotMatrixRipple />
 			<span {...stylex.props(styles.thinkingTime)}>{elapsed}</span>
-		</div>
+		</output>
 	);
 }
 
 const styles = stylex.create({
+	matrixGrid: {
+		display: "grid",
+		flexShrink: 0,
+	},
+	rippleDot: {
+		animationDelay:
+			"calc(var(--dmx-ripple-ring, 0) * 0.14 * var(--dmx-cycle, 1500ms) + var(--dmx-ripple-parity, 0) * 0.03 * var(--dmx-cycle, 1500ms))",
+		animationDuration: "var(--dmx-cycle, 1500ms)",
+		animationIterationCount: "infinite",
+		animationName: rippleEcho,
+		animationTimingFunction: "ease-in-out",
+		backgroundColor: color.textSoft,
+		borderRadius: 1,
+		display: "block",
+		willChange: "opacity",
+	},
+	spiralDot: {
+		animationDelay:
+			"calc(var(--dmx-spiral-order, 0) * 0.04 * var(--dmx-cycle, 2400ms))",
+		animationDuration: "var(--dmx-cycle, 2400ms)",
+		animationIterationCount: "infinite",
+		animationName: spiralFade,
+		animationTimingFunction: "linear",
+		backgroundColor: color.textSoft,
+		borderRadius: 1,
+		display: "block",
+		willChange: "opacity",
+	},
 	thinkingRow: {
 		alignItems: "center",
 		display: "flex",
@@ -217,7 +269,17 @@ const styles = stylex.create({
 		flexShrink: 0,
 	},
 	weaveDot: {
+		animationDelay:
+			"calc((var(--dmx-weave-row, 0) * 0.13 + var(--dmx-weave-center-distance, 0) * 0.08) * -1 * var(--dmx-weave-cycle, 1600ms))",
+		animationDirection: "alternate",
+		animationDuration: "var(--dmx-weave-cycle, 1600ms)",
+		animationIterationCount: "infinite",
+		animationName: weaveStrand,
+		animationTimingFunction: "ease",
+		backgroundColor: "currentColor",
 		borderRadius: radius.pill,
+		display: "block",
+		willChange: "opacity, transform",
 	},
 	weaveDotBase: {
 		opacity: 0.16,

@@ -12,11 +12,14 @@ import {
 	DEFAULT_APP_ROUTE,
 	DEFAULT_TERMINAL_MAIN_VIEW,
 } from "./lib/app-navigation.tsx";
-import { APP_REGION_DRAG_CLASS } from "./lib/app-region.ts";
-import { applyAppTheme, loadAppThemeId } from "./lib/app-theme.ts";
+import {
+	APP_REGION_DRAG_CLASS,
+	applyAppTheme,
+	loadAppThemeId,
+} from "./lib/app-theme.ts";
 import { TERMINAL_MAIN_VIEW_STORAGE_KEY } from "./lib/client-storage-keys.ts";
 import { hydrateStoredValues } from "./lib/client-storage-sync.ts";
-import { getServerOrigin, resolveServerUrl } from "./lib/server-origin.ts";
+import { getServerOrigin, resolveServerUrl } from "./lib/fetch-json.ts";
 import { readStoredBoolean, writeStoredValue } from "./lib/stored-json.ts";
 import { AutomationsPage } from "./pages/AutomationsPage";
 import { GoalsPage } from "./pages/GoalsPage";
@@ -27,6 +30,7 @@ import { PromptsPage } from "./pages/PromptsPage";
 import { SessionsPage } from "./pages/SessionsPage";
 import { SimulatorsPage } from "./pages/SimulatorsPage";
 import {
+	color,
 	colorTheme,
 	controlSizeTheme,
 	effectTheme,
@@ -83,6 +87,41 @@ if (typeof window !== "undefined") {
 	});
 }
 
+const styles = stylex.create({
+	shell: {
+		backgroundColor: color.background,
+		display: "flex",
+		flexDirection: "column",
+		height: "100vh",
+	},
+	windowSpacer: {
+		backgroundColor: color.background,
+		flexShrink: 0,
+		height: "1.5rem",
+	},
+	appBody: {
+		display: "flex",
+		flex: 1,
+		minHeight: 0,
+	},
+	mainColumn: {
+		display: "flex",
+		flex: 1,
+		flexDirection: "column",
+		minWidth: 0,
+		overflow: "hidden",
+	},
+	mainContent: {
+		flex: 1,
+		minWidth: 0,
+		overflow: "hidden",
+	},
+	onboardingBody: {
+		flex: 1,
+		minHeight: 0,
+	},
+});
+
 const rootElement = document.getElementById("root");
 
 if (!rootElement) {
@@ -97,7 +136,8 @@ const shellThemeProps = stylex.props(
 	radiusTheme,
 	motionTheme,
 	shadowTheme,
-	effectTheme
+	effectTheme,
+	styles.shell
 );
 const routeElements = {
 	terminal: <TerminalPage />,
@@ -113,18 +153,16 @@ const fallbackRouteElement = <Navigate to={DEFAULT_APP_ROUTE} replace />;
 
 function AppShell() {
 	return (
-		<div
-			{...shellThemeProps}
-			className={`flex h-screen flex-col bg-inferay-black ${shellThemeProps.className ?? ""}`}
-		>
+		<div {...shellThemeProps}>
 			<div
-				className={`inferay-window-spacer ${APP_REGION_DRAG_CLASS} h-6 shrink-0 bg-inferay-black`}
+				{...stylex.props(styles.windowSpacer)}
+				className={`inferay-window-spacer ${APP_REGION_DRAG_CLASS} ${stylex.props(styles.windowSpacer).className ?? ""}`}
 			/>
-			<div className="flex min-h-0 flex-1">
+			<div {...stylex.props(styles.appBody)}>
 				<Sidebar />
-				<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+				<div {...stylex.props(styles.mainColumn)}>
 					<TerminalShellHeader />
-					<main className="min-w-0 flex-1 overflow-hidden">
+					<main {...stylex.props(styles.mainContent)}>
 						<Suspense fallback={null}>
 							<Routes>
 								{APP_PAGE_ROUTES.map((route) => (
@@ -146,14 +184,12 @@ function AppShell() {
 
 function OnboardingShell() {
 	return (
-		<div
-			{...shellThemeProps}
-			className={`flex h-screen flex-col bg-inferay-black ${shellThemeProps.className ?? ""}`}
-		>
+		<div {...shellThemeProps}>
 			<div
-				className={`inferay-window-spacer ${APP_REGION_DRAG_CLASS} h-6 shrink-0 bg-inferay-black`}
+				{...stylex.props(styles.windowSpacer)}
+				className={`inferay-window-spacer ${APP_REGION_DRAG_CLASS} ${stylex.props(styles.windowSpacer).className ?? ""}`}
 			/>
-			<div className="min-h-0 flex-1">
+			<div {...stylex.props(styles.onboardingBody)}>
 				<OnboardingPage />
 			</div>
 		</div>

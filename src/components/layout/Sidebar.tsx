@@ -4,6 +4,7 @@ import {
 	useCallback,
 	useEffect,
 	useMemo,
+	useReducer,
 	useRef,
 	useState,
 } from "react";
@@ -17,20 +18,24 @@ import {
 	loadCanonicalTerminalState,
 	loadTerminalState,
 	mutateTerminalWorkspaceState,
-	terminalStateKey,
-	type TerminalShellChangeDetail,
 	type TerminalPaneModel,
+	type TerminalShellChangeDetail,
+	terminalStateKey,
 } from "../../features/terminal/terminal-utils.ts";
-import { useAppInfo } from "../../hooks/useAppInfo.ts";
+import { type AppInfo, useAppInfo } from "../../hooks/useAppInfo.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { SIDEBAR_NAV_ROUTES } from "../../lib/app-navigation.tsx";
 import {
 	APP_REGION_DRAG_CLASS,
 	APP_REGION_NO_DRAG_CLASS,
-} from "../../lib/app-region.ts";
-import { loadAppThemeId } from "../../lib/app-theme.ts";
-import { noop, toggleBoolean } from "../../lib/data.ts";
-import { fetchJsonOr, sendJson } from "../../lib/fetch-json.ts";
+	loadAppThemeId,
+} from "../../lib/app-theme.ts";
+import { noop } from "../../lib/data.ts";
+import {
+	fetchJsonOr,
+	resolveServerUrl,
+	sendJson,
+} from "../../lib/fetch-json.ts";
 import {
 	activateOnEnterOrSpacePreventDefault,
 	listenWindowEvent,
@@ -38,7 +43,6 @@ import {
 	stopPropagation,
 	stopPropagationAndCall,
 } from "../../lib/react-events.ts";
-import { resolveServerUrl } from "../../lib/server-origin.ts";
 import {
 	readStoredBoolean,
 	readStoredValue,
@@ -72,6 +76,19 @@ interface ForgeAccount {
 	active: boolean;
 }
 
+interface SidebarWorkspaceGroup {
+	id: string;
+	name: string;
+	panes: TerminalPaneModel[];
+	selectedPaneId?: string | null;
+}
+
+interface SidebarWorkspaceState {
+	groups: SidebarWorkspaceGroup[];
+	selectedGroupId: string | null;
+	key: string;
+}
+
 function sameForgeAccount(a: ForgeAccount | null, b: ForgeAccount | null) {
 	return (
 		a === b ||
@@ -100,6 +117,57 @@ const logoUrl = resolveServerUrl("/logo.png");
 const DEFAULT_SIDEBAR_WIDTH = 192;
 const MIN_SIDEBAR_WIDTH = 152;
 const MAX_SIDEBAR_WIDTH = 340;
+
+type UpdateStatus = "idle" | "updating" | "error";
+
+interface SidebarUiState {
+	collapsed: boolean;
+	sidebarWidth: number;
+	resizing: boolean;
+	updateStatus: UpdateStatus;
+}
+
+type SidebarUiAction =
+	| { type: "collapsed"; value: boolean }
+	| { type: "sidebarWidth"; value: number }
+	| { type: "resizing"; value: boolean }
+	| { type: "updateStatus"; value: UpdateStatus };
+
+function loadSidebarUiState(): SidebarUiState {
+	const storedWidth = Number(readStoredValue("main-sidebar-width"));
+	return {
+		collapsed: readStoredBoolean("sidebar-collapsed"),
+		sidebarWidth: Number.isFinite(storedWidth)
+			? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, storedWidth))
+			: DEFAULT_SIDEBAR_WIDTH,
+		resizing: false,
+		updateStatus: "idle",
+	};
+}
+
+function sidebarUiReducer(
+	state: SidebarUiState,
+	action: SidebarUiAction
+): SidebarUiState {
+	switch (action.type) {
+		case "collapsed":
+			return state.collapsed === action.value
+				? state
+				: { ...state, collapsed: action.value };
+		case "sidebarWidth":
+			return state.sidebarWidth === action.value
+				? state
+				: { ...state, sidebarWidth: action.value };
+		case "resizing":
+			return state.resizing === action.value
+				? state
+				: { ...state, resizing: action.value };
+		case "updateStatus":
+			return state.updateStatus === action.value
+				? state
+				: { ...state, updateStatus: action.value };
+	}
+}
 
 function deriveSummary(paneId: string): string | null {
 	return deriveStoredSummary(paneId, undefined, () =>
@@ -135,9 +203,16 @@ function PaneSummaryItem({
 		>
 			<span {...stylex.props(styles.paneSummaryIcon)}>
 				{isChat ? (
-					getAgentIcon(pane.agentKind, 12, "opacity-60")
+					getAgentIcon(
+						pane.agentKind,
+						12,
+						stylex.props(styles.iconDim).className
+					)
 				) : (
-					<IconTerminal size={12} className="opacity-60" />
+					<IconTerminal
+						size={12}
+						className={stylex.props(styles.iconDim).className}
+					/>
 				)}
 			</span>
 			<div {...stylex.props(styles.paneSummaryText)}>
@@ -180,17 +255,24 @@ function WorkspaceItem({
 }) {
 	const [collapsedGroupId, setCollapsedGroupId] = useState<string | null>(null);
 	const [editing, setEditing] = useState(false);
-	const [editValue, setEditValue] = useState(group.name);
+	const [editValue, setEditValue] = useState("");
 	const [hovered, setHovered] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const expanded = collapsedGroupId !== group.id;
 
-	useEffect(() => {
-		if (editing) {
-			inputRef.current?.focus();
-			inputRef.current?.select();
+	const handleEditInputRef = useCallback((node: HTMLInputElement | null) => {
+		inputRef.current = node;
+		if (node) {
+			node.focus();
+			node.select();
 		}
-	}, [editing]);
+	}, []);
+
+	const startEditing = (event: ReactMouseEvent) => {
+		event.stopPropagation();
+		setEditValue(group.name);
+		setEditing(true);
+	};
 
 	const commitRename = () => {
 		const trimmed = editValue.trim();
@@ -236,7 +318,10 @@ function WorkspaceItem({
 					{...stylex.props(styles.collapsedWorkspaceButton)}
 					title={group.name}
 				>
-					<IconTerminal size={14} className="shrink-0" />
+					<IconTerminal
+						size={14}
+						className={stylex.props(styles.noShrink).className}
+					/>
 				</button>
 				{group.panes.length > 0 && (
 					<span {...stylex.props(styles.collapsedWorkspaceCount)}>
@@ -264,7 +349,8 @@ function WorkspaceItem({
 			onMouseLeave={setHovered.bind(null, false)}
 		>
 			<div
-				role="button"
+				role="treeitem"
+				aria-selected={isActive}
 				tabIndex={0}
 				{...stylex.props(
 					styles.workspaceHeader,
@@ -276,7 +362,7 @@ function WorkspaceItem({
 				<div {...stylex.props(styles.workspaceNameWrap)}>
 					{editing ? (
 						<input
-							ref={inputRef}
+							ref={handleEditInputRef}
 							value={editValue}
 							onChange={setInputValue.bind(null, setEditValue)}
 							onBlur={commitRename}
@@ -291,11 +377,7 @@ function WorkspaceItem({
 						<div
 							{...stylex.props(styles.workspaceNameRow)}
 							title="Double-click to rename workspace"
-							onDoubleClick={(e) => {
-								e.stopPropagation();
-								setEditValue(group.name);
-								setEditing(true);
-							}}
+							onDoubleClick={startEditing}
 						>
 							<IconPencil
 								size={9}
@@ -310,7 +392,12 @@ function WorkspaceItem({
 				</span>
 				<IconChevronRight
 					size={10}
-					className={`shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
+					className={
+						stylex.props(
+							styles.workspaceChevron,
+							expanded && styles.workspaceChevronExpanded
+						).className
+					}
 				/>
 				{canDelete && hovered && !editing && (
 					<button
@@ -369,7 +456,10 @@ function SidebarNavItems({ collapsed }: { collapsed: boolean }) {
 						className={`${APP_REGION_NO_DRAG_CLASS} ${itemProps.className ?? ""}`}
 						title={collapsed ? item.label : undefined}
 					>
-						<Icon size={14} className="shrink-0" />
+						<Icon
+							size={14}
+							className={stylex.props(styles.noShrink).className}
+						/>
 						{!collapsed && <span>{item.label}</span>}
 					</button>
 				);
@@ -411,21 +501,153 @@ function SidebarProfileButton({
 	);
 }
 
+function SidebarWorkspacesSection({
+	collapsed,
+	workspaces,
+	onAddWorkspace,
+	onSelectWorkspace,
+	onSelectPane,
+	onExpandSidebar,
+	onRemoveWorkspace,
+	onRenameWorkspace,
+}: {
+	collapsed: boolean;
+	workspaces: SidebarWorkspaceState;
+	onAddWorkspace: () => void;
+	onSelectWorkspace: (groupId: string) => void;
+	onSelectPane: (groupId: string, paneId: string) => void;
+	onExpandSidebar: () => void;
+	onRemoveWorkspace: (groupId: string) => void;
+	onRenameWorkspace: (groupId: string, name: string) => void;
+}) {
+	const workspaceSectionProps = stylex.props(styles.workspaceSection);
+	return (
+		<div
+			className={`${APP_REGION_NO_DRAG_CLASS} ${workspaceSectionProps.className ?? ""}`}
+		>
+			<div
+				{...stylex.props(
+					styles.workspaceSectionHeader,
+					collapsed
+						? styles.workspaceSectionHeaderCollapsed
+						: styles.workspaceSectionHeaderOpen
+				)}
+			>
+				{collapsed ? (
+					<IconButton
+						type="button"
+						onClick={onAddWorkspace}
+						variant="ghost"
+						size="md"
+						className={stylex.props(styles.collapsedAddButton).className}
+						title="Add workspace"
+					>
+						<IconPlus
+							size={14}
+							className={stylex.props(styles.noShrink).className}
+						/>
+					</IconButton>
+				) : (
+					<>
+						<span {...stylex.props(styles.workspaceSectionLabel)}>
+							Workspaces
+						</span>
+						<IconButton
+							type="button"
+							onClick={onAddWorkspace}
+							variant="ghost"
+							size="xs"
+							title="New workspace"
+						>
+							<IconPlus size={12} />
+						</IconButton>
+					</>
+				)}
+			</div>
+			{workspaces.groups.map((group) => (
+				<WorkspaceItem
+					key={group.id}
+					group={{ ...group, selectedPaneId: group.selectedPaneId ?? null }}
+					isActive={group.id === workspaces.selectedGroupId}
+					canDelete={workspaces.groups.length > 1}
+					collapsed={collapsed}
+					selectedPaneId={group.selectedPaneId ?? null}
+					onSelect={() => onSelectWorkspace(group.id)}
+					onSelectPane={(paneId) => onSelectPane(group.id, paneId)}
+					onExpandSidebar={onExpandSidebar}
+					onDelete={() => onRemoveWorkspace(group.id)}
+					onRename={(name) => onRenameWorkspace(group.id, name)}
+				/>
+			))}
+		</div>
+	);
+}
+
+function SidebarFooter({
+	collapsed,
+	updateAvailable,
+	updateInfo,
+	updateStatus,
+	githubLabel,
+	githubAccount,
+	onUpdate,
+}: {
+	collapsed: boolean;
+	updateAvailable: boolean;
+	updateInfo: AppInfo["update"];
+	updateStatus: UpdateStatus;
+	githubLabel: string;
+	githubAccount: ForgeAccount | null;
+	onUpdate: () => void;
+}) {
+	const footerProps = stylex.props(styles.footer);
+	return (
+		<div
+			className={`${APP_REGION_NO_DRAG_CLASS} ${footerProps.className ?? ""}`}
+		>
+			{updateAvailable ? (
+				<button
+					type="button"
+					onClick={onUpdate}
+					disabled={updateStatus === "updating"}
+					{...stylex.props(
+						styles.updateButton,
+						updateStatus === "updating" && styles.updateButtonBusy,
+						collapsed ? styles.updateButtonCollapsed : styles.updateButtonOpen
+					)}
+					title={
+						collapsed ? `Update to ${updateInfo.latestVersion}` : undefined
+					}
+				>
+					<IconRefreshCw size={12} />
+					{!collapsed ? (
+						<span {...stylex.props(styles.updateLabel)}>
+							{updateStatus === "updating"
+								? "Updating..."
+								: updateStatus === "error"
+									? "Update failed"
+									: `Update to ${updateInfo.latestVersion}`}
+						</span>
+					) : null}
+				</button>
+			) : null}
+			<SidebarProfileButton
+				collapsed={collapsed}
+				githubLabel={githubLabel}
+				githubAccount={githubAccount}
+			/>
+		</div>
+	);
+}
+
 export function Sidebar() {
 	const navigate = useNavigate();
-	const [collapsed, setCollapsed] = useState(() => {
-		return readStoredBoolean("sidebar-collapsed");
-	});
-	const [sidebarWidth, setSidebarWidth] = useState(() => {
-		const stored = Number(readStoredValue("main-sidebar-width"));
-		return Number.isFinite(stored)
-			? Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, stored))
-			: DEFAULT_SIDEBAR_WIDTH;
-	});
-	const [resizing, setResizing] = useState(false);
-	const [updateStatus, setUpdateStatus] = useState<
-		"idle" | "updating" | "error"
-	>("idle");
+	const [uiState, dispatchUi] = useReducer(
+		sidebarUiReducer,
+		undefined,
+		loadSidebarUiState
+	);
+	const { collapsed, sidebarWidth, resizing, updateStatus } = uiState;
 	const { data: githubAccount, refresh: refreshGithubAccount } =
 		useAsyncResource(loadGithubAccount, null, { isEqual: sameForgeAccount });
 	const { data: appInfo } = useAppInfo();
@@ -597,7 +819,7 @@ export function Sidebar() {
 		(event: ReactMouseEvent<HTMLElement>) => {
 			if (collapsed) return;
 			event.preventDefault();
-			setResizing(true);
+			dispatchUi({ type: "resizing", value: true });
 			resizeWidthRef.current = sidebarWidth;
 			resizeRef.current = { startX: event.clientX, startWidth: sidebarWidth };
 			const handleMove = (moveEvent: MouseEvent) => {
@@ -608,11 +830,11 @@ export function Sidebar() {
 					Math.max(MIN_SIDEBAR_WIDTH, resizeRef.current.startWidth + delta)
 				);
 				resizeWidthRef.current = nextWidth;
-				setSidebarWidth(nextWidth);
+				dispatchUi({ type: "sidebarWidth", value: nextWidth });
 			};
 			const handleUp = () => {
 				resizeRef.current = null;
-				setResizing(false);
+				dispatchUi({ type: "resizing", value: false });
 				writeStoredValue("main-sidebar-width", String(resizeWidthRef.current));
 				window.removeEventListener("mousemove", handleMove);
 				window.removeEventListener("mouseup", handleUp);
@@ -632,7 +854,7 @@ export function Sidebar() {
 	const updateInfo = appInfo.update;
 	const updateAvailable = updateInfo.available && !!updateInfo.url;
 	const openUpdate = useCallback(() => {
-		setUpdateStatus("updating");
+		dispatchUi({ type: "updateStatus", value: "updating" });
 		void sendJson("/api/native/update")
 			.then((response) => {
 				if (!response.ok) {
@@ -642,7 +864,7 @@ export function Sidebar() {
 			.catch((error) => {
 				if (error instanceof TypeError) return;
 				console.error("[update] failed", error);
-				setUpdateStatus("error");
+				dispatchUi({ type: "updateStatus", value: "error" });
 			});
 	}, []);
 	const shellProps = stylex.props(
@@ -652,8 +874,6 @@ export function Sidebar() {
 	);
 	const logoBarProps = stylex.props(styles.logoBar);
 	const logoButtonProps = stylex.props(styles.logoButton);
-	const workspaceSectionProps = stylex.props(styles.workspaceSection);
-	const footerProps = stylex.props(styles.footer);
 	const resizeHandleProps = stylex.props(styles.resizeHandle);
 
 	return (
@@ -676,7 +896,7 @@ export function Sidebar() {
 			>
 				<button
 					type="button"
-					onClick={() => setCollapsed(!collapsed)}
+					onClick={() => dispatchUi({ type: "collapsed", value: !collapsed })}
 					{...logoButtonProps}
 					className={`${APP_REGION_NO_DRAG_CLASS} ${logoButtonProps.className ?? ""}`}
 				>
@@ -692,99 +912,28 @@ export function Sidebar() {
 			</div>
 			<nav {...stylex.props(styles.nav)}>
 				<SidebarNavItems collapsed={collapsed} />
-
-				{/* Workspaces section */}
-				<div
-					className={`${APP_REGION_NO_DRAG_CLASS} ${workspaceSectionProps.className ?? ""}`}
-				>
-					<div
-						{...stylex.props(
-							styles.workspaceSectionHeader,
-							collapsed
-								? styles.workspaceSectionHeaderCollapsed
-								: styles.workspaceSectionHeaderOpen
-						)}
-					>
-						{collapsed ? (
-							<IconButton
-								type="button"
-								onClick={addWorkspace}
-								variant="ghost"
-								size="md"
-								className="size-8"
-								title="Add workspace"
-							>
-								<IconPlus size={14} className="shrink-0" />
-							</IconButton>
-						) : (
-							<>
-								<span {...stylex.props(styles.workspaceSectionLabel)}>
-									Workspaces
-								</span>
-								<IconButton
-									type="button"
-									onClick={addWorkspace}
-									variant="ghost"
-									size="xs"
-									title="New workspace"
-								>
-									<IconPlus size={12} />
-								</IconButton>
-							</>
-						)}
-					</div>
-					{workspaces.groups.map((group) => (
-						<WorkspaceItem
-							key={group.id}
-							group={group}
-							isActive={group.id === workspaces.selectedGroupId}
-							canDelete={workspaces.groups.length > 1}
-							collapsed={collapsed}
-							selectedPaneId={group.selectedPaneId ?? null}
-							onSelect={() => selectWorkspace(group.id)}
-							onSelectPane={(paneId) => selectPane(group.id, paneId)}
-							onExpandSidebar={() => setCollapsed(false)}
-							onDelete={() => removeWorkspace(group.id)}
-							onRename={(name) => renameWorkspace(group.id, name)}
-						/>
-					))}
-				</div>
-			</nav>
-			<div
-				className={`${APP_REGION_NO_DRAG_CLASS} ${footerProps.className ?? ""}`}
-			>
-				{updateAvailable ? (
-					<button
-						type="button"
-						onClick={openUpdate}
-						disabled={updateStatus === "updating"}
-						{...stylex.props(
-							styles.updateButton,
-							updateStatus === "updating" && styles.updateButtonBusy,
-							collapsed ? styles.updateButtonCollapsed : styles.updateButtonOpen
-						)}
-						title={
-							collapsed ? `Update to ${updateInfo.latestVersion}` : undefined
-						}
-					>
-						<IconRefreshCw size={12} />
-						{!collapsed ? (
-							<span {...stylex.props(styles.updateLabel)}>
-								{updateStatus === "updating"
-									? "Updating..."
-									: updateStatus === "error"
-										? "Update failed"
-										: `Update to ${updateInfo.latestVersion}`}
-							</span>
-						) : null}
-					</button>
-				) : null}
-				<SidebarProfileButton
+				<SidebarWorkspacesSection
 					collapsed={collapsed}
-					githubLabel={githubLabel}
-					githubAccount={githubAccount}
+					workspaces={workspaces}
+					onAddWorkspace={addWorkspace}
+					onSelectWorkspace={selectWorkspace}
+					onSelectPane={selectPane}
+					onExpandSidebar={() =>
+						dispatchUi({ type: "collapsed", value: false })
+					}
+					onRemoveWorkspace={removeWorkspace}
+					onRenameWorkspace={renameWorkspace}
 				/>
-			</div>
+			</nav>
+			<SidebarFooter
+				collapsed={collapsed}
+				updateAvailable={updateAvailable}
+				updateInfo={updateInfo}
+				updateStatus={updateStatus}
+				githubLabel={githubLabel}
+				githubAccount={githubAccount}
+				onUpdate={openUpdate}
+			/>
 		</aside>
 	);
 }
@@ -808,6 +957,12 @@ function SidebarAccountAvatar({ account }: { account: ForgeAccount | null }) {
 }
 
 const styles = stylex.create({
+	iconDim: {
+		opacity: 0.6,
+	},
+	noShrink: {
+		flexShrink: 0,
+	},
 	paneSummary: {
 		alignItems: "flex-start",
 		borderWidth: 1,
@@ -1016,6 +1171,15 @@ const styles = stylex.create({
 		fontSize: font.size_1,
 		marginLeft: controlSize._1,
 	},
+	workspaceChevron: {
+		flexShrink: 0,
+		transitionDuration: "150ms",
+		transitionProperty: "transform",
+		transitionTimingFunction: "ease",
+	},
+	workspaceChevronExpanded: {
+		transform: "rotate(90deg)",
+	},
 	workspaceDelete: {
 		borderRadius: 4,
 		color: color.textSoft,
@@ -1177,6 +1341,10 @@ const styles = stylex.create({
 	workspaceSectionHeaderOpen: {
 		justifyContent: "space-between",
 		paddingInline: controlSize._2,
+	},
+	collapsedAddButton: {
+		height: controlSize._8,
+		width: controlSize._8,
 	},
 	workspaceSectionLabel: {
 		color: color.textSoft,
