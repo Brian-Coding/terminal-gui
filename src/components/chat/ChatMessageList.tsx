@@ -410,6 +410,16 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		gap: 8,
 	});
 	const virtualRows = rowVirtualizer.getVirtualItems();
+	const renderedVirtualRows =
+		virtualRows.length > 0 || renderRows.length === 0
+			? virtualRows
+			: [
+					{
+						index: renderRows.length - 1,
+						key: `fallback-${renderRows.length - 1}`,
+						start: Math.max(0, rowVirtualizer.getTotalSize() - 148),
+					},
+				];
 	const checkpointsByMessageId = useMemo(() => {
 		const byMessageId = new Map<string, CheckpointInfo>();
 		for (const checkpoint of checkpoints) {
@@ -456,7 +466,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 			{...stylex.props(styles.messageList)}
 			style={{ height: rowVirtualizer.getTotalSize() }}
 		>
-			{virtualRows.map((virtualRow) => {
+			{renderedVirtualRows.map((virtualRow) => {
 				const index = virtualRow.index;
 				const item = renderRows[index];
 				if (!item) return null;

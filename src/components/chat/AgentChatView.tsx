@@ -611,7 +611,7 @@ export const AgentChatView = memo(
 	) {
 		const renderVisibleChat = composerOnly || isVisible;
 		const { messages, messagesRef, saveMessagesNow, setMessages } =
-			usePersistentChatMessages(paneId, renderVisibleChat);
+			usePersistentChatMessages(paneId, true);
 		const visibleMessages = useMemo(
 			() => windowChatMessagesForRender(messages),
 			[messages]
