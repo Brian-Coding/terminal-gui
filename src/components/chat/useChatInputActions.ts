@@ -5,7 +5,6 @@ import {
 	type ChatLoadingState,
 	type ChatMessage,
 	nextId,
-	type QueuedMessageInfo,
 	type SlashCommand,
 	trimMessages,
 } from "../../features/chat/agent-chat-shared.ts";
@@ -82,19 +81,17 @@ export function useChatInputActions({
 	onSendStart,
 	onExitComposerOnly,
 	paneId,
-	queueMessage,
 	referencePaths,
 	selectCommand,
 	selectFile,
 	selectedReasoningLevel,
 	setFileMenu,
 	setInput,
-	setLoadingState,
 	setMessages,
+	setRunStatus,
 	setSlashMenu,
 	showCommands,
 	slashMenu,
-	shiftQueuedMessage,
 	textareaRef,
 }: {
 	agentKind: AgentKind;
@@ -117,100 +114,28 @@ export function useChatInputActions({
 	onSendStart?: () => void;
 	onExitComposerOnly?: () => void;
 	paneId: string;
-	queueMessage: (text: string, displayText: string, images?: string[]) => void;
 	referencePaths?: string[];
 	selectCommand: (idx: number) => void;
 	selectFile: (idx: number) => void;
 	selectedReasoningLevel: string;
 	setFileMenu: React.Dispatch<React.SetStateAction<FileMenuState>>;
 	setInput: (value: string) => void;
-	setLoadingState: (
-		state: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
-	) => void;
 	setMessages: (
 		update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])
+	) => void;
+	setRunStatus: (
+		state: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
 	) => void;
 	setSlashMenu: React.Dispatch<React.SetStateAction<SlashMenuState>>;
 	showCommands: boolean;
 	slashMenu: SlashMenuState;
-	shiftQueuedMessage: () => QueuedMessageInfo | null;
 	textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
 	const pendingSendConsumedRef = useRef(false);
-	const latestRef = useRef({
-		agentKind,
-		allCommands,
-		attachedImages,
-		cancelSpeechListening,
-		clearAttachedImages,
-		clearCheckpoints,
-		composerOnly,
-		consumePendingWorkspace,
-		cwd,
-		effectiveSelectedModel,
-		fileMenu,
-		fileResults,
-		filteredCommands,
-		incrementUsage,
-		input,
-		isLoading,
-		onSendStart,
-		onExitComposerOnly,
-		paneId,
-		queueMessage,
-		referencePaths,
-		selectCommand,
-		selectFile,
-		selectedReasoningLevel,
-		setFileMenu,
-		setInput,
-		setLoadingState,
-		setMessages,
-		setSlashMenu,
-		showCommands,
-		slashMenu,
-		shiftQueuedMessage,
-		textareaRef,
-	});
-	latestRef.current = {
-		agentKind,
-		allCommands,
-		attachedImages,
-		cancelSpeechListening,
-		clearAttachedImages,
-		clearCheckpoints,
-		composerOnly,
-		consumePendingWorkspace,
-		cwd,
-		effectiveSelectedModel,
-		fileMenu,
-		fileResults,
-		filteredCommands,
-		incrementUsage,
-		input,
-		isLoading,
-		onSendStart,
-		onExitComposerOnly,
-		paneId,
-		queueMessage,
-		referencePaths,
-		selectCommand,
-		selectFile,
-		selectedReasoningLevel,
-		setFileMenu,
-		setInput,
-		setLoadingState,
-		setMessages,
-		setSlashMenu,
-		showCommands,
-		slashMenu,
-		shiftQueuedMessage,
-		textareaRef,
-	};
 
 	const appendLocalMessage = useCallback(
 		(message: Pick<ChatMessage, "role" | "content" | "images">) => {
-			latestRef.current.setMessages((prev) =>
+			setMessages((prev) =>
 				trimMessages([
 					...prev,
 					{
@@ -222,14 +147,18 @@ export function useChatInputActions({
 				])
 			);
 		},
-		[]
+		[setMessages]
 	);
 
 	const sendToServer = useCallback(
-		(text: string, workspaceOverride?: ChatWorkspaceOverride) => {
-			const latest = latestRef.current;
-			latest.onSendStart?.();
-			latest.setLoadingState({
+		(
+			text: string,
+			workspaceOverride?: ChatWorkspaceOverride,
+			displayText?: string,
+			images?: string[]
+		) => {
+			onSendStart?.();
+			setRunStatus({
 				isLoading: true,
 				status: "thinking",
 				startTime: Date.now(),
@@ -237,25 +166,30 @@ export function useChatInputActions({
 
 			wsClient.send({
 				type: "chat:send",
-				paneId: latest.paneId,
+				paneId,
 				text,
-				cwd: workspaceOverride?.cwd ?? latest.cwd,
-				referencePaths:
-					workspaceOverride?.referencePaths ?? latest.referencePaths,
-				sessionId: loadStoredSessionId(latest.paneId),
-				agentKind: latest.agentKind,
-				model: latest.effectiveSelectedModel,
+				cwd: workspaceOverride?.cwd ?? cwd,
+				referencePaths: workspaceOverride?.referencePaths ?? referencePaths,
+				sessionId: loadStoredSessionId(paneId),
+				agentKind,
+				model: effectiveSelectedModel,
 				reasoningLevel:
-					latest.agentKind === "codex"
-						? latest.selectedReasoningLevel
-						: undefined,
+					agentKind === "codex" ? selectedReasoningLevel : undefined,
+				displayText,
+				images,
 			});
 		},
-		[]
+		[
+			agentKind,
+			cwd,
+			effectiveSelectedModel,
+			onSendStart,
+			paneId,
+			referencePaths,
+			selectedReasoningLevel,
+			setRunStatus,
+		]
 	);
-
-	const sendToServerRef = useRef<(text: string) => void>(sendToServer);
-	sendToServerRef.current = sendToServer;
 
 	const sendUserMessage = useCallback(
 		({
@@ -271,40 +205,28 @@ export function useChatInputActions({
 			text: string;
 			workspaceOverride?: ChatWorkspaceOverride;
 		}) => {
-			const latest = latestRef.current;
 			const trimmed = text.trim();
 			if (!trimmed) return;
 			const visibleText = displayText ?? trimmed;
-			if (latest.isLoading) {
-				latest.queueMessage(trimmed, visibleText, images);
+			if (isLoading) {
+				sendToServer(trimmed, workspaceOverride, visibleText, images);
 				return;
 			}
 			appendLocalMessage({ role: "user", content: visibleText, images });
-			if (systemMessage)
-				latest.setMessages((prev) => appendSystemMessage(prev, systemMessage));
-			sendToServer(trimmed, workspaceOverride);
+			if (systemMessage) {
+				setMessages((prev) => appendSystemMessage(prev, systemMessage));
+			}
+			sendToServer(trimmed, workspaceOverride, visibleText, images);
 		},
-		[appendLocalMessage, sendToServer]
+		[appendLocalMessage, isLoading, sendToServer, setMessages]
 	);
-
-	const sendNextQueuedMessage = useCallback(() => {
-		const next = latestRef.current.shiftQueuedMessage();
-		if (!next) return;
-		appendLocalMessage({
-			role: "user",
-			content: next.displayText,
-			images: next.images,
-		});
-		sendToServer(next.text);
-	}, [appendLocalMessage, sendToServer]);
 
 	const executeCommand = useCallback(
 		(cmd: SlashCommand, args?: string) => {
-			const latest = latestRef.current;
-			latest.setInput("");
+			setInput("");
 			if (cmd.name === "btw") {
 				const question = (args || "").trim();
-				latest.setMessages(
+				setMessages(
 					question
 						? appendTrimmedMessage.bind(null, {
 								id: nextId(),
@@ -316,26 +238,24 @@ export function useChatInputActions({
 				if (question)
 					wsClient.send({
 						type: "chat:btw",
-						paneId: latest.paneId,
+						paneId,
 						text: question,
-						cwd: latest.cwd,
+						cwd,
 					});
 				return;
 			}
 
 			if (cmd.action === "local") {
 				if (cmd.name === "clear") {
-					latest.setMessages([]);
-					clearAgentChatPaneState(latest.paneId);
-					latest.clearCheckpoints();
-					latest.setMessages((prev) =>
-						appendSystemMessage(prev, "Chat cleared")
-					);
+					setMessages([]);
+					clearAgentChatPaneState(paneId);
+					clearCheckpoints();
+					setMessages((prev) => appendSystemMessage(prev, "Chat cleared"));
 				} else if (cmd.name === "help") {
-					latest.setMessages((prev) =>
+					setMessages((prev) =>
 						appendSystemMessage(
 							prev,
-							latest.allCommands
+							allCommands
 								.map((command) => `/${command.name} - ${command.description}`)
 								.join("\n")
 						)
@@ -346,24 +266,32 @@ export function useChatInputActions({
 
 			const prompt = getCommandPrompt(cmd, args);
 			const displayText = getCommandDisplayText(cmd, args);
-			if (cmd.id) latest.incrementUsage(cmd.id).catch(noop);
+			if (cmd.id) incrementUsage(cmd.id).catch(noop);
 			sendUserMessage({
 				displayText,
 				systemMessage: `Running /${cmd.name}...`,
 				text: prompt,
 			});
 		},
-		[sendUserMessage]
+		[
+			allCommands,
+			clearCheckpoints,
+			cwd,
+			incrementUsage,
+			paneId,
+			sendUserMessage,
+			setInput,
+			setMessages,
+		]
 	);
 
 	const sendMessage = useCallback(() => {
-		const latest = latestRef.current;
-		const rawInput = latest.textareaRef.current?.value ?? latest.input;
+		const rawInput = textareaRef.current?.value ?? input;
 		const text = rawInput.trim();
-		if (!text && latest.attachedImages.length === 0) return;
-		latest.cancelSpeechListening();
+		if (!text && attachedImages.length === 0) return;
+		cancelSpeechListening();
 		if (text.startsWith("/") && !text.includes(" ")) {
-			const cmd = latest.allCommands.find(
+			const cmd = allCommands.find(
 				(command) => command.name.toLowerCase() === text.slice(1).toLowerCase()
 			);
 			if (cmd) {
@@ -372,71 +300,99 @@ export function useChatInputActions({
 			}
 		}
 
-		const imagePaths = latest.attachedImages.map((image) => image.path);
+		const imagePaths = attachedImages.map((image) => image.path);
 		const { expandedText, usedCommandIds } = expandInlineCommandPrompts(
 			text,
-			latest.allCommands
+			allCommands
 		);
 		usedCommandIds.forEach((id) => {
-			latest.incrementUsage(id).catch(noop);
+			incrementUsage(id).catch(noop);
 		});
 		const displayText =
-			text || `Attached image${latest.attachedImages.length > 1 ? "s" : ""}`;
+			text || `Attached image${attachedImages.length > 1 ? "s" : ""}`;
 		const fullText =
 			imagePaths.length > 0
 				? `${expandedText}${expandedText ? "\n\n" : ""}Here are the images at these paths:\n${imagePaths.join("\n")}`
 				: expandedText;
 
-		latest.setInput("");
-		latest.setSlashMenu(hideMenuState);
-		latest.setFileMenu(hideMenuState);
-		latest.clearAttachedImages();
-		if (latest.textareaRef.current)
-			latest.textareaRef.current.style.height = "20px";
+		setInput("");
+		setSlashMenu(hideMenuState);
+		setFileMenu(hideMenuState);
+		clearAttachedImages();
+		if (textareaRef.current) {
+			textareaRef.current.value = "";
+			textareaRef.current.style.height = "20px";
+		}
 		sendUserMessage({
 			displayText,
 			images: imagePaths.length > 0 ? imagePaths : undefined,
 			text: fullText,
-			workspaceOverride: latest.consumePendingWorkspace(),
+			workspaceOverride: consumePendingWorkspace(),
 		});
-	}, [executeCommand, sendUserMessage]);
+	}, [
+		allCommands,
+		attachedImages,
+		cancelSpeechListening,
+		clearAttachedImages,
+		consumePendingWorkspace,
+		executeCommand,
+		incrementUsage,
+		input,
+		sendUserMessage,
+		setFileMenu,
+		setInput,
+		setSlashMenu,
+		textareaRef,
+	]);
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
-			const latest = latestRef.current;
 			if (
-				latest.fileMenu.show &&
-				latest.fileResults.length > 0 &&
+				fileMenu.show &&
+				fileResults.length > 0 &&
 				handleMenuKey(
 					e,
-					latest.fileResults.length,
-					latest.setFileMenu,
-					latest.fileMenu.selectedIdx,
-					latest.selectFile
+					fileResults.length,
+					setFileMenu,
+					fileMenu.selectedIdx,
+					selectFile
 				)
 			)
 				return;
 			if (
-				latest.showCommands &&
-				latest.filteredCommands.length > 0 &&
+				showCommands &&
+				filteredCommands.length > 0 &&
 				handleMenuKey(
 					e,
-					latest.filteredCommands.length,
-					latest.setSlashMenu,
-					latest.slashMenu.selectedIdx,
-					latest.selectCommand
+					filteredCommands.length,
+					setSlashMenu,
+					slashMenu.selectedIdx,
+					selectCommand
 				)
 			)
 				return;
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
 				sendMessage();
-			} else if (latest.composerOnly && e.key === "Escape") {
+			} else if (composerOnly && e.key === "Escape") {
 				e.preventDefault();
-				latest.onExitComposerOnly?.();
+				onExitComposerOnly?.();
 			}
 		},
-		[sendMessage]
+		[
+			composerOnly,
+			fileMenu,
+			fileResults.length,
+			filteredCommands.length,
+			onExitComposerOnly,
+			selectCommand,
+			selectFile,
+			sendMessage,
+			setFileMenu,
+			setSlashMenu,
+			showCommands,
+			slashMenu.selectedIdx,
+		]
 	);
 
 	useEffect(() => {
@@ -449,12 +405,11 @@ export function useChatInputActions({
 		setMessages((prev) =>
 			trimMessages([...prev, { id: nextId(), role: "user", content: pending }])
 		);
-		sendToServerRef.current(pending);
-	}, [enabled, isLoading, paneId, setInput, setMessages]);
+		sendToServer(pending);
+	}, [enabled, isLoading, paneId, sendToServer, setInput, setMessages]);
 
 	return {
 		handleKeyDown,
-		sendNextQueuedMessage,
 		sendUserMessage,
 	};
 }

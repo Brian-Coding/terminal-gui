@@ -11,6 +11,17 @@ type ChatToolMessage = Pick<
 	"id" | "role" | "content" | "toolName" | "isStreaming"
 >;
 
+type ChatActivityUiState = {
+	expandedTools: Set<string>;
+	liveActivities: ToolActivity[];
+};
+
+type IncomingToolActivity = {
+	isStreaming?: boolean;
+	summary: string;
+	toolName: string;
+};
+
 export function normalizeToolName(toolName: string): string {
 	const name = toolName.trim().toLowerCase();
 	if (name.startsWith("mcp__")) {
@@ -59,6 +70,44 @@ export function clearLiveActivities<
 	S extends { liveActivities: ToolActivity[] },
 >(state: S): S {
 	return { ...state, liveActivities: [] };
+}
+
+export function appendLiveToolActivity(
+	activity: IncomingToolActivity,
+	state: ChatActivityUiState
+): ChatActivityUiState {
+	const nextActivity: ToolActivity = {
+		id: `${activity.toolName}-${state.liveActivities.length}`,
+		toolName: activity.toolName,
+		summary: activity.summary,
+		isStreaming: activity.isStreaming ?? true,
+	};
+	const last = state.liveActivities[state.liveActivities.length - 1];
+	if (
+		last &&
+		last.toolName === nextActivity.toolName &&
+		last.summary === nextActivity.summary
+	) {
+		return state;
+	}
+	return {
+		...state,
+		liveActivities: [...state.liveActivities, nextActivity].slice(-12),
+	};
+}
+
+export function clearCompletedChatUiState(
+	messageIds: Set<string>,
+	state: ChatActivityUiState
+): ChatActivityUiState {
+	const pruned = new Set<string>();
+	for (const id of state.expandedTools) if (messageIds.has(id)) pruned.add(id);
+	return {
+		...state,
+		expandedTools:
+			pruned.size === state.expandedTools.size ? state.expandedTools : pruned,
+		liveActivities: [],
+	};
 }
 
 export function markToolState(

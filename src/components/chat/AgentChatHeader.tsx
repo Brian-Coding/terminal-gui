@@ -6,7 +6,7 @@ import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
 import {
 	APP_REGION_DRAG_CLASS,
 	APP_REGION_NO_DRAG_CLASS,
-} from "../../lib/app-region.ts";
+} from "../../lib/app-theme.ts";
 import { fetchJsonOr, postJson } from "../../lib/fetch-json.ts";
 import {
 	color,

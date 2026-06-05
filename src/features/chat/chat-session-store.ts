@@ -1,4 +1,5 @@
 import { createCollection, localStorageCollectionOptions } from "@tanstack/db";
+import { isChatMessageStorageKey } from "../../lib/client-storage-keys.ts";
 import { hasRole, isString, noop } from "../../lib/data.ts";
 import { postJson, sendJson } from "../../lib/fetch-json.ts";
 import {
@@ -8,8 +9,17 @@ import {
 	writeStoredJson,
 	writeStoredValue,
 } from "../../lib/stored-json.ts";
+import {
+	type ChatLoadingState,
+	type ChatMessage,
+	type CheckpointInfo,
+	prepareTranscriptForStorage,
+	type QueuedMessageInfo,
+	trimMessages,
+} from "./agent-chat-shared.ts";
 
-const STORAGE_KEY_PREFIX = "inferay-chat-";
+const LEGACY_MESSAGES_KEY_PREFIX = "inferay-chat-";
+const MESSAGE_SAVE_INTERVAL_MS = 2500;
 const SESSION_KEY_PREFIX = "inferay-chat-session-";
 const INPUT_KEY_PREFIX = "inferay-chat-input-";
 const CHECKPOINT_KEY_PREFIX = "inferay-checkpoints-";
@@ -19,6 +29,16 @@ const PENDING_SEND_KEY_PREFIX = "inferay-chat-pending-send-";
 const SUMMARY_KEY_PREFIX = "inferay-chat-summary-";
 const PENDING_WORKSPACE_KEY_PREFIX = "inferay-chat-pending-workspace-";
 const QUEUE_KEY_PREFIX = "inferay-chat-queue-";
+const PREFERENCES_STORAGE_KEY = "inferay-db-preferences";
+const STALE_CHAT_DB_STORAGE_KEYS = [
+	"inferay-db-conversations",
+	"inferay-db-messages",
+] as const;
+const DEFAULT_CHAT_RUN_STATUS: ChatLoadingState = {
+	isLoading: false,
+	status: "idle",
+	startTime: null,
+};
 const CHAT_CACHE_DB = "inferay-chat-cache";
 const CHAT_CONVERSATIONS_STORE = "conversations";
 const CHAT_MESSAGES_STORE = "messages";
@@ -27,7 +47,12 @@ const pendingQueueFileSaves = new Map<
 	string,
 	{ queue: unknown[]; inFlight: boolean }
 >();
+const chatMessageReadModels = new Map<string, ChatMessageReadModel>();
+const chatCheckpointReadModels = new Map<string, ChatCheckpointReadModel>();
+const chatQueueReadModels = new Map<string, ChatQueueReadModel>();
+const chatRunStatusReadModels = new Map<string, ChatRunStatusReadModel>();
 let chatCacheDbPromise: Promise<IDBDatabase | null> | null = null;
+let messageLifecycleFlushRegistered = false;
 
 type DbPreference = {
 	id: string;
@@ -35,19 +60,72 @@ type DbPreference = {
 	updatedAt: number;
 };
 
+type ChatMessageReadModelListener = () => void;
+type ChatCheckpointReadModelListener = () => void;
+type ChatQueueReadModelListener = () => void;
+type ChatRunStatusReadModelListener = () => void;
+
+export interface ChatMessageReadModel {
+	flush: () => void;
+	get: () => ChatMessage[];
+	getSnapshot: () => ChatMessage[];
+	loadAsync: () => Promise<void>;
+	saveNow: (messages: ChatMessage[]) => ChatMessage[];
+	set: (
+		update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])
+	) => void;
+	setSummaryChangeCallback: (callback: () => void) => void;
+	subscribe: (listener: ChatMessageReadModelListener) => () => void;
+}
+
+export interface ChatCheckpointReadModel {
+	clear: () => void;
+	getSnapshot: () => CheckpointInfo[];
+	recordFinalized: (
+		event: {
+			checkpointId: string;
+			changedFileCount: number;
+			changedFiles: CheckpointInfo["changedFiles"];
+			timestamp?: number;
+		},
+		messages: readonly ChatMessage[]
+	) => void;
+	markReverted: (checkpointId: string) => void;
+	set: (
+		update: CheckpointInfo[] | ((prev: CheckpointInfo[]) => CheckpointInfo[])
+	) => void;
+	subscribe: (listener: ChatCheckpointReadModelListener) => () => void;
+}
+
+export interface ChatQueueReadModel {
+	get: () => QueuedMessageInfo[];
+	getSnapshot: () => QueuedMessageInfo[];
+	loadAsync: () => Promise<void>;
+	replaceFromServer: (messages: QueuedMessageInfo[]) => void;
+	setLocal: (
+		update:
+			| QueuedMessageInfo[]
+			| ((prev: QueuedMessageInfo[]) => QueuedMessageInfo[])
+	) => void;
+	subscribe: (listener: ChatQueueReadModelListener) => () => void;
+}
+
+export interface ChatRunStatusReadModel {
+	clear: () => ChatLoadingState;
+	get: () => ChatLoadingState;
+	getSnapshot: () => ChatLoadingState;
+	set: (
+		update: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
+	) => ChatLoadingState;
+	subscribe: (listener: ChatRunStatusReadModelListener) => () => void;
+}
+
 const preferencesCollection = createCollection(
 	localStorageCollectionOptions<DbPreference, string>({
-		storageKey: "inferay-db-preferences",
+		storageKey: PREFERENCES_STORAGE_KEY,
 		getKey: (preference) => preference.id,
 	})
 );
-
-for (const staleChatDbKey of [
-	"inferay-db-conversations",
-	"inferay-db-messages",
-]) {
-	removeStoredValue(staleChatDbKey);
-}
 
 function openChatCacheDb(): Promise<IDBDatabase | null> {
 	if (typeof indexedDB === "undefined") return Promise.resolve(null);
@@ -205,8 +283,57 @@ function removePreference(id: string) {
 	if (preferencesCollection.get(id)) preferencesCollection.delete(id);
 }
 
+function listLocalStorageKeys(): string[] {
+	try {
+		return Array.from({ length: localStorage.length }, (_, index) =>
+			localStorage.key(index)
+		).filter(isString);
+	} catch {
+		return [];
+	}
+}
+
+function isStaleChatPreferenceId(id: string): boolean {
+	return isChatMessageStorageKey(id) || id.startsWith(QUEUE_KEY_PREFIX);
+}
+
+function cleanupStalePreferenceRows() {
+	const rows = readStoredJson<unknown>(PREFERENCES_STORAGE_KEY, null);
+	if (!Array.isArray(rows)) return;
+	const kept: unknown[] = [];
+	let removed = false;
+	for (const row of rows) {
+		const id =
+			row && typeof row === "object" ? (row as { id?: unknown }).id : undefined;
+		if (typeof id === "string" && isStaleChatPreferenceId(id)) {
+			removePreference(id);
+			removed = true;
+			continue;
+		}
+		kept.push(row);
+	}
+	if (!removed) return;
+	if (kept.length === 0) removeStoredValue(PREFERENCES_STORAGE_KEY);
+	else writeStoredJson(PREFERENCES_STORAGE_KEY, kept);
+}
+
+export function cleanupStaleChatClientStorage() {
+	for (const staleChatDbKey of STALE_CHAT_DB_STORAGE_KEYS) {
+		removeStoredValue(staleChatDbKey);
+	}
+	for (const key of listLocalStorageKeys()) {
+		if (isChatMessageStorageKey(key) || key.startsWith(QUEUE_KEY_PREFIX)) {
+			removeStoredValue(key);
+		}
+	}
+	cleanupStalePreferenceRows();
+}
+
+cleanupStaleChatClientStorage();
+
 export function loadStoredMessages<T>(paneId: string): T[] {
-	return readPaneJson(STORAGE_KEY_PREFIX, paneId, []);
+	removePaneValue(LEGACY_MESSAGES_KEY_PREFIX, paneId);
+	return [];
 }
 
 export function loadStoredMessagesAsync<T>(paneId: string): Promise<T[]> {
@@ -214,7 +341,151 @@ export function loadStoredMessagesAsync<T>(paneId: string): Promise<T[]> {
 }
 
 export function saveStoredMessages<T>(paneId: string, messages: T[]) {
+	removePaneValue(LEGACY_MESSAGES_KEY_PREFIX, paneId);
 	void writeIndexedChatMessages(paneId, messages);
+}
+
+function dedupeStoredChatMessages<T extends { id: string }>(
+	messages: T[]
+): T[] {
+	let hasDuplicate = false;
+	const seen = new Set<string>();
+	for (const message of messages) {
+		if (seen.has(message.id)) {
+			hasDuplicate = true;
+			break;
+		}
+		seen.add(message.id);
+	}
+	if (!hasDuplicate) return messages;
+
+	const byId = new Map<string, T>();
+	for (const message of messages) {
+		if (byId.has(message.id)) byId.delete(message.id);
+		byId.set(message.id, message);
+	}
+	return [...byId.values()];
+}
+
+function prepareChatMessagesForStorage(messages: ChatMessage[]): ChatMessage[] {
+	return prepareTranscriptForStorage(
+		trimMessages(dedupeStoredChatMessages(messages))
+	) as ChatMessage[];
+}
+
+function loadInitialChatMessages(paneId: string): ChatMessage[] {
+	return dedupeStoredChatMessages(
+		loadStoredMessages<ChatMessage>(paneId).map((message) => ({
+			...message,
+			isStreaming: false,
+		}))
+	);
+}
+
+function registerMessageLifecycleFlush() {
+	if (messageLifecycleFlushRegistered || typeof window === "undefined") return;
+	messageLifecycleFlushRegistered = true;
+	const flushAll = () => {
+		for (const model of chatMessageReadModels.values()) model.flush();
+	};
+	window.addEventListener("beforeunload", flushAll);
+	window.addEventListener("pagehide", flushAll);
+}
+
+function createChatMessageReadModel(paneId: string): ChatMessageReadModel {
+	let messages = loadInitialChatMessages(paneId);
+	const listeners = new Set<ChatMessageReadModelListener>();
+	let loadStarted = false;
+	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	let pendingSave: ChatMessage[] | null = null;
+	let _summary: string | null = null;
+	let summaryChangeCallback = noop;
+
+	const notify = () => {
+		for (const listener of listeners) listener();
+	};
+	const flush = () => {
+		if (saveTimer) {
+			clearTimeout(saveTimer);
+			saveTimer = null;
+		}
+		if (!pendingSave) return;
+		saveStoredMessages(paneId, prepareChatMessagesForStorage(pendingSave));
+		pendingSave = null;
+	};
+	const saveNow = (nextMessages: ChatMessage[]) => {
+		if (saveTimer) {
+			clearTimeout(saveTimer);
+			saveTimer = null;
+		}
+		const storedMessages = prepareChatMessagesForStorage(nextMessages);
+		saveStoredMessages(paneId, storedMessages);
+		pendingSave = null;
+		return storedMessages;
+	};
+	const scheduleSave = (nextMessages: ChatMessage[]) => {
+		pendingSave = nextMessages;
+		_summary ??= deriveStoredSummary(
+			paneId,
+			nextMessages,
+			summaryChangeCallback
+		);
+		if (saveTimer) return;
+		saveTimer = setTimeout(flush, MESSAGE_SAVE_INTERVAL_MS);
+	};
+	const set = (
+		update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])
+	) => {
+		const next =
+			typeof update === "function"
+				? (update as (prev: ChatMessage[]) => ChatMessage[])(messages)
+				: update;
+		const deduped = dedupeStoredChatMessages(next);
+		if (deduped === messages) return;
+		messages = deduped;
+		scheduleSave(deduped);
+		notify();
+	};
+	const loadAsync = async () => {
+		if (loadStarted) return;
+		loadStarted = true;
+		const cachedMessages = await loadStoredMessagesAsync<ChatMessage>(paneId);
+		if (cachedMessages.length === 0 || messages.length > 0) return;
+		const nextMessages = dedupeStoredChatMessages(
+			cachedMessages.map((message) => ({ ...message, isStreaming: false }))
+		);
+		if (nextMessages.length === 0) return;
+		messages = nextMessages;
+		notify();
+	};
+
+	registerMessageLifecycleFlush();
+	return {
+		flush,
+		get: () => messages,
+		getSnapshot: () => messages,
+		loadAsync,
+		saveNow,
+		set,
+		setSummaryChangeCallback: (callback) => {
+			summaryChangeCallback = callback;
+		},
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+	};
+}
+
+export function getChatMessageReadModel(paneId: string): ChatMessageReadModel {
+	let model = chatMessageReadModels.get(paneId);
+	if (!model) {
+		model = createChatMessageReadModel(paneId);
+		chatMessageReadModels.set(paneId, model);
+	}
+	return model;
 }
 
 export function loadStoredInput(paneId: string): string {
@@ -256,6 +527,84 @@ export function loadStoredCheckpoints<T>(paneId: string): T[] {
 export function saveStoredCheckpoints<T>(paneId: string, checkpoints: T[]) {
 	writePaneJson(CHECKPOINT_KEY_PREFIX, paneId, checkpoints);
 	savePreference(storageKey(CHECKPOINT_KEY_PREFIX, paneId), checkpoints);
+}
+
+function createChatCheckpointReadModel(
+	paneId: string
+): ChatCheckpointReadModel {
+	let checkpoints = loadStoredCheckpoints<CheckpointInfo>(paneId);
+	const listeners = new Set<ChatCheckpointReadModelListener>();
+	const notify = () => {
+		for (const listener of listeners) listener();
+	};
+	const set = (
+		update: CheckpointInfo[] | ((prev: CheckpointInfo[]) => CheckpointInfo[])
+	) => {
+		const next = typeof update === "function" ? update(checkpoints) : update;
+		if (next === checkpoints) return;
+		checkpoints = next;
+		saveStoredCheckpoints(paneId, next);
+		notify();
+	};
+	return {
+		clear: () => set([]),
+		getSnapshot: () => checkpoints,
+		markReverted: (checkpointId) => {
+			set((prev) =>
+				prev.map((checkpoint) =>
+					checkpoint.id === checkpointId
+						? { ...checkpoint, reverted: true }
+						: checkpoint
+				)
+			);
+		},
+		recordFinalized: (event, messages) => {
+			if (event.changedFileCount <= 0) return;
+			const lastMessage =
+				messages.findLast?.(
+					(message) => message.role === "assistant" && !message.isStreaming
+				) ?? messages.findLast?.((message) => message.role === "assistant");
+			if (!lastMessage) return;
+			set((prev) => {
+				if (
+					prev.some(
+						(checkpoint) => checkpoint.afterMessageId === lastMessage.id
+					)
+				) {
+					return prev;
+				}
+				return [
+					...prev,
+					{
+						id: event.checkpointId,
+						timestamp: event.timestamp ?? Date.now(),
+						changedFileCount: event.changedFileCount,
+						changedFiles: event.changedFiles,
+						reverted: false,
+						afterMessageId: lastMessage.id,
+					},
+				];
+			});
+		},
+		set,
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+	};
+}
+
+export function getChatCheckpointReadModel(
+	paneId: string
+): ChatCheckpointReadModel {
+	let model = chatCheckpointReadModels.get(paneId);
+	if (!model) {
+		model = createChatCheckpointReadModel(paneId);
+		chatCheckpointReadModels.set(paneId, model);
+	}
+	return model;
 }
 
 export function loadStoredSessionId(paneId: string): string | null {
@@ -316,7 +665,7 @@ function saveStoredSummary(paneId: string, summary: string) {
 
 export function deriveStoredSummary(
 	paneId: string,
-	messages = loadStoredMessages<{ role: string; content: string }>(paneId),
+	messages: { role: string; content: string }[] = [],
 	onStored?: () => void
 ): string | null {
 	const existing = loadStoredSummary(paneId);
@@ -357,10 +706,9 @@ export function savePendingWorkspacePaths(paneId: string, paths: string[]) {
 }
 
 export function loadStoredQueue<T>(paneId: string): T[] {
-	const directQueue = readPaneJson<T[] | null>(QUEUE_KEY_PREFIX, paneId, null);
-	return (
-		directQueue ?? loadPreference(storageKey(QUEUE_KEY_PREFIX, paneId), [])
-	);
+	removePaneValue(QUEUE_KEY_PREFIX, paneId);
+	removePreference(storageKey(QUEUE_KEY_PREFIX, paneId));
+	return [];
 }
 
 export async function loadFileBackedQueue<T>(
@@ -427,17 +775,153 @@ function saveLatestFileBackedQueue(paneId: string, queue: unknown[]) {
 }
 
 export function saveStoredQueue<T>(paneId: string, queue: T[]) {
-	if (queue.length === 0) removePaneValue(QUEUE_KEY_PREFIX, paneId);
-	else writePaneJson(QUEUE_KEY_PREFIX, paneId, queue);
-	savePreference(storageKey(QUEUE_KEY_PREFIX, paneId), queue);
+	removePaneValue(QUEUE_KEY_PREFIX, paneId);
+	removePreference(storageKey(QUEUE_KEY_PREFIX, paneId));
 	saveLatestFileBackedQueue(paneId, queue);
 }
 
+function areQueuedMessagesEqual(
+	prev: QueuedMessageInfo[],
+	next: QueuedMessageInfo[]
+) {
+	if (prev.length !== next.length) return false;
+	for (let i = 0; i < prev.length; i++) {
+		const a = prev[i]!;
+		const b = next[i]!;
+		if (
+			a.id !== b.id ||
+			a.text !== b.text ||
+			a.displayText !== b.displayText ||
+			(a.images?.length ?? 0) !== (b.images?.length ?? 0)
+		) {
+			return false;
+		}
+		const imagesA = a.images ?? [];
+		const imagesB = b.images ?? [];
+		for (let j = 0; j < imagesA.length; j++) {
+			if (imagesA[j] !== imagesB[j]) return false;
+		}
+	}
+	return true;
+}
+
+function createChatQueueReadModel(paneId: string): ChatQueueReadModel {
+	let queue = loadStoredQueue<QueuedMessageInfo>(paneId);
+	let revision = 0;
+	let loadStarted = false;
+	const listeners = new Set<ChatQueueReadModelListener>();
+	const notify = () => {
+		for (const listener of listeners) listener();
+	};
+	const setSnapshot = (
+		next: QueuedMessageInfo[],
+		options: { persist: boolean }
+	) => {
+		if (areQueuedMessagesEqual(queue, next)) return;
+		revision++;
+		queue = next;
+		if (options.persist) saveStoredQueue(paneId, next);
+		notify();
+	};
+	const setLocal = (
+		update:
+			| QueuedMessageInfo[]
+			| ((prev: QueuedMessageInfo[]) => QueuedMessageInfo[])
+	) => {
+		const next = typeof update === "function" ? update(queue) : update;
+		setSnapshot(next, { persist: true });
+	};
+	const loadAsync = async () => {
+		if (loadStarted) return;
+		loadStarted = true;
+		const revisionAtLoad = revision;
+		const fileBackedQueue =
+			await loadFileBackedQueue<QueuedMessageInfo>(paneId);
+		if (fileBackedQueue === null || revision !== revisionAtLoad) return;
+		setSnapshot(fileBackedQueue, { persist: false });
+	};
+	return {
+		get: () => queue,
+		getSnapshot: () => queue,
+		loadAsync,
+		replaceFromServer: (messages) => setSnapshot(messages, { persist: false }),
+		setLocal,
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+	};
+}
+
+export function getChatQueueReadModel(paneId: string): ChatQueueReadModel {
+	let model = chatQueueReadModels.get(paneId);
+	if (!model) {
+		model = createChatQueueReadModel(paneId);
+		chatQueueReadModels.set(paneId, model);
+	}
+	return model;
+}
+
+function createChatRunStatusReadModel(): ChatRunStatusReadModel {
+	let runStatus = DEFAULT_CHAT_RUN_STATUS;
+	const listeners = new Set<ChatRunStatusReadModelListener>();
+	const notify = () => {
+		for (const listener of listeners) listener();
+	};
+	const set = (
+		update: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
+	) => {
+		const next = typeof update === "function" ? update(runStatus) : update;
+		if (
+			runStatus.isLoading === next.isLoading &&
+			runStatus.status === next.status &&
+			runStatus.startTime === next.startTime
+		) {
+			return runStatus;
+		}
+		runStatus = next;
+		notify();
+		return runStatus;
+	};
+	return {
+		clear: () => set(DEFAULT_CHAT_RUN_STATUS),
+		get: () => runStatus,
+		getSnapshot: () => runStatus,
+		set,
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+	};
+}
+
+export function getChatRunStatusReadModel(
+	paneId: string
+): ChatRunStatusReadModel {
+	let model = chatRunStatusReadModels.get(paneId);
+	if (!model) {
+		model = createChatRunStatusReadModel();
+		chatRunStatusReadModels.set(paneId, model);
+	}
+	return model;
+}
+
 export function clearAgentChatPaneState(paneId: string) {
+	chatMessageReadModels.get(paneId)?.flush();
+	chatMessageReadModels.delete(paneId);
+	chatCheckpointReadModels.delete(paneId);
+	chatQueueReadModels.delete(paneId);
+	chatRunStatusReadModels.get(paneId)?.clear();
+	chatRunStatusReadModels.delete(paneId);
 	for (const prefix of [
-		STORAGE_KEY_PREFIX,
+		LEGACY_MESSAGES_KEY_PREFIX,
 		SESSION_KEY_PREFIX,
 		INPUT_KEY_PREFIX,
+		CHECKPOINT_KEY_PREFIX,
 		SUMMARY_KEY_PREFIX,
 		PENDING_WORKSPACE_KEY_PREFIX,
 	]) {

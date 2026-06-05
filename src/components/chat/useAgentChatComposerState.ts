@@ -1,18 +1,18 @@
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import type {
 	AttachedImageInfo,
 	QueuedMessageInfo,
 } from "../../features/chat/agent-chat-shared.ts";
-import {
-	loadFileBackedQueue,
-	loadStoredQueue,
-	saveStoredQueue,
-} from "../../features/chat/chat-session-store.ts";
-import { CHAT_QUEUE_KEY_PREFIX } from "../../lib/client-storage-keys.ts";
-import { CLIENT_STORAGE_CHANGED_EVENT } from "../../lib/client-storage-sync.ts";
+import { getChatQueueReadModel } from "../../features/chat/chat-session-store.ts";
 import { hasPath, lacksId } from "../../lib/data.ts";
-import { listenWindowEvent } from "../../lib/react-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 
 interface MarkdownPreviewState {
@@ -27,14 +27,6 @@ type FilePreviewMessage =
 	| { type: "file:content"; content: string }
 	| { type: "file:error"; error?: string };
 
-let queueIdCounter = 0;
-
-function nextQueueId(): string {
-	return typeof crypto !== "undefined" && "randomUUID" in crypto
-		? crypto.randomUUID()
-		: `${Date.now()}-${++queueIdCounter}`;
-}
-
 function isFilePreviewMessage(msg: unknown): msg is FilePreviewMessage {
 	if (!msg || typeof msg !== "object") return false;
 	const type = (msg as { type?: unknown }).type;
@@ -48,55 +40,17 @@ function isFilePreviewMessage(msg: unknown): msg is FilePreviewMessage {
 	);
 }
 
-function areQueuedMessagesEqual(
-	prev: QueuedMessageInfo[],
-	next: QueuedMessageInfo[]
-) {
-	if (prev.length !== next.length) return false;
-	for (let i = 0; i < prev.length; i++) {
-		const a = prev[i]!;
-		const b = next[i]!;
-		if (
-			a.id !== b.id ||
-			a.text !== b.text ||
-			a.displayText !== b.displayText ||
-			(a.images?.length ?? 0) !== (b.images?.length ?? 0)
-		) {
-			return false;
-		}
-		const imagesA = a.images ?? [];
-		const imagesB = b.images ?? [];
-		for (let j = 0; j < imagesA.length; j++) {
-			if (imagesA[j] !== imagesB[j]) return false;
-		}
-	}
-	return true;
-}
-
-function parseQueuedMessages(
-	value: string | null | undefined
-): QueuedMessageInfo[] {
-	if (!value) return [];
-	try {
-		const parsed = JSON.parse(value);
-		return Array.isArray(parsed) ? (parsed as QueuedMessageInfo[]) : [];
-	} catch {
-		return [];
-	}
-}
-
 export function useAgentChatComposerState(paneId: string, enabled = true) {
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [attachedImages, setAttachedImages] = useState<AttachedImageInfo[]>([]);
 	const attachedImagesRef = useRef(attachedImages);
 	attachedImagesRef.current = attachedImages;
-	const queueRef = useRef<QueuedMessageInfo[]>(
-		loadStoredQueue<QueuedMessageInfo>(paneId)
+	const queueReadModel = useMemo(() => getChatQueueReadModel(paneId), [paneId]);
+	const queuedMessages = useSyncExternalStore(
+		queueReadModel.subscribe,
+		queueReadModel.getSnapshot,
+		queueReadModel.getSnapshot
 	);
-	const queueRevisionRef = useRef(0);
-	const [queuedMessages, setQueuedMessagesState] = useState<
-		QueuedMessageInfo[]
-	>(() => queueRef.current);
 	const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
 	const [editingQueueText, setEditingQueueText] = useState("");
 	const [mdPreview, setMdPreview] = useState<MarkdownPreviewState>({
@@ -120,32 +74,8 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 
 	useEffect(() => {
 		if (!enabled) return;
-		let active = true;
-		const next = loadStoredQueue<QueuedMessageInfo>(paneId);
-		const shouldApplyStoredQueue =
-			queueRef.current.length === 0 ||
-			next.length > 0 ||
-			areQueuedMessagesEqual(queueRef.current, next);
-		if (shouldApplyStoredQueue) {
-			queueRef.current = next;
-			setQueuedMessagesState(next);
-		}
-		const revisionAtLoad = queueRevisionRef.current;
-		void loadFileBackedQueue<QueuedMessageInfo>(paneId).then(
-			(fileBackedQueue) => {
-				if (!active || fileBackedQueue === null) return;
-				if (queueRevisionRef.current !== revisionAtLoad) return;
-				if (areQueuedMessagesEqual(queueRef.current, fileBackedQueue)) return;
-				queueRevisionRef.current++;
-				queueRef.current = fileBackedQueue;
-				setQueuedMessagesState(fileBackedQueue);
-				saveStoredQueue(paneId, fileBackedQueue);
-			}
-		);
-		return () => {
-			active = false;
-		};
-	}, [enabled, paneId]);
+		void queueReadModel.loadAsync();
+	}, [enabled, queueReadModel]);
 
 	useEffect(() => {
 		if (!enabled || !mdPreview.loading) return;
@@ -168,83 +98,38 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 		return wsClient.onMessage(handleMessage);
 	}, [enabled, mdPreview.loading]);
 
-	const setQueuedMessages = useCallback(
-		(messages: QueuedMessageInfo[]) => {
-			if (areQueuedMessagesEqual(queueRef.current, messages)) return;
-			queueRevisionRef.current++;
-			queueRef.current = messages;
-			setQueuedMessagesState(messages);
-			saveStoredQueue(paneId, messages);
-		},
-		[paneId]
-	);
-
-	useEffect(() => {
-		if (!enabled) return;
-		return listenWindowEvent(CLIENT_STORAGE_CHANGED_EVENT, (event) => {
-			const detail = (
-				event as CustomEvent<{ key?: string; value?: string | null }>
-			).detail;
-			if (detail?.key !== `${CHAT_QUEUE_KEY_PREFIX}${paneId}`) return;
-			const next = parseQueuedMessages(detail.value);
-			if (areQueuedMessagesEqual(queueRef.current, next)) return;
-			queueRevisionRef.current++;
-			queueRef.current = next;
-			setQueuedMessagesState(next);
-		});
-	}, [enabled, paneId]);
-
-	const queueMessage = useCallback(
-		(text: string, displayText: string, images?: string[]) => {
-			setQueuedMessages([
-				...queueRef.current,
-				{
-					id: nextQueueId(),
-					text,
-					displayText,
-					images: images?.length ? images : undefined,
-				},
-			]);
-		},
-		[setQueuedMessages]
-	);
-
-	const shiftQueuedMessage = useCallback(() => {
-		const [next = null, ...rest] = queueRef.current;
-		setQueuedMessages(rest);
-		return next;
-	}, [setQueuedMessages]);
-
 	const replaceQueuedMessages = useCallback(
 		(messages: QueuedMessageInfo[]) => {
-			setQueuedMessages(messages);
+			queueReadModel.replaceFromServer(messages);
 		},
-		[setQueuedMessages]
+		[queueReadModel]
 	);
 
 	const removeQueuedMessage = useCallback(
 		(id: string) => {
-			if (!queueRef.current.some((item) => item.id === id)) return;
-			setQueuedMessages(queueRef.current.filter(lacksId.bind(null, id)));
+			const queue = queueReadModel.get();
+			if (!queue.some((item) => item.id === id)) return;
+			queueReadModel.setLocal(queue.filter(lacksId.bind(null, id)));
 			if (editingQueueId === id) {
 				setEditingQueueId(null);
 				setEditingQueueText("");
 			}
 		},
-		[editingQueueId, setQueuedMessages]
+		[editingQueueId, queueReadModel]
 	);
 
 	const updateQueuedMessage = useCallback(
 		(id: string, text: string) => {
-			const existing = queueRef.current.find((item) => item.id === id);
+			const queue = queueReadModel.get();
+			const existing = queue.find((item) => item.id === id);
 			if (!existing || existing.text === text) return;
-			setQueuedMessages(
-				queueRef.current.map((item) =>
+			queueReadModel.setLocal(
+				queue.map((item) =>
 					item.id === id ? { ...item, text, displayText: text } : item
 				)
 			);
 		},
-		[setQueuedMessages]
+		[queueReadModel]
 	);
 
 	const startQueuedMessageEdit = useCallback((id: string, text: string) => {
@@ -341,8 +226,6 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 		setIsDragOver,
 		attachedImages,
 		queuedMessages,
-		queueMessage,
-		shiftQueuedMessage,
 		replaceQueuedMessages,
 		removeQueuedMessage,
 		updateQueuedMessage,

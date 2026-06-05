@@ -8,6 +8,7 @@ interface UseFileWatcherOptions {
 	cwd: string | undefined;
 	paneId: string | undefined;
 	currentFile: string | undefined;
+	diffReady: boolean;
 	loadDiff: (req: DiffRequest) => void;
 	setSelectedFile: (path: string, staged: boolean) => void;
 	onDiffLoaded: () => void;
@@ -30,6 +31,7 @@ export function useFileWatcher({
 	cwd,
 	paneId,
 	currentFile,
+	diffReady,
 	loadDiff,
 	setSelectedFile,
 	onDiffLoaded,
@@ -40,12 +42,14 @@ export function useFileWatcher({
 	const currentFileRef = useRef(currentFile);
 	const loadDiffRef = useRef(loadDiff);
 	const setSelectedFileRef = useRef(setSelectedFile);
+	const onDiffLoadedRef = useRef(onDiffLoaded);
 
 	enabledRef.current = enabled;
 	cwdRef.current = cwd;
 	currentFileRef.current = currentFile;
 	loadDiffRef.current = loadDiff;
 	setSelectedFileRef.current = setSelectedFile;
+	onDiffLoadedRef.current = onDiffLoaded;
 
 	useEffect(() => {
 		if (!enabled || !cwd) return;
@@ -96,13 +100,9 @@ export function useFileWatcher({
 		};
 	}, [cwd, paneId]);
 
-	return {
-		pendingScrollRef,
-		checkPendingScroll: () => {
-			if (pendingScrollRef.current) {
-				pendingScrollRef.current = false;
-				onDiffLoaded();
-			}
-		},
-	};
+	useEffect(() => {
+		if (!diffReady || !pendingScrollRef.current) return;
+		pendingScrollRef.current = false;
+		onDiffLoadedRef.current();
+	}, [diffReady]);
 }

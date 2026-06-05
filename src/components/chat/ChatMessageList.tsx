@@ -2,7 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import React, {
 	useCallback,
-	useEffect,
+	useImperativeHandle,
 	useLayoutEffect,
 	useMemo,
 	useState,
@@ -198,6 +198,26 @@ const Bubble = React.memo(function Bubble({
 				: null,
 		[msg.content, msg.role, msg.toolName]
 	);
+	const userMessageDisplay = useMemo(() => {
+		if (msg.role !== "user") return null;
+		let imagePaths = msg.images ?? [];
+		let displayContent = msg.content;
+		if (
+			imagePaths.length === 0 &&
+			msg.content.includes("Here are the images at these paths:")
+		) {
+			const parts = msg.content.split("Here are the images at these paths:\n");
+			displayContent = parts[0]?.trim() ?? "";
+			const pathLines = parts[1]?.split("\n").filter((p) => p.trim()) ?? [];
+			imagePaths = pathLines.filter((p) => p.includes("/.tmp/"));
+		}
+		return {
+			contentNodes: displayContent
+				? renderTextPills(displayContent, slashCommandNames)
+				: null,
+			imagePaths,
+		};
+	}, [msg.content, msg.images, msg.role, slashCommandNames]);
 	const handleCopyMessage = useCallback(() => {
 		if (!msg.content) return;
 		navigator.clipboard
@@ -219,23 +239,13 @@ const Bubble = React.memo(function Bubble({
 		) {
 			return null;
 		}
-		let imagePaths = msg.images ?? [];
-		let displayContent = msg.content;
-		if (
-			imagePaths.length === 0 &&
-			msg.content.includes("Here are the images at these paths:")
-		) {
-			const parts = msg.content.split("Here are the images at these paths:\n");
-			displayContent = parts[0]?.trim() ?? "";
-			const pathLines = parts[1]?.split("\n").filter((p) => p.trim()) ?? [];
-			imagePaths = pathLines.filter((p) => p.includes("/.tmp/"));
-		}
+		if (!userMessageDisplay) return null;
 		return (
 			<div {...stylex.props(styles.userRow)}>
 				<div {...stylex.props(styles.userBubble)}>
-					{imagePaths.length > 0 && (
+					{userMessageDisplay.imagePaths.length > 0 && (
 						<div {...stylex.props(styles.userImages)}>
-							{imagePaths.map((imgPath) => (
+							{userMessageDisplay.imagePaths.map((imgPath) => (
 								<img
 									key={imgPath}
 									src={`/api/file?path=${encodeURIComponent(imgPath)}`}
@@ -245,9 +255,9 @@ const Bubble = React.memo(function Bubble({
 							))}
 						</div>
 					)}
-					{displayContent && (
+					{userMessageDisplay.contentNodes && (
 						<p {...stylex.props(styles.userText)}>
-							{renderTextPills(displayContent, slashCommandNames)}
+							{userMessageDisplay.contentNodes}
 						</p>
 					)}
 				</div>
@@ -373,7 +383,7 @@ const Bubble = React.memo(function Bubble({
 export const ChatMessageList = React.memo(function ChatMessageList({
 	messages,
 	scrollElementRef,
-	onVirtualizerReady,
+	virtualizerControlsRef,
 	expandedTools,
 	toggleTool,
 	checkpoints,
@@ -386,7 +396,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 }: {
 	messages: ChatMessage[];
 	scrollElementRef: React.RefObject<HTMLDivElement | null>;
-	onVirtualizerReady?: (controls: ChatVirtualizerControls | null) => void;
+	virtualizerControlsRef?: React.Ref<ChatVirtualizerControls | null>;
 	expandedTools: Set<string>;
 	toggleTool: (id: string) => void;
 	checkpoints: CheckpointInfo[];
@@ -402,9 +412,14 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		if (!isLoading || !startTime) return renderItems;
 		return [...renderItems, { type: "thinking", key: "thinking", startTime }];
 	}, [isLoading, renderItems, startTime]);
+	const getVirtualRowKey = useCallback(
+		(index: number) => getRowKey(renderRows[index], index),
+		[renderRows]
+	);
 	const rowVirtualizer = useVirtualizer({
 		count: renderRows.length,
 		getScrollElement: () => scrollElementRef.current,
+		getItemKey: getVirtualRowKey,
 		estimateSize: () => 148,
 		overscan: 8,
 		gap: 8,
@@ -430,8 +445,9 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		return byMessageId;
 	}, [checkpoints]);
 
-	useEffect(() => {
-		onVirtualizerReady?.({
+	useImperativeHandle(
+		virtualizerControlsRef,
+		() => ({
 			scrollToEnd: (behavior = "smooth") => {
 				if (renderRows.length === 0) return;
 				rowVirtualizer.scrollToIndex(renderRows.length - 1, {
@@ -449,9 +465,9 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 				if (!el) return 0;
 				return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
 			},
-		});
-		return () => onVirtualizerReady?.(null);
-	}, [onVirtualizerReady, renderRows.length, rowVirtualizer, scrollElementRef]);
+		}),
+		[renderRows.length, rowVirtualizer, scrollElementRef]
+	);
 
 	useLayoutEffect(() => {
 		if (renderRows.length === 0) return;

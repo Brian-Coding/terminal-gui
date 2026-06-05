@@ -105,7 +105,7 @@ async function requestMicrophoneAccess() {
 	} catch (error) {
 		throw new Error(formatMicrophoneError(error));
 	} finally {
-		stream?.getTracks().forEach((track) => track.stop());
+		for (const track of stream?.getTracks() ?? []) track.stop();
 	}
 }
 

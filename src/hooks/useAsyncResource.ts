@@ -52,7 +52,7 @@ export function useAsyncResource<T>(
 		} finally {
 			setLoading(false);
 		}
-	}, [fetcher]);
+	}, [fetcher, setData]);
 
 	useEffect(() => {
 		void refresh();

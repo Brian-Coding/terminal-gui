@@ -71,6 +71,17 @@ export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
 	);
 }
 
+export function stringifyToolInput(input: unknown): string {
+	if (input === undefined || input === null) return "";
+	return typeof input === "string" ? input : JSON.stringify(input, null, 2);
+}
+
+export function getToolBlockInitialContent(block: unknown): string {
+	if (!block || typeof block !== "object") return "";
+	const input = (block as { input?: unknown }).input;
+	return stringifyToolInput(input);
+}
+
 export interface CheckpointInfo {
 	id: string;
 	timestamp: number;
@@ -158,4 +169,12 @@ export function appendTrimmedMessage(
 	msgs: ChatMessage[]
 ): ChatMessage[] {
 	return trimMessages([...msgs, msg]);
+}
+
+export function prepareTranscriptForStorage<
+	T extends { isStreaming?: boolean },
+>(messages: T[]): Array<Omit<T, "isStreaming"> & { isStreaming?: boolean }> {
+	return messages.map((message) =>
+		message.isStreaming ? { ...message, isStreaming: false } : message
+	);
 }

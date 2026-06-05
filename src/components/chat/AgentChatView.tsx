@@ -1,7 +1,6 @@
 import * as stylex from "@stylexjs/stylex";
 import type React from "react";
 import {
-	forwardRef,
 	memo,
 	useCallback,
 	useEffect,
@@ -9,6 +8,7 @@ import {
 	useMemo,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react";
 import { getAgentIcon } from "../../features/agents/agent-ui.tsx";
 import {
@@ -19,24 +19,20 @@ import {
 import type {
 	AttachedImageInfo,
 	ChatLoadingState,
-	ChatMessage,
 	ChatUiState,
 	QueuedMessageInfo,
 	ToolActivity,
 } from "../../features/chat/agent-chat-shared.ts";
-import { trimMessages } from "../../features/chat/agent-chat-shared.ts";
 import {
 	clearStoredSessionId,
-	deriveStoredSummary,
+	getChatMessageReadModel,
+	getChatRunStatusReadModel,
 	loadPendingWorkspacePaths,
 	loadStoredInput,
-	loadStoredMessages,
-	loadStoredMessagesAsync,
 	loadStoredModel,
 	loadStoredReasoningLevel,
 	savePendingWorkspacePaths,
 	saveStoredInput,
-	saveStoredMessages,
 	saveStoredModel,
 	saveStoredReasoningLevel,
 } from "../../features/chat/chat-session-store.ts";
@@ -63,7 +59,7 @@ import {
 import { extractToolActivities } from "./chat-agent-utils.ts";
 import {
 	appendSystemMessage,
-	dedupeChatMessagesById,
+	windowChatMessagesForRender,
 } from "./chat-state-utils.ts";
 import { useAgentChatComposerState } from "./useAgentChatComposerState.ts";
 import { useAgentChatMenus } from "./useAgentChatMenus.ts";
@@ -88,160 +84,45 @@ export interface AgentChatHandle {
 	removeAttachedImage: (path: string) => void;
 }
 
-const MESSAGE_SAVE_INTERVAL_MS = 2500;
 const EMPTY_CWD_LIST: string[] = [];
-const CHAT_RENDER_CHAR_WINDOW = 50_000;
-const CHAT_RENDER_MIN_MESSAGES = 30;
-const CHAT_RENDER_MAX_MESSAGES = 200;
 
-function loadDurableChatMessages(paneId: string) {
-	return dedupeChatMessagesById(
-		loadStoredMessages<ChatMessage>(paneId).map((message) => ({
-			...message,
-			isStreaming: false,
-		}))
-	);
-}
-
-function prepareMessagesForStorage(messages: ChatMessage[]) {
-	return trimMessages(dedupeChatMessagesById(messages)).map((message) =>
-		message.isStreaming ? { ...message, isStreaming: false } : message
-	);
-}
-
-function windowChatMessagesForRender(messages: ChatMessage[]) {
-	if (messages.length <= CHAT_RENDER_MIN_MESSAGES) return messages;
-	let totalChars = 0;
-	let start = messages.length;
-	while (start > 0) {
-		const next = messages[start - 1]!;
-		const nextTotal = totalChars + next.content.length;
-		const selectedCount = messages.length - start;
-		if (
-			selectedCount >= CHAT_RENDER_MIN_MESSAGES &&
-			(nextTotal > CHAT_RENDER_CHAR_WINDOW ||
-				selectedCount >= CHAT_RENDER_MAX_MESSAGES)
-		) {
-			break;
-		}
-		totalChars = nextTotal;
-		start--;
-	}
-	return start <= 0 ? messages : messages.slice(start);
-}
-
-function usePersistentChatMessages(paneId: string, enabled = true) {
-	const [messages, setMessagesRaw] = useState<ChatMessage[]>(() =>
-		enabled ? loadDurableChatMessages(paneId) : []
-	);
-	const loadedPaneRef = useRef<string | null>(enabled ? paneId : null);
-	const messagesRef = useRef(messages);
-	const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const pendingMessageSaveRef = useRef<ChatMessage[] | null>(null);
-	const summaryRef = useRef<string | null>(null);
-	messagesRef.current = messages;
-
-	const saveMessagesNow = useCallback(
-		(nextMessages: ChatMessage[]) => {
-			if (saveTimerRef.current) {
-				clearTimeout(saveTimerRef.current);
-				saveTimerRef.current = null;
-			}
-			const storedMessages = prepareMessagesForStorage(nextMessages);
-			saveStoredMessages(paneId, storedMessages);
-			pendingMessageSaveRef.current = null;
-			return storedMessages;
-		},
+function usePersistentChatMessages(paneId: string) {
+	const messageReadModel = useMemo(
+		() => getChatMessageReadModel(paneId),
 		[paneId]
 	);
-	const flushPendingMessageSave = useCallback(() => {
-		if (saveTimerRef.current) {
-			clearTimeout(saveTimerRef.current);
-			saveTimerRef.current = null;
-		}
-		if (pendingMessageSaveRef.current) {
-			saveStoredMessages(
-				paneId,
-				prepareMessagesForStorage(pendingMessageSaveRef.current)
-			);
-			pendingMessageSaveRef.current = null;
-		}
-	}, [paneId]);
-	const scheduleMessageSave = useCallback(
-		(nextMessages: ChatMessage[]) => {
-			pendingMessageSaveRef.current = nextMessages;
-			summaryRef.current ??= deriveStoredSummary(paneId, nextMessages, () =>
-				dispatchTerminalShellChange({
-					source: "cache",
-					reason: "session-title",
-				})
-			);
-			if (saveTimerRef.current) return;
-			saveTimerRef.current = setTimeout(() => {
-				flushPendingMessageSave();
-			}, MESSAGE_SAVE_INTERVAL_MS);
-		},
-		[flushPendingMessageSave, paneId]
+	const messages = useSyncExternalStore(
+		messageReadModel.subscribe,
+		messageReadModel.getSnapshot,
+		messageReadModel.getSnapshot
 	);
-	const setMessages = useCallback(
-		(update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-			setMessagesRaw((prev) => {
-				const next =
-					typeof update === "function"
-						? (update as (prev: ChatMessage[]) => ChatMessage[])(prev)
-						: update;
-				const deduped = dedupeChatMessagesById(next);
-				if (deduped === prev) return prev;
-				messagesRef.current = deduped;
-				scheduleMessageSave(deduped);
-				return deduped;
-			});
-		},
-		[scheduleMessageSave]
+	const getToolActivities = useCallback(
+		() => extractToolActivities(messageReadModel.get()),
+		[messageReadModel]
 	);
 
 	useEffect(() => {
-		if (!enabled || loadedPaneRef.current === paneId) return;
-		const nextMessages = loadDurableChatMessages(paneId);
-		loadedPaneRef.current = paneId;
-		messagesRef.current = nextMessages;
-		setMessagesRaw(nextMessages);
-	}, [enabled, paneId]);
-	useEffect(() => {
-		if (!enabled) return;
-		let cancelled = false;
-		void loadStoredMessagesAsync<ChatMessage>(paneId).then((cachedMessages) => {
-			if (cancelled || cachedMessages.length === 0) return;
-			if (messagesRef.current.length > 0) return;
-			const nextMessages = dedupeChatMessagesById(
-				cachedMessages.map((message) => ({ ...message, isStreaming: false }))
-			);
-			if (nextMessages.length === 0) return;
-			messagesRef.current = nextMessages;
-			setMessagesRaw(nextMessages);
+		messageReadModel.setSummaryChangeCallback(() => {
+			dispatchTerminalShellChange({
+				source: "cache",
+				reason: "session-title",
+			});
 		});
 		return () => {
-			cancelled = true;
+			messageReadModel.setSummaryChangeCallback(() => {});
 		};
-	}, [enabled, paneId]);
-	useEffect(() => () => flushPendingMessageSave(), [flushPendingMessageSave]);
+	}, [messageReadModel]);
 	useEffect(() => {
-		if (!enabled) {
-			flushPendingMessageSave();
-			return;
-		}
-		const flushCurrentMessages = () => {
-			saveMessagesNow(messagesRef.current);
-		};
-		window.addEventListener("beforeunload", flushCurrentMessages);
-		window.addEventListener("pagehide", flushCurrentMessages);
-		return () => {
-			window.removeEventListener("beforeunload", flushCurrentMessages);
-			window.removeEventListener("pagehide", flushCurrentMessages);
-		};
-	}, [enabled, flushPendingMessageSave, saveMessagesNow]);
+		void messageReadModel.loadAsync();
+		return () => messageReadModel.flush();
+	}, [messageReadModel]);
 
-	return { messages, messagesRef, saveMessagesNow, setMessages };
+	return {
+		getToolActivities,
+		messageReadModel,
+		messages,
+		setMessages: messageReadModel.set,
+	};
 }
 
 function useAgentChatSettings(paneId: string, agentKind: AgentKind) {
@@ -373,13 +254,6 @@ function useChatViewport(
 		},
 		[scrollToBottom]
 	);
-	const handleVirtualizerReady = useCallback(
-		(controls: ChatVirtualizerControls | null) => {
-			chatVirtualizerRef.current = controls;
-			if (controls) setIsAtBottom(controls.isAtEnd());
-		},
-		[]
-	);
 	useEffect(() => {
 		if (!isSelected || !isVisible) return;
 		requestAnimationFrame(() => textareaRef.current?.focus());
@@ -407,9 +281,8 @@ function useChatViewport(
 			highlightOverlayRef.current.style.transform = `translateY(-${ta.scrollTop}px)`;
 		}
 	}, [input, isVisible]);
-	useEffect(() => {
-		if (!isSelected || !isVisible) return;
-		const onKeyDown = (e: KeyboardEvent) => {
+	const handleWindowKeyDown = useCallback(
+		(e: KeyboardEvent) => {
 			if (e.key !== "ArrowDown") return;
 			const active = document.activeElement;
 			if (
@@ -421,13 +294,17 @@ function useChatViewport(
 				e.preventDefault();
 				scrollToBottom();
 			}
-		};
-		return listenWindowEvent("keydown", onKeyDown);
-	}, [isAtBottom, isSelected, isVisible, scrollToBottom]);
+		},
+		[isAtBottom, scrollToBottom]
+	);
+	useEffect(() => {
+		if (!isSelected || !isVisible) return;
+		return listenWindowEvent("keydown", handleWindowKeyDown);
+	}, [handleWindowKeyDown, isSelected, isVisible]);
 
 	return {
+		chatVirtualizerRef,
 		handleScroll,
-		handleVirtualizerReady,
 		highlightOverlayRef,
 		isAtBottom,
 		scheduleScrollToBottom,
@@ -441,46 +318,45 @@ function useChatUiState(
 	paneId: string,
 	onStatusChange?: (paneId: string, status: string) => void
 ) {
-	const [chatUiState, setChatUiState] = useState<ChatUiState>(() => ({
-		isLoading: false,
-		status: "idle",
-		startTime: null,
+	const runStatusReadModel = useMemo(
+		() => getChatRunStatusReadModel(paneId),
+		[paneId]
+	);
+	const runStatus = useSyncExternalStore(
+		runStatusReadModel.subscribe,
+		runStatusReadModel.getSnapshot,
+		runStatusReadModel.getSnapshot
+	);
+	const [chatUiControls, setChatUiControls] = useState<
+		Pick<ChatUiState, "expandedTools" | "liveActivities">
+	>(() => ({
 		expandedTools: new Set(),
 		liveActivities: [],
 	}));
-	const chatUiStateRef = useRef(chatUiState);
-	chatUiStateRef.current = chatUiState;
-	const setLoadingState = useCallback(
+	const chatUiState = useMemo(
+		() => ({
+			...runStatus,
+			...chatUiControls,
+		}),
+		[chatUiControls, runStatus]
+	);
+	const setRunStatus = useCallback(
 		(
 			value: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
 		) => {
-			const prev = chatUiStateRef.current;
-			const patch = typeof value === "function" ? value(prev) : value;
-			const next = { ...prev, ...patch };
-			if (
-				prev.isLoading === next.isLoading &&
-				prev.status === next.status &&
-				prev.startTime === next.startTime &&
-				prev.expandedTools === next.expandedTools &&
-				prev.liveActivities === next.liveActivities
-			) {
-				return;
-			}
-			chatUiStateRef.current = next;
-			setChatUiState(next);
+			const prev = runStatusReadModel.get();
+			const next = runStatusReadModel.set(value);
 			if (prev.status !== next.status) onStatusChange?.(paneId, next.status);
 		},
-		[onStatusChange, paneId]
+		[onStatusChange, paneId, runStatusReadModel]
 	);
 	const setExpandedTools = useCallback(
 		(value: Set<string> | ((prev: Set<string>) => Set<string>)) => {
-			setChatUiState((prev) => {
+			setChatUiControls((prev) => {
 				const expandedTools =
 					typeof value === "function" ? value(prev.expandedTools) : value;
 				if (prev.expandedTools === expandedTools) return prev;
-				const next = { ...prev, expandedTools };
-				chatUiStateRef.current = next;
-				return next;
+				return { ...prev, expandedTools };
 			});
 		},
 		[]
@@ -488,10 +364,9 @@ function useChatUiState(
 
 	return {
 		chatUiState,
-		chatUiStateRef,
-		setChatUiState,
+		setChatUiState: setChatUiControls,
 		setExpandedTools,
-		setLoadingState,
+		setRunStatus,
 	};
 }
 
@@ -580,467 +455,448 @@ interface AgentChatViewProps {
 	onDirectoryCancel?: (paneId: string) => void;
 	/** Called when user wants to add a new pane of a specific agent kind */
 	onAddPane?: (agentKind: AgentKind) => void;
+	ref?: React.Ref<AgentChatHandle>;
 }
 
-export const AgentChatView = memo(
-	forwardRef<AgentChatHandle, AgentChatViewProps>(function AgentChatView(
-		{
-			paneId,
-			cwd,
-			referencePaths,
-			gitBranch: providedGitBranch,
-			showInput = true,
-			agentKind = loadDefaultChatSettings().agentKind,
-			onStatusChange,
-			hideHeader,
-			onClose,
-			isSelected,
-			isVisible = true,
-			draggable,
-			onDragStart,
-			onDragEnd,
-			sessions,
-			onSelectSession,
-			composerOnly = false,
-			composerOnlyOffsetX = 0,
-			onExitComposerOnly,
-			onDirectoryChange,
-			onDirectoryCancel,
+export const AgentChatView = memo(function AgentChatView({
+	paneId,
+	cwd,
+	referencePaths,
+	gitBranch: providedGitBranch,
+	showInput = true,
+	agentKind = loadDefaultChatSettings().agentKind,
+	onStatusChange,
+	hideHeader,
+	onClose,
+	isSelected,
+	isVisible = true,
+	draggable,
+	onDragStart,
+	onDragEnd,
+	sessions,
+	onSelectSession,
+	composerOnly = false,
+	composerOnlyOffsetX = 0,
+	onExitComposerOnly,
+	onDirectoryChange,
+	onDirectoryCancel,
+	ref,
+}: AgentChatViewProps) {
+	const renderVisibleChat = composerOnly || isVisible;
+	const { getToolActivities, messageReadModel, messages, setMessages } =
+		usePersistentChatMessages(paneId);
+	const visibleMessages = useMemo(
+		() => windowChatMessagesForRender(messages),
+		[messages]
+	);
+	const {
+		agentKindOptions,
+		effectiveSelectedModel,
+		handleAgentKindChange,
+		handleModelChange,
+		handleReasoningLevelChange,
+		selectedReasoningLevel,
+	} = useAgentChatSettings(paneId, agentKind);
+	const {
+		consumePendingWorkspace,
+		cwdList,
+		savePendingWorkspaceSelection,
+		visibleCwd,
+	} = usePendingChatWorkspace(paneId, cwd, onDirectoryChange);
+	const [input, setInputRaw] = useState(() => loadStoredInput(paneId));
+	const pendingInputRef = useRef(input);
+	const inputSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const flushInputSave = useCallback(() => {
+		if (inputSaveTimerRef.current) {
+			clearTimeout(inputSaveTimerRef.current);
+			inputSaveTimerRef.current = null;
+		}
+		saveStoredInput(paneId, pendingInputRef.current);
+	}, [paneId]);
+	const setInput = useCallback(
+		(val: string) => {
+			setInputRaw(val);
+			pendingInputRef.current = val;
+			if (inputSaveTimerRef.current) return;
+			inputSaveTimerRef.current = setTimeout(flushInputSave, 250);
 		},
-		ref
-	) {
-		const renderVisibleChat = composerOnly || isVisible;
-		const { messages, messagesRef, saveMessagesNow, setMessages } =
-			usePersistentChatMessages(paneId, true);
-		const visibleMessages = useMemo(
-			() => windowChatMessagesForRender(messages),
-			[messages]
-		);
-		const {
-			agentKindOptions,
-			effectiveSelectedModel,
-			handleAgentKindChange,
-			handleModelChange,
-			handleReasoningLevelChange,
-			selectedReasoningLevel,
-		} = useAgentChatSettings(paneId, agentKind);
-		const {
-			consumePendingWorkspace,
-			cwdList,
-			savePendingWorkspaceSelection,
-			visibleCwd,
-		} = usePendingChatWorkspace(paneId, cwd, onDirectoryChange);
-		const [input, setInputRaw] = useState(() => loadStoredInput(paneId));
-		const pendingInputRef = useRef(input);
-		const inputSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-			null
-		);
-		const flushInputSave = useCallback(() => {
-			if (inputSaveTimerRef.current) {
-				clearTimeout(inputSaveTimerRef.current);
-				inputSaveTimerRef.current = null;
-			}
-			saveStoredInput(paneId, pendingInputRef.current);
-		}, [paneId]);
-		const setInput = useCallback(
-			(val: string) => {
-				setInputRaw(val);
-				pendingInputRef.current = val;
-				if (inputSaveTimerRef.current) return;
-				inputSaveTimerRef.current = setTimeout(flushInputSave, 250);
+		[flushInputSave]
+	);
+	useEffect(() => () => flushInputSave(), [flushInputSave]);
+	const {
+		cancelListening: cancelSpeechListening,
+		error: speechError,
+		isListening: isSpeechListening,
+		isSupported: isSpeechSupported,
+		toggleListening: toggleSpeechListening,
+	} = useSpeechToText({
+		enabled: renderVisibleChat && showInput,
+		value: input,
+		onChange: setInput,
+	});
+	const shouldLoadGitBranch =
+		providedGitBranch === undefined && renderVisibleChat;
+	const { projects: gitProjects } = useGitStatus(
+		shouldLoadGitBranch ? cwdList : EMPTY_CWD_LIST,
+		{ enabled: shouldLoadGitBranch && cwdList.length > 0 }
+	);
+	const gitBranch = providedGitBranch ?? gitProjects[0]?.branch ?? null;
+
+	const { chatUiState, setChatUiState, setExpandedTools, setRunStatus } =
+		useChatUiState(paneId, onStatusChange);
+	const { isLoading, status, startTime, expandedTools, liveActivities } =
+		chatUiState;
+	const inputContainerRef = useRef<HTMLDivElement>(null);
+	const containerRef = useRef<HTMLDivElement>(null);
+	const {
+		chatVirtualizerRef,
+		handleScroll,
+		isAtBottom,
+		highlightOverlayRef,
+		scheduleScrollToBottom,
+		scrollRef,
+		scrollToBottom,
+		textareaRef,
+	} = useChatViewport(input, isSelected, renderVisibleChat);
+	const {
+		setIsDragOver,
+		attachedImages,
+		queuedMessages,
+		replaceQueuedMessages,
+		removeQueuedMessage,
+		updateQueuedMessage,
+		editingQueueId,
+		editingQueueText,
+		setEditingQueueText,
+		startQueuedMessageEdit,
+		cancelQueuedMessageEdit,
+		saveQueuedMessageEdit,
+		mdPreview,
+		setMdPreview,
+		handleMdFileClick,
+		attachImage,
+		removeAttachedImage,
+		clearAttachedImages,
+		handleDrop,
+		handlePaste,
+	} = useAgentChatComposerState(paneId, renderVisibleChat);
+	const {
+		allCommands,
+		fileMenu,
+		setFileMenu,
+		fileResults,
+		slashMenu,
+		setSlashMenu,
+		filteredCommands,
+		showCommands,
+		incrementUsage,
+		slashCommandNames,
+		handleInputForFileMenu,
+		handleInputForSlashMenu,
+		selectCommand,
+		selectFile,
+	} = useAgentChatMenus({
+		agentKind,
+		cwd,
+		enabled: renderVisibleChat,
+		input,
+		setInput,
+		textareaRef,
+		inputContainerRef,
+		containerRef,
+	});
+	const { checkpoints, clearCheckpoints, resetStreamState, revertCheckpoint } =
+		useChatConnection({
+			enabled: renderVisibleChat,
+			messageReadModel,
+			paneId,
+			replaceQueuedMessages,
+			setChatUiState,
+			setRunStatus,
+		});
+	const { handleKeyDown, sendUserMessage } = useChatInputActions({
+		agentKind,
+		allCommands,
+		attachedImages,
+		cancelSpeechListening,
+		clearAttachedImages,
+		clearCheckpoints,
+		composerOnly,
+		consumePendingWorkspace,
+		cwd,
+		effectiveSelectedModel,
+		enabled: renderVisibleChat,
+		fileMenu,
+		fileResults,
+		filteredCommands,
+		incrementUsage,
+		input,
+		isLoading,
+		onSendStart: () => {
+			resetStreamState();
+			scheduleScrollToBottom("auto");
+		},
+		onExitComposerOnly,
+		paneId,
+		referencePaths,
+		selectCommand,
+		selectFile,
+		selectedReasoningLevel,
+		setFileMenu,
+		setInput,
+		setRunStatus,
+		setMessages,
+		setSlashMenu,
+		showCommands,
+		slashMenu,
+		textareaRef,
+	});
+	const handleSendMessage = useCallback(
+		(text: string) =>
+			sendUserMessage({ text, workspaceOverride: consumePendingWorkspace() }),
+		[consumePendingWorkspace, sendUserMessage]
+	);
+	const stopGeneration = useCallback(() => {
+		wsClient.send({ type: "chat:stop", paneId });
+		setRunStatus({ isLoading: false, status: "idle", startTime: null });
+		setMessages((prev) => appendSystemMessage(prev, "Generation stopped"));
+	}, [paneId, setMessages, setRunStatus]);
+	useImperativeHandle(
+		ref,
+		() => ({
+			sendMessage: (text: string) => {
+				const trimmed = text.trim();
+				if (!trimmed) return;
+				sendUserMessage({ text: trimmed });
 			},
-			[flushInputSave]
-		);
-		useEffect(() => () => flushInputSave(), [flushInputSave]);
-		const {
-			cancelListening: cancelSpeechListening,
+			sendMessageWithImages: (text: string, images?: string[]) => {
+				const trimmed = text.trim();
+				if (!trimmed) return;
+				sendUserMessage({ images, text: trimmed });
+			},
+			getStatus: () => status,
+			focusInput: (atEnd?: boolean) => {
+				const ta = textareaRef.current;
+				if (!ta) return;
+				ta.focus();
+				if (atEnd) ta.setSelectionRange(ta.value.length, ta.value.length);
+			},
+			getToolActivities,
+			getQueuedCount: () => queuedMessages.length,
+			getQueuedMessages: () =>
+				queuedMessages.map((queued) => ({
+					id: queued.id,
+					text: queued.text,
+					displayText: queued.displayText,
+					images: queued.images,
+				})),
+			removeQueuedMessage,
+			updateQueuedMessage,
+			stopGeneration,
+			isLoading: () => isLoading,
+			getAttachedImages: () => [...attachedImages],
+			attachImageFile: attachImage,
+			removeAttachedImage,
+		}),
+		[
+			attachImage,
+			attachedImages,
+			isLoading,
+			getToolActivities,
+			queuedMessages,
+			removeAttachedImage,
+			removeQueuedMessage,
+			sendUserMessage,
+			status,
+			stopGeneration,
+			textareaRef,
+			updateQueuedMessage,
+		]
+	);
+
+	const toggleTool = useCallback(
+		(id: string) => {
+			setExpandedTools((prev) => {
+				const next = new Set(prev);
+				next.has(id) ? next.delete(id) : next.add(id);
+				return next;
+			});
+		},
+		[setExpandedTools]
+	);
+	const voiceInput = useMemo(
+		() => ({
 			error: speechError,
 			isListening: isSpeechListening,
 			isSupported: isSpeechSupported,
-			toggleListening: toggleSpeechListening,
-		} = useSpeechToText({
-			enabled: renderVisibleChat && showInput,
-			value: input,
-			onChange: setInput,
-		});
-		const shouldLoadGitBranch =
-			providedGitBranch === undefined && renderVisibleChat;
-		const { projects: gitProjects } = useGitStatus(
-			shouldLoadGitBranch ? cwdList : EMPTY_CWD_LIST,
-			{ enabled: shouldLoadGitBranch && cwdList.length > 0 }
-		);
-		const gitBranch = providedGitBranch ?? gitProjects[0]?.branch ?? null;
+			onToggleListening: toggleSpeechListening,
+		}),
+		[isSpeechListening, isSpeechSupported, speechError, toggleSpeechListening]
+	);
 
-		const { chatUiState, setChatUiState, setExpandedTools, setLoadingState } =
-			useChatUiState(paneId, onStatusChange);
-		const { isLoading, status, startTime, expandedTools, liveActivities } =
-			chatUiState;
-		const inputContainerRef = useRef<HTMLDivElement>(null);
-		const containerRef = useRef<HTMLDivElement>(null);
-		const {
-			handleScroll,
-			handleVirtualizerReady,
-			isAtBottom,
-			highlightOverlayRef,
-			scheduleScrollToBottom,
-			scrollRef,
-			scrollToBottom,
-			textareaRef,
-		} = useChatViewport(input, isSelected, renderVisibleChat);
-		const {
-			setIsDragOver,
-			attachedImages,
-			queuedMessages,
-			queueMessage,
-			shiftQueuedMessage,
-			replaceQueuedMessages,
-			removeQueuedMessage,
-			updateQueuedMessage,
-			editingQueueId,
-			editingQueueText,
-			setEditingQueueText,
-			startQueuedMessageEdit,
-			cancelQueuedMessageEdit,
-			saveQueuedMessageEdit,
-			mdPreview,
-			setMdPreview,
-			handleMdFileClick,
-			attachImage,
-			removeAttachedImage,
-			clearAttachedImages,
-			handleDrop,
-			handlePaste,
-		} = useAgentChatComposerState(paneId, renderVisibleChat);
-		const {
-			allCommands,
-			fileMenu,
-			setFileMenu,
-			fileResults,
-			slashMenu,
-			setSlashMenu,
-			filteredCommands,
-			showCommands,
-			incrementUsage,
-			slashCommandNames,
-			handleInputForFileMenu,
-			handleInputForSlashMenu,
-			selectCommand,
-			selectFile,
-		} = useAgentChatMenus({
-			agentKind,
-			cwd,
-			enabled: renderVisibleChat,
-			input,
-			setInput,
-			textareaRef,
-			inputContainerRef,
-			containerRef,
-		});
-		const {
-			checkpoints,
-			clearCheckpoints,
-			resetStreamState,
-			revertCheckpoint,
-		} = useChatConnection({
-			enabled: renderVisibleChat,
-			messagesRef,
-			paneId,
-			replaceQueuedMessages,
-			saveMessagesNow,
-			setChatUiState,
-			setLoadingState,
-			setMessages,
-		});
-		const { handleKeyDown, sendUserMessage } = useChatInputActions({
-			agentKind,
-			allCommands,
-			attachedImages,
-			cancelSpeechListening,
-			clearAttachedImages,
-			clearCheckpoints,
-			composerOnly,
-			consumePendingWorkspace,
-			cwd,
-			effectiveSelectedModel,
-			enabled: renderVisibleChat,
-			fileMenu,
-			fileResults,
-			filteredCommands,
-			incrementUsage,
-			input,
-			isLoading,
-			onSendStart: () => {
-				resetStreamState();
-				scheduleScrollToBottom("auto");
-			},
-			onExitComposerOnly,
-			paneId,
-			queueMessage,
-			referencePaths,
-			selectCommand,
-			selectFile,
-			selectedReasoningLevel,
-			setFileMenu,
-			setInput,
-			setLoadingState,
-			setMessages,
-			setSlashMenu,
-			showCommands,
-			slashMenu,
-			shiftQueuedMessage,
-			textareaRef,
-		});
-		const handleSendMessage = useCallback(
-			(text: string) =>
-				sendUserMessage({ text, workspaceOverride: consumePendingWorkspace() }),
-			[consumePendingWorkspace, sendUserMessage]
-		);
-		const stopGeneration = useCallback(() => {
-			wsClient.send({ type: "chat:stop", paneId });
-			setLoadingState({ isLoading: false, status: "idle", startTime: null });
-			setMessages((prev) => appendSystemMessage(prev, "Generation stopped"));
-		}, [paneId, setLoadingState, setMessages]);
-		useImperativeHandle(
-			ref,
-			() => ({
-				sendMessage: (text: string) => {
-					const trimmed = text.trim();
-					if (!trimmed) return;
-					sendUserMessage({ text: trimmed });
-				},
-				sendMessageWithImages: (text: string, images?: string[]) => {
-					const trimmed = text.trim();
-					if (!trimmed) return;
-					sendUserMessage({ images, text: trimmed });
-				},
-				getStatus: () => status,
-				focusInput: (atEnd?: boolean) => {
-					const ta = textareaRef.current;
-					if (!ta) return;
-					ta.focus();
-					if (atEnd) ta.setSelectionRange(ta.value.length, ta.value.length);
-				},
-				getToolActivities: () => extractToolActivities(messagesRef.current),
-				getQueuedCount: () => queuedMessages.length,
-				getQueuedMessages: () =>
-					queuedMessages.map((queued) => ({
-						id: queued.id,
-						text: queued.text,
-						displayText: queued.displayText,
-						images: queued.images,
-					})),
-				removeQueuedMessage,
-				updateQueuedMessage,
-				stopGeneration,
-				isLoading: () => isLoading,
-				getAttachedImages: () => [...attachedImages],
-				attachImageFile: attachImage,
-				removeAttachedImage,
-			}),
-			[
-				attachImage,
-				attachedImages,
-				isLoading,
-				messagesRef,
-				queuedMessages,
-				removeAttachedImage,
-				removeQueuedMessage,
-				sendUserMessage,
-				status,
-				stopGeneration,
-				textareaRef,
-				updateQueuedMessage,
-			]
-		);
-
-		const toggleTool = useCallback(
-			(id: string) => {
-				setExpandedTools((prev) => {
-					const next = new Set(prev);
-					next.has(id) ? next.delete(id) : next.add(id);
-					return next;
-				});
-			},
-			[setExpandedTools]
-		);
-		const voiceInput = useMemo(
-			() => ({
-				error: speechError,
-				isListening: isSpeechListening,
-				isSupported: isSpeechSupported,
-				onToggleListening: toggleSpeechListening,
-			}),
-			[isSpeechListening, isSpeechSupported, speechError, toggleSpeechListening]
-		);
-
-		return (
-			<div
-				ref={containerRef}
-				{...stylex.props(styles.root, composerOnly && styles.composerOnlyRoot)}
-				style={
-					composerOnly
-						? {
-								left: `calc(50% + ${composerOnlyOffsetX}px)`,
-							}
-						: undefined
-				}
-				onDragOver={(e) => {
-					e.preventDefault();
-					setIsDragOver(true);
-				}}
-				onDragLeave={() => setIsDragOver(false)}
-				onDrop={handleDrop}
-			>
-				{renderVisibleChat && !hideHeader && !composerOnly && (
-					<AgentChatHeader
-						paneId={paneId}
-						cwd={visibleCwd}
-						gitBranch={gitBranch}
-						draggable={draggable}
-						onDragStart={onDragStart}
-						onDragEnd={onDragEnd}
-						onClose={onClose}
-						sessions={sessions}
-						onSelectSession={onSelectSession}
-					/>
-				)}
-				{renderVisibleChat && !composerOnly && (
-					<div {...stylex.props(styles.messageRegion)}>
-						<div
-							ref={scrollRef}
-							{...stylex.props(styles.scrollArea)}
-							onScroll={handleScroll}
-						>
-							{messages.length === 0 &&
-								!isLoading &&
-								!cwd &&
-								onDirectoryChange && (
-									<div {...stylex.props(styles.directoryPickerWrap)}>
-										<div {...stylex.props(styles.directoryPickerInner)}>
-											<InlineDirectoryPicker
-												onSelect={(path) => {
-													if (path) onDirectoryChange(paneId, path);
-													else onDirectoryCancel?.(paneId);
-												}}
-												onCancel={onDirectoryCancel?.bind(null, paneId)}
-												multiSelect
-												showStartButton={false}
-												onSelectionChange={(paths) => {
-													savePendingWorkspaceSelection(paths);
-												}}
-												onMultiSelect={(paths) => {
-													if (paths.length > 0) {
-														onDirectoryChange(
-															paneId,
-															paths[0]!,
-															paths.slice(1)
-														);
-													}
-												}}
-											/>
-										</div>
+	return (
+		<div
+			ref={containerRef}
+			{...stylex.props(styles.root, composerOnly && styles.composerOnlyRoot)}
+			style={
+				composerOnly
+					? {
+							left: `calc(50% + ${composerOnlyOffsetX}px)`,
+						}
+					: undefined
+			}
+			onDragOver={(e) => {
+				e.preventDefault();
+				setIsDragOver(true);
+			}}
+			onDragLeave={() => setIsDragOver(false)}
+			onDrop={handleDrop}
+		>
+			{renderVisibleChat && !hideHeader && !composerOnly && (
+				<AgentChatHeader
+					paneId={paneId}
+					cwd={visibleCwd}
+					gitBranch={gitBranch}
+					draggable={draggable}
+					onDragStart={onDragStart}
+					onDragEnd={onDragEnd}
+					onClose={onClose}
+					sessions={sessions}
+					onSelectSession={onSelectSession}
+				/>
+			)}
+			{renderVisibleChat && !composerOnly && (
+				<div {...stylex.props(styles.messageRegion)}>
+					<div
+						ref={scrollRef}
+						{...stylex.props(styles.scrollArea)}
+						onScroll={handleScroll}
+					>
+						{messages.length === 0 &&
+							!isLoading &&
+							!cwd &&
+							onDirectoryChange && (
+								<div {...stylex.props(styles.directoryPickerWrap)}>
+									<div {...stylex.props(styles.directoryPickerInner)}>
+										<InlineDirectoryPicker
+											onSelect={(path) => {
+												if (path) onDirectoryChange(paneId, path);
+												else onDirectoryCancel?.(paneId);
+											}}
+											onCancel={onDirectoryCancel?.bind(null, paneId)}
+											multiSelect
+											showStartButton={false}
+											onSelectionChange={(paths) => {
+												savePendingWorkspaceSelection(paths);
+											}}
+											onMultiSelect={(paths) => {
+												if (paths.length > 0) {
+													onDirectoryChange(paneId, paths[0]!, paths.slice(1));
+												}
+											}}
+										/>
 									</div>
-								)}
-							<ChatMessageList
-								messages={visibleMessages}
-								scrollElementRef={scrollRef}
-								onVirtualizerReady={handleVirtualizerReady}
-								expandedTools={expandedTools}
-								toggleTool={toggleTool}
-								checkpoints={checkpoints}
-								revertCheckpoint={revertCheckpoint}
-								isLoading={isLoading}
-								startTime={startTime}
-								handleSendMessage={handleSendMessage}
-								onMdFileClick={handleMdFileClick}
-								slashCommandNames={slashCommandNames}
-							/>
-						</div>
-						{!isAtBottom && (
-							<button
-								type="button"
-								onClick={() => scrollToBottom()}
-								{...stylex.props(styles.scrollButton)}
-							>
-								<IconArrowDown size={12} {...stylex.props(styles.scrollIcon)} />
-							</button>
-						)}
+								</div>
+							)}
+						<ChatMessageList
+							messages={visibleMessages}
+							scrollElementRef={scrollRef}
+							virtualizerControlsRef={chatVirtualizerRef}
+							expandedTools={expandedTools}
+							toggleTool={toggleTool}
+							checkpoints={checkpoints}
+							revertCheckpoint={revertCheckpoint}
+							isLoading={isLoading}
+							startTime={startTime}
+							handleSendMessage={handleSendMessage}
+							onMdFileClick={handleMdFileClick}
+							slashCommandNames={slashCommandNames}
+						/>
 					</div>
-				)}
+					{!isAtBottom && (
+						<button
+							type="button"
+							onClick={() => scrollToBottom()}
+							{...stylex.props(styles.scrollButton)}
+						>
+							<IconArrowDown size={12} {...stylex.props(styles.scrollIcon)} />
+						</button>
+					)}
+				</div>
+			)}
 
-				{renderVisibleChat && (
-					<div {...stylex.props(styles.composerRegion)}>
-						{!composerOnly && (
-							<>
-								<div
-									{...stylex.props(styles.composerBackdrop)}
-									style={{ backgroundImage: effectValues.composerBackdrop }}
-								/>
-								<div
-									{...stylex.props(styles.composerFade)}
-									style={{ backgroundImage: effectValues.composerFade }}
-								/>
-							</>
-						)}
-						<div {...stylex.props(styles.composerContent)}>
-							<AgentChatStatusBar
-								liveActivities={liveActivities}
-								isLoading={isLoading}
-								status={status}
-								onStop={stopGeneration}
+			{renderVisibleChat && (
+				<div {...stylex.props(styles.composerRegion)}>
+					{!composerOnly && (
+						<>
+							<div
+								{...stylex.props(styles.composerBackdrop)}
+								style={{ backgroundImage: effectValues.composerBackdrop }}
 							/>
-							<ChatComposer
-								showInput={showInput}
-								agentKind={agentKind}
-								agentKindOptions={agentKindOptions}
-								model={effectiveSelectedModel}
-								reasoningLevel={selectedReasoningLevel}
-								onAgentKindChange={handleAgentKindChange}
-								onModelChange={handleModelChange}
-								onReasoningLevelChange={handleReasoningLevelChange}
-								input={input}
-								setInput={setInput}
-								isLoading={isLoading}
-								attachedImages={attachedImages}
-								removeAttachedImage={removeAttachedImage}
-								attachImage={attachImage}
-								queuedMessages={queuedMessages}
-								editingQueueId={editingQueueId}
-								editingQueueText={editingQueueText}
-								setEditingQueueText={setEditingQueueText}
-								startQueuedMessageEdit={startQueuedMessageEdit}
-								cancelQueuedMessageEdit={cancelQueuedMessageEdit}
-								saveQueuedMessageEdit={saveQueuedMessageEdit}
-								removeQueuedMessage={removeQueuedMessage}
-								fileMenu={fileMenu}
-								setFileMenu={setFileMenu}
-								fileResults={fileResults}
-								selectFile={selectFile}
-								slashMenu={slashMenu}
-								setSlashMenu={setSlashMenu}
-								showCommands={showCommands}
-								filteredCommands={filteredCommands}
-								slashCommandNames={slashCommandNames}
-								selectCommand={selectCommand}
-								handleInputForFileMenu={handleInputForFileMenu}
-								handleInputForSlashMenu={handleInputForSlashMenu}
-								handleKeyDown={handleKeyDown}
-								handlePaste={handlePaste}
-								textareaRef={textareaRef}
-								highlightOverlayRef={highlightOverlayRef}
-								inputContainerRef={inputContainerRef}
-								mdPreview={mdPreview}
-								setMdPreview={setMdPreview}
-								onMdFileClick={handleMdFileClick}
-								voiceInput={voiceInput}
+							<div
+								{...stylex.props(styles.composerFade)}
+								style={{ backgroundImage: effectValues.composerFade }}
 							/>
-						</div>
+						</>
+					)}
+					<div {...stylex.props(styles.composerContent)}>
+						<AgentChatStatusBar
+							liveActivities={liveActivities}
+							isLoading={isLoading}
+							status={status}
+							onStop={stopGeneration}
+						/>
+						<ChatComposer
+							showInput={showInput}
+							agentKind={agentKind}
+							agentKindOptions={agentKindOptions}
+							model={effectiveSelectedModel}
+							reasoningLevel={selectedReasoningLevel}
+							onAgentKindChange={handleAgentKindChange}
+							onModelChange={handleModelChange}
+							onReasoningLevelChange={handleReasoningLevelChange}
+							input={input}
+							setInput={setInput}
+							isLoading={isLoading}
+							attachedImages={attachedImages}
+							removeAttachedImage={removeAttachedImage}
+							attachImage={attachImage}
+							queuedMessages={queuedMessages}
+							editingQueueId={editingQueueId}
+							editingQueueText={editingQueueText}
+							setEditingQueueText={setEditingQueueText}
+							startQueuedMessageEdit={startQueuedMessageEdit}
+							cancelQueuedMessageEdit={cancelQueuedMessageEdit}
+							saveQueuedMessageEdit={saveQueuedMessageEdit}
+							removeQueuedMessage={removeQueuedMessage}
+							fileMenu={fileMenu}
+							setFileMenu={setFileMenu}
+							fileResults={fileResults}
+							selectFile={selectFile}
+							slashMenu={slashMenu}
+							setSlashMenu={setSlashMenu}
+							showCommands={showCommands}
+							filteredCommands={filteredCommands}
+							slashCommandNames={slashCommandNames}
+							selectCommand={selectCommand}
+							handleInputForFileMenu={handleInputForFileMenu}
+							handleInputForSlashMenu={handleInputForSlashMenu}
+							handleKeyDown={handleKeyDown}
+							handlePaste={handlePaste}
+							textareaRef={textareaRef}
+							highlightOverlayRef={highlightOverlayRef}
+							inputContainerRef={inputContainerRef}
+							mdPreview={mdPreview}
+							setMdPreview={setMdPreview}
+							onMdFileClick={handleMdFileClick}
+							voiceInput={voiceInput}
+						/>
 					</div>
-				)}
-			</div>
-		);
-	})
-);
+				</div>
+			)}
+		</div>
+	);
+});
 
 const styles = stylex.create({
 	root: {

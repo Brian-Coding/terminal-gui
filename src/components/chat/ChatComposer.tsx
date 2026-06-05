@@ -423,16 +423,16 @@ export const ChatComposer = memo(function ChatComposer({
 				multiple
 				{...stylex.props(styles.hidden)}
 				onChange={async (e) => {
-					for (const file of Array.from(e.target.files || [])) {
-						if (file.type.startsWith("image/")) await attachImage(file);
-					}
+					const files = Array.from(e.target.files || []).filter((file) =>
+						file.type.startsWith("image/")
+					);
+					await Promise.all(files.map((file) => attachImage(file)));
 					e.target.value = "";
 				}}
 			/>
 
 			{attachedImages.length > 0 && (
-				<div
-					role="group"
+				<section
 					{...stylex.props(styles.attachments)}
 					aria-label="Attached images"
 				>
@@ -456,7 +456,7 @@ export const ChatComposer = memo(function ChatComposer({
 							</IconButton>
 						</div>
 					))}
-				</div>
+				</section>
 			)}
 
 			{showInput && (
@@ -523,7 +523,7 @@ export const ChatComposer = memo(function ChatComposer({
 									onClick={() => fileInputRef.current?.click()}
 									variant="ghost"
 									size="md"
-									className="shrink-0"
+									className={stylex.props(styles.noShrink).className}
 									title="Attach image"
 								>
 									<IconPlus size={16} />
@@ -534,14 +534,15 @@ export const ChatComposer = memo(function ChatComposer({
 										onClick={voiceInput.onToggleListening}
 										variant="ghost"
 										size="md"
-										className={`shrink-0 ${
+										className={
 											stylex.props(
+												styles.noShrink,
 												voiceInput.isListening && styles.voiceButtonListening,
 												!voiceInput.isListening && voiceInput.error
 													? styles.voiceButtonError
 													: null
-											).className ?? ""
-										}`}
+											).className
+										}
 										title={
 											voiceInput.error && !voiceInput.isListening
 												? voiceInput.error
@@ -1281,6 +1282,9 @@ const styles = stylex.create({
 		display: "flex",
 		flexShrink: 0,
 		gap: controlSize._0_5,
+	},
+	noShrink: {
+		flexShrink: 0,
 	},
 	voiceButtonListening: {
 		backgroundColor: color.accentWash,

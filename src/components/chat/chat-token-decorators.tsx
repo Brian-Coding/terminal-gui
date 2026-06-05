@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import type React from "react";
 import { colorValues, effectValues } from "../../tokens.stylex.ts";
 
@@ -46,11 +47,12 @@ export function renderInputHighlights(
 	text: string,
 	slashCommandNames?: readonly string[]
 ): React.ReactNode {
-	if (!text) return <span style={{ color: "transparent" }}>{"\u00A0"}</span>;
+	if (!text)
+		return <span {...stylex.props(styles.transparent)}>{"\u00A0"}</span>;
 
 	const tokens = findDecoratedTokenRanges(text, slashCommandNames);
 	if (tokens.length === 0) {
-		return <span style={{ color: colorValues.textMain }}>{text}</span>;
+		return <span {...stylex.props(styles.text)}>{text}</span>;
 	}
 
 	const segments: React.ReactNode[] = [];
@@ -61,7 +63,7 @@ export function renderInputHighlights(
 
 		if (token.start > lastEnd) {
 			segments.push(
-				<span key={`t-${lastEnd}`} style={{ color: colorValues.textMain }}>
+				<span key={`t-${lastEnd}`} {...stylex.props(styles.text)}>
 					{text.slice(lastEnd, token.start)}
 				</span>
 			);
@@ -69,14 +71,7 @@ export function renderInputHighlights(
 
 		const tokenText = text.slice(token.start, token.end);
 		segments.push(
-			<span
-				key={`h-${token.start}`}
-				className="rounded-sm"
-				style={{
-					color: colorValues.accent,
-					backgroundColor: effectValues.tokenHighlightBackground,
-				}}
-			>
+			<span key={`h-${token.start}`} {...stylex.props(styles.highlight)}>
 				{tokenText}
 			</span>
 		);
@@ -85,7 +80,7 @@ export function renderInputHighlights(
 
 	if (lastEnd < text.length) {
 		segments.push(
-			<span key={`t-${lastEnd}`} style={{ color: colorValues.textMain }}>
+			<span key={`t-${lastEnd}`} {...stylex.props(styles.text)}>
 				{text.slice(lastEnd)}
 			</span>
 		);
@@ -115,14 +110,7 @@ export function renderTextPills(
 
 		const tokenText = text.slice(token.start, token.end);
 		parts.push(
-			<span
-				key={`${token.start}-${tokenText}`}
-				className="inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium align-middle"
-				style={{
-					backgroundColor: effectValues.tokenHighlightBackground,
-					color: colorValues.accent,
-				}}
-			>
+			<span key={`${token.start}-${tokenText}`} {...stylex.props(styles.pill)}>
 				{tokenText}
 			</span>
 		);
@@ -135,3 +123,30 @@ export function renderTextPills(
 
 	return parts;
 }
+
+const styles = stylex.create({
+	transparent: {
+		color: "transparent",
+	},
+	text: {
+		color: colorValues.textMain,
+	},
+	highlight: {
+		backgroundColor: effectValues.tokenHighlightBackground,
+		borderRadius: "0.125rem",
+		color: colorValues.accent,
+	},
+	pill: {
+		alignItems: "center",
+		alignSelf: "center",
+		backgroundColor: effectValues.tokenHighlightBackground,
+		borderRadius: "999px",
+		color: colorValues.accent,
+		display: "inline-flex",
+		fontSize: "0.75rem",
+		fontWeight: 500,
+		paddingBlock: "0.125rem",
+		paddingInline: "0.375rem",
+		verticalAlign: "middle",
+	},
+});

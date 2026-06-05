@@ -1,6 +1,7 @@
 import {
-	CHAT_MESSAGES_STORAGE_KEY_PREFIX,
+	CHAT_QUEUE_KEY_PREFIX,
 	CHAT_SESSION_INDEX_STORAGE_KEY,
+	isChatMessageStorageKey,
 	shouldSyncClientStorageKey,
 	TERMINAL_STATE_STORAGE_KEY,
 } from "./client-storage-keys.ts";
@@ -82,7 +83,8 @@ async function fetchTerminalStateEntry(): Promise<TerminalStateEntryResult> {
 function isChatCacheKey(key: string): boolean {
 	return (
 		key === CHAT_SESSION_INDEX_STORAGE_KEY ||
-		key.startsWith(CHAT_MESSAGES_STORAGE_KEY_PREFIX)
+		isChatMessageStorageKey(key) ||
+		key.startsWith(CHAT_QUEUE_KEY_PREFIX)
 	);
 }
 

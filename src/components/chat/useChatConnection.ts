@@ -1,44 +1,59 @@
 import {
 	type Dispatch,
-	type MutableRefObject,
 	type SetStateAction,
 	useCallback,
 	useEffect,
+	useMemo,
 	useRef,
-	useState,
+	useSyncExternalStore,
 } from "react";
 import {
 	appendTrimmedMessage,
 	type ChatLoadingState,
 	type ChatMessage,
 	type ChatStreamEvent,
-	type ChatUiState,
-	type CheckpointInfo,
+	getToolBlockInitialContent,
 	isChatServerMessage,
 	nextId,
 	type QueuedMessageInfo,
 	type ToolActivity,
-	trimMessages,
 } from "../../features/chat/agent-chat-shared.ts";
 import {
-	loadStoredCheckpoints,
-	saveStoredCheckpoints,
+	getChatCheckpointReadModel,
 	saveStoredSessionId,
 } from "../../features/chat/chat-session-store.ts";
-import { getToolBlockInitialContent } from "../../features/chat/chat-stream-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import {
+	appendLiveToolActivity,
+	clearCompletedChatUiState,
 	clearLiveActivities,
 	markRespondingState,
 	markToolState,
 } from "./chat-agent-utils.ts";
 import {
-	appendMessageContent,
+	appendBtwQuestionMessage,
 	appendSystemMessage,
-	dedupeChatMessagesById,
-	mergeSyncedMessages,
+	applyAssistantResultMessage,
+	applyPendingMessageContent,
+	createBtwQuestionMessage,
+	finishBtwMessage,
+	finishStreamingMessages,
 	patchMessageById,
+	reconcileChatSync,
 } from "./chat-state-utils.ts";
+
+interface ChatMessageMutationModel {
+	get: () => ChatMessage[];
+	saveNow: (messages: ChatMessage[]) => ChatMessage[];
+	set: (
+		update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])
+	) => void;
+}
+
+type ChatActivityUiState = {
+	expandedTools: Set<string>;
+	liveActivities: ToolActivity[];
+};
 
 function scheduleFrame(callback: () => void): number {
 	if (typeof window !== "undefined" && window.requestAnimationFrame) {
@@ -57,25 +72,19 @@ function cancelFrame(id: number) {
 
 export function useChatConnection({
 	enabled = true,
-	messagesRef,
+	messageReadModel,
 	paneId,
 	replaceQueuedMessages,
-	saveMessagesNow,
 	setChatUiState,
-	setLoadingState,
-	setMessages,
+	setRunStatus,
 }: {
 	enabled?: boolean;
-	messagesRef: MutableRefObject<ChatMessage[]>;
+	messageReadModel: ChatMessageMutationModel;
 	paneId: string;
 	replaceQueuedMessages: (messages: QueuedMessageInfo[]) => void;
-	saveMessagesNow: (messages: ChatMessage[]) => ChatMessage[];
-	setChatUiState: Dispatch<SetStateAction<ChatUiState>>;
-	setLoadingState: (
+	setChatUiState: Dispatch<SetStateAction<ChatActivityUiState>>;
+	setRunStatus: (
 		value: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
-	) => void;
-	setMessages: (
-		update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])
 	) => void;
 }) {
 	const currentAssistantRef = useRef<string | null>(null);
@@ -85,16 +94,18 @@ export function useChatConnection({
 	const transcriptRevisionRef = useRef<number | null>(null);
 	const pendingContentRef = useRef<Map<string, string>>(new Map());
 	const flushFrameRef = useRef<number | null>(null);
-	const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>(() =>
-		loadStoredCheckpoints<CheckpointInfo>(paneId)
+	const checkpointReadModel = useMemo(
+		() => getChatCheckpointReadModel(paneId),
+		[paneId]
+	);
+	const checkpoints = useSyncExternalStore(
+		checkpointReadModel.subscribe,
+		checkpointReadModel.getSnapshot,
+		checkpointReadModel.getSnapshot
 	);
 	const applyPendingContent = useCallback(
 		(messages: ChatMessage[], pending: Map<string, string>) => {
-			let next: ChatMessage[] = messages;
-			for (const [targetId, content] of pending) {
-				next = appendMessageContent(next, targetId, content) as ChatMessage[];
-			}
-			return next;
+			return applyPendingMessageContent(messages, pending);
 		},
 		[]
 	);
@@ -104,13 +115,12 @@ export function useChatConnection({
 			flushFrameRef.current = null;
 		}
 		const pending = pendingContentRef.current;
-		if (pending.size === 0) return messagesRef.current;
+		if (pending.size === 0) return messageReadModel.get();
 		pendingContentRef.current = new Map();
-		const next = applyPendingContent(messagesRef.current, pending);
-		messagesRef.current = next;
-		setMessages(next);
+		const next = applyPendingContent(messageReadModel.get(), pending);
+		messageReadModel.set(next);
 		return next;
-	}, [applyPendingContent, messagesRef, setMessages]);
+	}, [applyPendingContent, messageReadModel]);
 	const clearPendingContent = useCallback(() => {
 		if (flushFrameRef.current !== null) {
 			cancelFrame(flushFrameRef.current);
@@ -129,10 +139,10 @@ export function useChatConnection({
 				const queued = pendingContentRef.current;
 				if (queued.size === 0) return;
 				pendingContentRef.current = new Map();
-				setMessages((prev) => applyPendingContent(prev, queued));
+				messageReadModel.set((prev) => applyPendingContent(prev, queued));
 			});
 		},
-		[applyPendingContent, setMessages]
+		[applyPendingContent, messageReadModel]
 	);
 	const resetStreamState = useCallback(() => {
 		flushPendingContent();
@@ -141,9 +151,8 @@ export function useChatConnection({
 		hasStreamedRef.current = false;
 	}, [flushPendingContent]);
 	const clearCheckpoints = useCallback(() => {
-		setCheckpoints([]);
-		saveStoredCheckpoints(paneId, []);
-	}, [paneId]);
+		checkpointReadModel.clear();
+	}, [checkpointReadModel]);
 	const revertCheckpoint = useCallback(
 		(checkpointId: string) => {
 			wsClient.send({ type: "checkpoint:revert", paneId, checkpointId });
@@ -153,8 +162,8 @@ export function useChatConnection({
 	function appendAssistant(content: string, isStreaming: boolean) {
 		const id = nextId();
 		currentAssistantRef.current = id;
-		setLoadingState(markRespondingState);
-		setMessages(
+		setRunStatus(markRespondingState);
+		messageReadModel.set(
 			appendTrimmedMessage.bind(null, {
 				id,
 				role: "assistant",
@@ -167,8 +176,8 @@ export function useChatConnection({
 		const id = nextId();
 		currentAssistantRef.current = null;
 		currentToolRef.current = id;
-		setLoadingState(markToolState.bind(null, toolName));
-		setMessages(
+		setRunStatus(markToolState.bind(null, toolName));
+		messageReadModel.set(
 			appendTrimmedMessage.bind(null, {
 				id,
 				role: "tool",
@@ -184,10 +193,10 @@ export function useChatConnection({
 			if (!msg?.content || hasStreamedRef.current) return;
 			for (const block of msg.content) {
 				if (block.type === "text" && block.text) {
-					setLoadingState(markRespondingState);
+					setRunStatus(markRespondingState);
 					if (currentAssistantRef.current) {
 						const targetId = currentAssistantRef.current;
-						setMessages((prev) =>
+						messageReadModel.set((prev) =>
 							patchMessageById(
 								prev,
 								targetId,
@@ -239,57 +248,23 @@ export function useChatConnection({
 			}
 		} else if (event.type === "content_block_stop") {
 			flushPendingContent();
-			setMessages((prev) => {
-				let updated = prev.slice();
-				let changed = false;
-				if (currentAssistantRef.current) {
-					const next = patchMessageById(updated, currentAssistantRef.current, {
-						isStreaming: false,
-					});
-					changed = next !== updated || changed;
-					updated = next;
-				}
-				if (currentToolRef.current) {
-					const next = patchMessageById(updated, currentToolRef.current, {
-						isStreaming: false,
-					});
-					changed = next !== updated || changed;
-					updated = next;
-				}
-				resetStreamState();
-				return changed ? trimMessages(updated) : prev;
+			const assistantId = currentAssistantRef.current;
+			const toolId = currentToolRef.current;
+			messageReadModel.set((prev) => {
+				return finishStreamingMessages(prev, { assistantId, toolId });
 			});
+			currentAssistantRef.current = null;
+			currentToolRef.current = null;
+			hasStreamedRef.current = false;
 		} else if (event.type === "result" && event.result) {
 			flushPendingContent();
 			const result = event.result;
-			setLoadingState(markRespondingState);
-			if (currentAssistantRef.current) {
-				const targetId = currentAssistantRef.current;
-				setMessages((prev) => {
-					const updated = patchMessageById(
-						prev,
-						targetId,
-						{ content: result, isStreaming: false },
-						false
-					);
-					if (updated !== prev) return updated;
-					return trimMessages([
-						...prev,
-						{ id: nextId(), role: "assistant", content: result },
-					]);
-				});
-				currentAssistantRef.current = null;
-			} else {
-				setMessages((prev) => {
-					const last = prev[prev.length - 1];
-					if (last?.role === "assistant" && last.content === result)
-						return prev;
-					return trimMessages([
-						...prev,
-						{ id: nextId(), role: "assistant", content: result },
-					]);
-				});
-			}
+			setRunStatus(markRespondingState);
+			const assistantId = currentAssistantRef.current;
+			messageReadModel.set((prev) =>
+				applyAssistantResultMessage(prev, assistantId, result)
+			);
+			currentAssistantRef.current = null;
 		}
 	}
 	const handleChatEventRef = useRef(handleChatEvent);
@@ -311,27 +286,16 @@ export function useChatConnection({
 				if (msg.sessionId) saveStoredSessionId(paneId, msg.sessionId);
 			} else if (msg.type === "chat:done") {
 				const flushedMessages = flushPendingContent();
-				const updated = saveMessagesNow(flushedMessages);
-				setMessages(updated);
+				const updated = messageReadModel.saveNow(flushedMessages);
+				messageReadModel.set(updated);
 				const ids = new Set(updated.map((message) => message.id));
-				setLoadingState({ isLoading: false, status: "idle", startTime: null });
-				setChatUiState((prev) => {
-					const pruned = new Set<string>();
-					for (const id of prev.expandedTools) if (ids.has(id)) pruned.add(id);
-					return {
-						...prev,
-						expandedTools:
-							pruned.size === prev.expandedTools.size
-								? prev.expandedTools
-								: pruned,
-						liveActivities: [],
-					};
-				});
+				setRunStatus({ isLoading: false, status: "idle", startTime: null });
+				setChatUiState(clearCompletedChatUiState.bind(null, ids));
 				resetStreamState();
 				wsClient.send({ type: "chat:reconnect", paneId });
 			} else if (msg.type === "chat:user_message") {
 				setChatUiState(clearLiveActivities);
-				setLoadingState((prev) => ({
+				setRunStatus((prev) => ({
 					isLoading: true,
 					status: "thinking",
 					startTime: prev.startTime ?? Date.now(),
@@ -339,47 +303,34 @@ export function useChatConnection({
 				resetStreamState();
 			} else if (msg.type === "chat:error") {
 				flushPendingContent();
-				setMessages((prev) => appendSystemMessage(prev, msg.error));
-				setLoadingState({ isLoading: false, status: "error", startTime: null });
+				messageReadModel.set((prev) => appendSystemMessage(prev, msg.error));
+				setRunStatus({ isLoading: false, status: "error", startTime: null });
 			} else if (msg.type === "chat:system") {
-				setMessages((prev) => appendSystemMessage(prev, msg.message));
+				messageReadModel.set((prev) => appendSystemMessage(prev, msg.message));
 			} else if (msg.type === "chat:status") {
-				setLoadingState((prev) => ({
+				setRunStatus((prev) => ({
 					isLoading: msg.isLoading ?? prev.isLoading,
 					status: msg.status ?? prev.status,
 					startTime:
 						msg.isLoading === false ? null : (prev.startTime ?? Date.now()),
 				}));
 			} else if (msg.type === "chat:activity" && msg.activity) {
-				const activity = msg.activity;
-				setChatUiState((prev) => {
-					const nextActivity: ToolActivity = {
-						id: `${activity.toolName}-${prev.liveActivities.length}`,
-						toolName: activity.toolName,
-						summary: activity.summary,
-						isStreaming: activity.isStreaming ?? true,
-					};
-					const last = prev.liveActivities[prev.liveActivities.length - 1];
-					if (
-						last &&
-						last.toolName === nextActivity.toolName &&
-						last.summary === nextActivity.summary
-					)
-						return prev;
-					return {
-						...prev,
-						liveActivities: [...prev.liveActivities, nextActivity].slice(-12),
-					};
-				});
+				setChatUiState(appendLiveToolActivity.bind(null, msg.activity));
 			} else if (msg.type === "chat:sync") {
 				flushPendingContent();
 				const revision = typeof msg.revision === "number" ? msg.revision : null;
-				if (
-					revision !== null &&
-					transcriptRevisionRef.current === revision &&
-					!msg.isStreaming
-				) {
-					setLoadingState({
+				const serverMessagesInput: ChatMessage[] = Array.isArray(msg.messages)
+					? msg.messages
+					: [];
+				const syncResult = reconcileChatSync({
+					currentMessages: messageReadModel.get(),
+					isStreaming: Boolean(msg.isStreaming),
+					previousRevision: transcriptRevisionRef.current,
+					revision,
+					serverMessages: serverMessagesInput,
+				});
+				if (syncResult.shouldSkip) {
+					setRunStatus({
 						isLoading: false,
 						status: "idle",
 						startTime: null,
@@ -388,36 +339,27 @@ export function useChatConnection({
 					resetStreamState();
 					return;
 				}
-				const serverMessages: ChatMessage[] = dedupeChatMessagesById(
-					msg.messages
-				);
-				if (serverMessages.length > 0 || !msg.isStreaming) {
-					const mergedMessages = trimMessages(
-						mergeSyncedMessages(messagesRef.current, serverMessages)
-					);
-					setMessages(mergedMessages);
-					if (!msg.isStreaming) saveMessagesNow(mergedMessages);
+				if (syncResult.shouldUpdateMessages) {
+					messageReadModel.set(syncResult.mergedMessages);
+					if (syncResult.shouldPersist)
+						messageReadModel.saveNow(syncResult.mergedMessages);
 				}
 				if (msg.isStreaming) {
-					if (revision !== null) transcriptRevisionRef.current = revision;
-					setLoadingState((prev) => ({
+					transcriptRevisionRef.current = syncResult.nextRevision;
+					setRunStatus((prev) => ({
 						isLoading: true,
 						status: "responding",
 						startTime: prev.startTime ?? Date.now(),
 					}));
-					const lastAssistant = serverMessages.findLast?.(
-						(message: ChatMessage) =>
-							message.isStreaming && message.role === "assistant"
-					);
-					if (lastAssistant) currentAssistantRef.current = lastAssistant.id;
-					const lastTool = serverMessages.findLast?.(
-						(message: ChatMessage) =>
-							message.isStreaming && message.role === "tool"
-					);
-					if (lastTool) currentToolRef.current = lastTool.id;
+					if (syncResult.streamingAssistantId) {
+						currentAssistantRef.current = syncResult.streamingAssistantId;
+					}
+					if (syncResult.streamingToolId) {
+						currentToolRef.current = syncResult.streamingToolId;
+					}
 				} else {
-					if (revision !== null) transcriptRevisionRef.current = revision;
-					setLoadingState({
+					transcriptRevisionRef.current = syncResult.nextRevision;
+					setRunStatus({
 						isLoading: false,
 						status: "idle",
 						startTime: null,
@@ -428,16 +370,10 @@ export function useChatConnection({
 			} else if (msg.type === "chat:queue" && Array.isArray(msg.queue)) {
 				replaceQueuedMessages(msg.queue);
 			} else if (msg.type === "chat:btw:start") {
-				const id = nextId();
-				currentBtwRef.current = id;
-				setMessages(
-					appendTrimmedMessage.bind(null, {
-						id,
-						role: "btw",
-						content: "",
-						isStreaming: true,
-						btwQuestion: msg.question,
-					})
+				const btwMessage = createBtwQuestionMessage(msg.question);
+				currentBtwRef.current = btwMessage.id;
+				messageReadModel.set((prev) =>
+					appendBtwQuestionMessage(prev, btwMessage)
 				);
 			} else if (msg.type === "chat:btw:delta") {
 				const targetId = currentBtwRef.current;
@@ -449,57 +385,29 @@ export function useChatConnection({
 				const targetId = currentBtwRef.current;
 				currentBtwRef.current = null;
 				if (targetId) {
-					setMessages((prev) =>
-						patchMessageById(prev, targetId, {
-							content: msg.answer,
-							isStreaming: false,
-						})
+					messageReadModel.set((prev) =>
+						finishBtwMessage(prev, targetId, msg.answer)
 					);
 				}
 			} else if (msg.type === "checkpoint:finalized") {
-				if (msg.changedFileCount <= 0) return;
-				setCheckpoints((prev) => {
-					const lastMsg =
-						messagesRef.current.findLast?.(
-							(message) => message.role === "assistant" && !message.isStreaming
-						) ??
-						messagesRef.current.findLast?.(
-							(message) => message.role === "assistant"
-						);
-					if (!lastMsg || prev.some((c) => c.afterMessageId === lastMsg.id))
-						return prev;
-					const updated = [
-						...prev,
-						{
-							id: msg.checkpointId,
-							timestamp: Date.now(),
-							changedFileCount: msg.changedFileCount,
-							changedFiles: msg.changedFiles,
-							reverted: false,
-							afterMessageId: lastMsg.id,
-						},
-					];
-					saveStoredCheckpoints(paneId, updated);
-					return updated;
-				});
+				checkpointReadModel.recordFinalized(
+					{
+						checkpointId: msg.checkpointId,
+						changedFileCount: msg.changedFileCount,
+						changedFiles: msg.changedFiles,
+					},
+					messageReadModel.get()
+				);
 			} else if (msg.type === "checkpoint:reverted") {
-				setCheckpoints((prev) => {
-					const updated = prev.map((checkpoint) =>
-						checkpoint.id === msg.checkpointId
-							? { ...checkpoint, reverted: true }
-							: checkpoint
-					);
-					saveStoredCheckpoints(paneId, updated);
-					return updated;
-				});
-				setMessages((prev) =>
+				checkpointReadModel.markReverted(msg.checkpointId);
+				messageReadModel.set((prev) =>
 					appendSystemMessage(
 						prev,
 						`Reverted ${msg.restoredFiles?.length ?? 0} file(s) to checkpoint`
 					)
 				);
 			} else if (msg.type === "checkpoint:error") {
-				setMessages((prev) =>
+				messageReadModel.set((prev) =>
 					appendSystemMessage(prev, `Revert failed: ${msg.error}`)
 				);
 			}
@@ -515,18 +423,17 @@ export function useChatConnection({
 			cleanup();
 		};
 	}, [
+		checkpointReadModel,
 		clearPendingContent,
 		enabled,
-		messagesRef,
+		messageReadModel,
 		paneId,
 		flushPendingContent,
 		queueMessageContent,
 		replaceQueuedMessages,
 		resetStreamState,
-		saveMessagesNow,
 		setChatUiState,
-		setLoadingState,
-		setMessages,
+		setRunStatus,
 	]);
 
 	return { checkpoints, clearCheckpoints, resetStreamState, revertCheckpoint };
