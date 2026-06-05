@@ -2,9 +2,8 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { noop } from "../lib/data.ts";
-import { PROJECT_ROOT } from "../lib/path-utils.ts";
-import { buildApiRoutes } from "./routes/api.ts";
-import { handlePromptRequest } from "./routes/prompts.ts";
+import { PROJECT_ROOT } from "../lib/user-data.ts";
+import { buildApiRoutes, handlePromptRequest } from "./routes/api.ts";
 import { TerminalService } from "./routes/terminal.ts";
 import {
 	isTrustedLocalOrigin,

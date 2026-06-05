@@ -3,31 +3,39 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { AgentKind } from "../../features/agents/agents.ts";
-import { PROJECT_ROOT } from "../../lib/path-utils.ts";
+import {
+	createAgentEnv,
+	resolveInteractiveAgentCommand,
+} from "../../features/terminal/terminal-command.ts";
+import {
+	createDefaultTerminalState,
+	normalizeTerminalState,
+	reduceTerminalWorkspaceState,
+	type TerminalSavedState,
+	type TerminalWorkspaceAction,
+} from "../../features/terminal/terminal-utils.ts";
 import {
 	compareName,
 	comparePort,
 	hasPid,
 	isFirstPath,
 } from "../../lib/data.ts";
-import { badRequest, tryRoute } from "../../lib/route-helpers.ts";
 import {
-	createAgentEnv,
-	resolveInteractiveAgentCommand,
-} from "../../features/terminal/terminal-command.ts";
+	badRequest,
+	readJson,
+	tryRoute,
+	writeJson,
+} from "../../lib/route-helpers.ts";
+import { PROJECT_ROOT, userDataPath } from "../../lib/user-data.ts";
 import { isAllowedLocalPath, resolveAllowedLocalPath } from "../security.ts";
 import { ChatService } from "../services/agent-chat.ts";
 import { ConfigManager } from "../services/config-manager.ts";
 import { PidTracker } from "../services/pid-tracker.ts";
-import {
-	applyTerminalWorkspaceAction,
-	readTerminalState,
-	writeTerminalState,
-} from "../services/terminal-state.ts";
 
 const configManager = new ConfigManager();
 
 const isWin = process.platform === "win32";
+const TERMINAL_STATE_PATH = userDataPath("terminal-state.json");
 
 class OutputBuffer {
 	private chunks: string[] = [];
@@ -99,6 +107,95 @@ function sendToClient(session: TerminalSession, msg: object) {
 	if (session.ws?.readyState === 1) {
 		session.ws.send(JSON.stringify(msg));
 	}
+}
+
+export async function readTerminalState<T>(fallback: T): Promise<T> {
+	return await readJson<T>(TERMINAL_STATE_PATH, fallback);
+}
+
+export async function writeTerminalState(data: unknown): Promise<void> {
+	const current = await readJson<unknown | null>(TERMINAL_STATE_PATH, null);
+	if (isTerminalStateRegression(current, data)) return;
+	return writeJson(TERMINAL_STATE_PATH, data);
+}
+
+export async function applyTerminalWorkspaceAction(
+	action: TerminalWorkspaceAction
+): Promise<TerminalSavedState | null> {
+	const current = normalizeTerminalState(
+		await readJson<unknown | null>(TERMINAL_STATE_PATH, null),
+		{ createDefault: true }
+	);
+	const next = reduceTerminalWorkspaceState(
+		current ?? createDefaultTerminalState(),
+		action
+	);
+	const normalized = normalizeTerminalState(next, { createDefault: true });
+	if (!normalized) return null;
+	await writeJson(TERMINAL_STATE_PATH, normalized);
+	return normalized;
+}
+
+function isTerminalStateRegression(current: unknown, next: unknown): boolean {
+	if (terminalStateScore(next) < terminalStateScore(current)) return true;
+	const currentPanes = getPaneMap(current);
+	if (currentPanes.size === 0) return false;
+	for (const [paneId, currentPane] of currentPanes) {
+		if (!currentPane.cwd) continue;
+		const nextPane = getPaneMap(next).get(paneId);
+		if (!nextPane) continue;
+		if (!nextPane.cwd && nextPane.pendingCwd) return true;
+	}
+	return false;
+}
+
+export function terminalStateScore(state: unknown): number {
+	if (typeof state !== "object" || state === null) return 0;
+	const groups = (state as { groups?: unknown }).groups;
+	if (!Array.isArray(groups)) return 0;
+	let score = groups.length;
+	for (const group of groups) {
+		if (typeof group !== "object" || group === null) continue;
+		const panes = (group as { panes?: unknown }).panes;
+		if (!Array.isArray(panes)) continue;
+		score += panes.length * 10;
+		for (const pane of panes) {
+			if (typeof pane !== "object" || pane === null) continue;
+			const value = pane as { cwd?: unknown; pendingCwd?: unknown };
+			if (typeof value.cwd === "string" && value.cwd) score += 10;
+			if (value.pendingCwd === false) score += 3;
+		}
+	}
+	return score;
+}
+
+function getPaneMap(
+	state: unknown
+): Map<string, { cwd?: string; pendingCwd?: boolean }> {
+	const panesById = new Map<string, { cwd?: string; pendingCwd?: boolean }>();
+	if (typeof state !== "object" || state === null) return panesById;
+	const groups = (state as { groups?: unknown }).groups;
+	if (!Array.isArray(groups)) return panesById;
+	for (const group of groups) {
+		if (typeof group !== "object" || group === null) continue;
+		const panes = (group as { panes?: unknown }).panes;
+		if (!Array.isArray(panes)) continue;
+		for (const pane of panes) {
+			if (typeof pane !== "object" || pane === null) continue;
+			const value = pane as {
+				id?: unknown;
+				cwd?: unknown;
+				pendingCwd?: unknown;
+			};
+			if (typeof value.id !== "string") continue;
+			panesById.set(value.id, {
+				cwd: typeof value.cwd === "string" ? value.cwd : undefined,
+				pendingCwd:
+					typeof value.pendingCwd === "boolean" ? value.pendingCwd : undefined,
+			});
+		}
+	}
+	return panesById;
 }
 
 export const TerminalService = {

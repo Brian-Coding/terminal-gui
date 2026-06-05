@@ -1,41 +1,794 @@
+import { appendFile, mkdir, readdir, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { ServerWebSocket } from "bun";
 import type { ChatAgentKind } from "../../features/agents/agents.ts";
 import type {
 	ChatServerMessage,
 	QueuedMessageInfo,
 } from "../../features/chat/agent-chat-shared.ts";
-import { isChatStreamEvent } from "../../features/chat/agent-chat-shared.ts";
+import {
+	getToolBlockInitialContent,
+	isChatStreamEvent,
+	prepareTranscriptForStorage,
+	trimMessages,
+} from "../../features/chat/agent-chat-shared.ts";
 import {
 	createAgentEnv,
 	resolveAgentBinary,
 } from "../../features/terminal/terminal-command.ts";
-import { getAgentAdapter, resolveAgentModel } from "../agents/registry.ts";
+import { readJson, writeJson } from "../../lib/route-helpers.ts";
+import { userDataPath } from "../../lib/user-data.ts";
 import {
+	type AgentEvent,
+	type AgentHandle,
+	type AgentRunContext,
 	drainStreamToString,
 	flushNdjsonLeftover,
 	parseNdjsonLines,
-} from "../agents/stream-utils.ts";
-import type { AgentRunContext } from "../agents/types.ts";
+} from "../agents/events.ts";
+import { getAgentAdapter, resolveAgentModel } from "../agents/registry.ts";
 import { resolveAllowedLocalPath } from "../security.ts";
-import { appendChatEvent } from "./chat-events.ts";
-import {
-	CODEX_WORKFLOW_INSTRUCTIONS,
-	createGoalContinuationPrompt,
-	createGoalPrompt,
-	deriveGoalView,
-	GOAL_MAX_TURNS,
-	goalResultStatus,
-	parseGoalCommand,
-	stripGoalMarkers,
-} from "./chat-goals.ts";
-import {
-	deleteChatQueue,
-	loadChatQueue,
-	saveChatQueue,
-} from "./chat-queues.ts";
-import { type ChatSession, chatRuntime } from "./chat-runtime.ts";
-import { readChatTranscript } from "./chat-transcripts.ts";
 import { CheckpointService } from "./checkpoint.ts";
+
+const DISCONNECTED_SESSION_TTL_MS = 5 * 60 * 1000;
+const TRANSCRIPT_PERSIST_DEBOUNCE_MS = 250;
+const GOAL_MAX_TURNS = 20;
+const CHAT_EVENTS_DIR = "chat-events";
+const CHAT_QUEUE_DIR = userDataPath("chat-queues");
+const CHAT_TRANSCRIPTS_DIR = "chat-transcripts";
+const CODEX_WORKFLOW_INSTRUCTIONS = `<inferay-workflow-instructions>
+Do not run formatters with write mode as a routine chat-completion step. In this project, do not run \`bunx biome check --write ...\` unless the user explicitly asks for Biome formatting.
+Do not run \`bun run build:renderer\` at the end of every chat. Run builds/tests only when the user requests verification or when the change genuinely needs that specific check.
+If formatting is needed, prefer the project's intended formatting or commit-hook flow and keep formatting-only churn out of unrelated edits.
+</inferay-workflow-instructions>`;
+const GOAL_COMPLETE_MARKER = "[[GOAL_COMPLETE]]";
+const GOAL_NEEDS_INPUT_MARKER = "[[GOAL_NEEDS_INPUT]]";
+const GENERATION_STOPPED_MESSAGE = "Generation stopped";
+
+let serverMsgId = 0;
+
+export interface ChatEventLogEntry {
+	paneId: string;
+	sequence: number;
+	timestamp: number;
+	type: string;
+	payload: unknown;
+}
+
+export interface ChatTranscriptMessage {
+	id: string;
+	role: "user" | "assistant" | "tool" | "system";
+	content: string;
+	images?: string[];
+	toolName?: string;
+	isStreaming?: boolean;
+}
+
+// Goal command parsing and user-facing goal activity projection.
+type GoalStatus = "active" | "paused";
+type GoalResultStatus = GoalStatus | "complete";
+
+interface GoalState {
+	objective: string;
+	status: GoalStatus;
+	turns: number;
+	startedAt: number;
+}
+
+function parseGoalCommand(
+	text: string
+):
+	| { action: "start"; objective: string }
+	| { action: "pause" | "resume" | "clear" | "status" }
+	| null {
+	const match = text.trim().match(/^\/goal(?:\s+([\s\S]*))?$/i);
+	if (!match) return null;
+	const args = (match[1] ?? "").trim();
+	const subcommand = args.toLowerCase();
+	if (subcommand === "pause") return { action: "pause" };
+	if (subcommand === "resume") return { action: "resume" };
+	if (subcommand === "clear" || subcommand === "stop")
+		return { action: "clear" };
+	if (subcommand === "status" || !args) return { action: "status" };
+	return { action: "start", objective: args };
+}
+
+function createGoalPrompt(objective: string) {
+	return `Start pursuing this goal until it is genuinely complete:\n\n${objective}\n\nWork autonomously. When the goal is fully achieved, include ${GOAL_COMPLETE_MARKER} in your final response. If you are blocked and need user input, include ${GOAL_NEEDS_INPUT_MARKER}.`;
+}
+
+function createGoalContinuationPrompt(goal: GoalState) {
+	return `<goal-continuation>
+Objective: ${goal.objective}
+Turns used: ${goal.turns}
+Elapsed milliseconds: ${Date.now() - goal.startedAt}
+
+Continue working toward the objective. Do not ask for confirmation unless you are blocked. When the goal is fully achieved, include ${GOAL_COMPLETE_MARKER} in your final response. If you need user input to proceed, include ${GOAL_NEEDS_INPUT_MARKER}.
+</goal-continuation>`;
+}
+
+function goalResultStatus(text?: string): GoalResultStatus {
+	if (!text) return "active";
+	if (text.includes(GOAL_COMPLETE_MARKER)) return "complete";
+	if (text.includes(GOAL_NEEDS_INPUT_MARKER)) return "paused";
+	return "active";
+}
+
+function stripGoalMarkers(text: string): string {
+	return text
+		.replaceAll(GOAL_COMPLETE_MARKER, "")
+		.replaceAll(GOAL_NEEDS_INPUT_MARKER, "")
+		.trim();
+}
+
+function firstUsefulLine(text: string, max = 140): string {
+	const line =
+		text
+			.split("\n")
+			.map((item) => item.trim())
+			.find(Boolean) ?? "";
+	return line.length > max ? `${line.slice(0, max - 3)}...` : line;
+}
+
+function deriveGoalView(session: {
+	goal: GoalState | null;
+	currentHandle: unknown;
+	agentEvents: AgentEvent[];
+	messageBuffer: { getMessages(): ChatTranscriptMessage[] };
+}) {
+	const messages = session.messageBuffer.getMessages();
+	const latestSystem = [...messages]
+		.reverse()
+		.find((message) => message.role === "system" && message.content.trim());
+	const activity: Array<Record<string, string | null>> = [];
+	const pushActivity = (
+		id: string,
+		type: string,
+		label: string,
+		detail: string | null,
+		state: string
+	) => {
+		activity.push({ id, type, label, detail, state });
+		if (activity.length > 30) activity.shift();
+	};
+	for (const [index, event] of session.agentEvents.entries()) {
+		if (event.type === "status") {
+			pushActivity(
+				`status-${index}`,
+				"status",
+				event.label ?? event.status,
+				null,
+				event.status === "error"
+					? "error"
+					: event.status === "idle"
+						? "complete"
+						: "running"
+			);
+		} else if (event.type === "tool-call-start") {
+			pushActivity(
+				event.toolCallId,
+				"tool",
+				event.toolName,
+				event.summary ?? null,
+				"running"
+			);
+		} else if (event.type === "tool-call-end") {
+			pushActivity(
+				`${event.toolCallId}-end`,
+				"tool",
+				event.error ? "Tool failed" : "Tool finished",
+				event.error ?? null,
+				event.error ? "error" : "complete"
+			);
+		} else if (event.type === "result") {
+			pushActivity(
+				`result-${index}`,
+				"result",
+				"Result",
+				firstUsefulLine(event.text),
+				"complete"
+			);
+		} else if (event.type === "error") {
+			pushActivity(`error-${index}`, "error", "Error", event.message, "error");
+		}
+	}
+	if (latestSystem?.content) {
+		pushActivity(
+			`system-${activity.length}`,
+			"system",
+			"System",
+			firstUsefulLine(latestSystem.content),
+			session.goal?.status === "paused" ? "paused" : "complete"
+		);
+	}
+	return { activity };
+}
+
+// In-memory transcript buffer used by live sessions and event-log replay.
+class ChatMessageBuffer {
+	private messages: ChatTranscriptMessage[] = [];
+	private currentAssistantIdx = -1;
+	private currentToolIdx = -1;
+	private hasStreamed = false;
+	private revision = 0;
+
+	private push(
+		role: ChatTranscriptMessage["role"],
+		content: string,
+		extra?: Partial<ChatTranscriptMessage>
+	) {
+		this.messages.push({ id: `s${++serverMsgId}`, role, content, ...extra });
+		this.revision++;
+		this.trim();
+	}
+
+	pushUser(text: string, images?: string[]) {
+		this.push("user", text, { images: images?.length ? images : undefined });
+	}
+
+	pushSystem(text: string) {
+		this.push("system", text);
+	}
+
+	private appendAssistant(content: string, isStreaming: boolean) {
+		this.currentAssistantIdx = this.messages.length;
+		this.push("assistant", content, { isStreaming });
+	}
+
+	private appendTool(name: string, content: string) {
+		this.currentAssistantIdx = -1;
+		this.currentToolIdx = this.messages.length;
+		this.push("tool", content, { toolName: name, isStreaming: true });
+	}
+
+	private patchCurrent(
+		key: "currentAssistantIdx" | "currentToolIdx",
+		patch: Partial<ChatTranscriptMessage>
+	) {
+		const idx = this[key];
+		if (idx < 0 || idx >= this.messages.length) return false;
+		this.messages[idx] = { ...this.messages[idx]!, ...patch };
+		this.revision++;
+		return true;
+	}
+
+	applyEvent(event: unknown) {
+		if (!isChatStreamEvent(event)) return;
+		if (event.type === "assistant") {
+			const msg = event.message;
+			if (!msg?.content || this.hasStreamed) return;
+			for (const block of msg.content) {
+				if (block.type === "text" && block.text) {
+					if (
+						!this.patchCurrent("currentAssistantIdx", {
+							content: block.text,
+							isStreaming: !msg.stop_reason,
+						})
+					)
+						this.appendAssistant(block.text, !msg.stop_reason);
+				} else if (block.type === "tool_use") {
+					this.appendTool(
+						block.name,
+						typeof block.input === "string"
+							? block.input
+							: JSON.stringify(block.input, null, 2)
+					);
+				}
+			}
+		} else if (event.type === "content_block_start") {
+			this.hasStreamed = true;
+			const block = event.content_block;
+			if (block?.type === "text") {
+				this.appendAssistant(block.text || "", true);
+			} else if (block?.type === "tool_use") {
+				this.appendTool(block.name, getToolBlockInitialContent(block));
+			}
+		} else if (event.type === "content_block_delta") {
+			const delta = event.delta;
+			if (
+				delta?.type === "text_delta" &&
+				delta.text &&
+				this.currentAssistantIdx >= 0
+			) {
+				this.messages[this.currentAssistantIdx]!.content += delta.text;
+				this.revision++;
+			} else if (
+				delta?.type === "input_json_delta" &&
+				delta.partial_json &&
+				this.currentToolIdx >= 0
+			) {
+				this.messages[this.currentToolIdx]!.content += delta.partial_json;
+				this.revision++;
+			}
+		} else if (event.type === "content_block_stop") {
+			this.patchCurrent("currentAssistantIdx", { isStreaming: false });
+			this.patchCurrent("currentToolIdx", { isStreaming: false });
+			this.currentAssistantIdx = -1;
+			this.currentToolIdx = -1;
+		} else if (event.type === "result" && event.result) {
+			if (
+				this.patchCurrent("currentAssistantIdx", {
+					content: event.result,
+					isStreaming: false,
+				})
+			) {
+				this.currentAssistantIdx = -1;
+			} else {
+				this.push("assistant", event.result);
+			}
+		}
+	}
+
+	finalize() {
+		let changed = false;
+		for (const message of this.messages) {
+			if (message.isStreaming) changed = true;
+			message.isStreaming = false;
+		}
+		this.currentAssistantIdx = -1;
+		this.currentToolIdx = -1;
+		this.hasStreamed = false;
+		if (changed) this.revision++;
+		this.trim();
+	}
+
+	replaceInAssistantMessages(replacer: (content: string) => string) {
+		for (const message of this.messages) {
+			if (message.role !== "assistant") continue;
+			const nextContent = replacer(message.content);
+			if (nextContent === message.content) continue;
+			message.content = nextContent;
+			this.revision++;
+		}
+	}
+
+	getMessages(): ChatTranscriptMessage[] {
+		return this.messages;
+	}
+
+	getRevision(): number {
+		return this.revision;
+	}
+
+	get streaming(): boolean {
+		return this.currentAssistantIdx >= 0 || this.currentToolIdx >= 0;
+	}
+
+	replaceMessages(messages: ChatTranscriptMessage[]) {
+		this.messages = messages.map((message) => ({
+			...message,
+			isStreaming: false,
+		}));
+		this.currentAssistantIdx = -1;
+		this.currentToolIdx = -1;
+		this.hasStreamed = false;
+		this.revision++;
+		this.trim();
+	}
+
+	private trim() {
+		const previous = this.messages;
+		this.messages = trimMessages(this.messages);
+		const drop = previous.length - this.messages.length;
+		if (drop <= 0) return;
+		this.revision++;
+		this.currentAssistantIdx =
+			this.currentAssistantIdx >= drop ? this.currentAssistantIdx - drop : -1;
+		this.currentToolIdx =
+			this.currentToolIdx >= drop ? this.currentToolIdx - drop : -1;
+	}
+}
+
+// Authoritative chat event log: append-only runtime history and replay.
+const eventSequenceByPane = new Map<string, number>();
+const pendingEventWrites = new Map<string, Promise<void>>();
+
+function eventPath(paneId: string): string {
+	return userDataPath(CHAT_EVENTS_DIR, `${paneId}.jsonl`);
+}
+
+function nextEventSequence(paneId: string): number {
+	const floor = Date.now() * 1000;
+	const previous = eventSequenceByPane.get(paneId) ?? 0;
+	const next = Math.max(floor, previous + 1);
+	eventSequenceByPane.set(paneId, next);
+	return next;
+}
+
+function appendChatEvent(
+	paneId: string,
+	type: string,
+	payload: unknown
+): number {
+	const sequence = nextEventSequence(paneId);
+	const entry: ChatEventLogEntry = {
+		paneId,
+		sequence,
+		timestamp: Date.now(),
+		type,
+		payload,
+	};
+	const path = eventPath(paneId);
+	const previous = pendingEventWrites.get(paneId) ?? Promise.resolve();
+	const nextWrite = previous
+		.catch(() => {})
+		.then(async () => {
+			await mkdir(dirname(path), { recursive: true });
+			await appendFile(path, `${JSON.stringify(entry)}\n`);
+		})
+		.catch((error) => {
+			console.error("[ChatEvents] Failed to append chat event:", error);
+		});
+	pendingEventWrites.set(paneId, nextWrite);
+	return sequence;
+}
+
+function queueEventPayload(queue: unknown[]) {
+	return {
+		count: queue.length,
+		messageIds: queue
+			.map((item) =>
+				item && typeof item === "object"
+					? (item as { id?: unknown }).id
+					: undefined
+			)
+			.filter((id): id is string => typeof id === "string"),
+	};
+}
+
+async function readChatEvents(
+	paneId: string,
+	afterSequence = 0,
+	limit = 500
+): Promise<ChatEventLogEntry[]> {
+	await pendingEventWrites.get(paneId)?.catch(() => {});
+	const file = Bun.file(eventPath(paneId));
+	if (!(await file.exists())) return [];
+	const text = await file.text();
+	const events: ChatEventLogEntry[] = [];
+	for (const line of text.split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			const entry = JSON.parse(line) as ChatEventLogEntry;
+			if (
+				entry.paneId === paneId &&
+				entry.sequence > afterSequence &&
+				events.length < limit
+			) {
+				events.push(entry);
+			}
+		} catch {}
+	}
+	return events;
+}
+
+function eventPayloadRecord(entry: ChatEventLogEntry): Record<string, unknown> {
+	return entry.payload && typeof entry.payload === "object"
+		? (entry.payload as Record<string, unknown>)
+		: {};
+}
+
+function replayChatEvent(
+	buffer: ChatMessageBuffer,
+	entry: ChatEventLogEntry
+): boolean {
+	const payload = eventPayloadRecord(entry);
+	if (entry.type === "user_message") {
+		const text =
+			typeof payload.displayText === "string"
+				? payload.displayText
+				: typeof payload.text === "string"
+					? payload.text
+					: "";
+		const images = Array.isArray(payload.images)
+			? payload.images.filter(
+					(image): image is string => typeof image === "string"
+				)
+			: undefined;
+		if (text || images?.length) {
+			buffer.pushUser(text, images);
+			return true;
+		}
+	} else if (entry.type === "system_message") {
+		if (typeof payload.message === "string") {
+			buffer.pushSystem(payload.message);
+			return true;
+		}
+	} else if (entry.type === "agent_event") {
+		const previousRevision = buffer.getRevision();
+		buffer.applyEvent(entry.payload);
+		return buffer.getRevision() !== previousRevision;
+	}
+	return false;
+}
+
+async function readEventLogTranscript(
+	paneId: string
+): Promise<ChatTranscriptMessage[] | null> {
+	const events = await readChatEvents(paneId, 0, 10_000);
+	if (events.length === 0) return null;
+	const buffer = new ChatMessageBuffer();
+	let hasTranscriptEvent = false;
+	for (const event of events) {
+		hasTranscriptEvent = replayChatEvent(buffer, event) || hasTranscriptEvent;
+	}
+	if (!hasTranscriptEvent) return null;
+	buffer.finalize();
+	return buffer.getMessages().map((message) => ({ ...message }));
+}
+
+async function readAuthoritativeTranscript(
+	paneId: string
+): Promise<ChatTranscriptMessage[] | null> {
+	const fromEventLog = await readEventLogTranscript(paneId);
+	if (fromEventLog) return fromEventLog;
+	return readChatTranscript(paneId);
+}
+
+async function listEventLogPaneIds(): Promise<string[]> {
+	return (await readdir(userDataPath(CHAT_EVENTS_DIR)).catch(() => []))
+		.filter((file) => file.endsWith(".jsonl"))
+		.map((file) => file.slice(0, -".jsonl".length));
+}
+
+// Transcript snapshots are a fast cache; event replay is the restore authority.
+const transcriptCache = new Map<string, ChatTranscriptMessage[] | null>();
+
+function cloneTranscript(
+	messages: ChatTranscriptMessage[] | null
+): ChatTranscriptMessage[] | null {
+	return messages?.map((message) => ({ ...message })) ?? null;
+}
+
+export async function readChatTranscript(
+	paneId: string
+): Promise<ChatTranscriptMessage[] | null> {
+	if (transcriptCache.has(paneId)) {
+		return cloneTranscript(transcriptCache.get(paneId) ?? null);
+	}
+	const transcript = await readJson<unknown>(
+		userDataPath(CHAT_TRANSCRIPTS_DIR, `${paneId}.json`),
+		null
+	);
+	const messages = isChatTranscript(transcript) ? transcript : null;
+	transcriptCache.set(paneId, cloneTranscript(messages));
+	return cloneTranscript(messages);
+}
+
+export async function writeChatTranscript(
+	paneId: string,
+	messages: ChatTranscriptMessage[]
+): Promise<void> {
+	const stored = prepareTranscriptForStorage(messages);
+	transcriptCache.set(paneId, cloneTranscript(stored));
+	await writeJson(userDataPath(CHAT_TRANSCRIPTS_DIR, `${paneId}.json`), stored);
+}
+
+function isChatTranscript(value: unknown): value is ChatTranscriptMessage[] {
+	return (
+		Array.isArray(value) &&
+		value.every((message) => {
+			if (typeof message !== "object" || message === null) return false;
+			const candidate = message as Partial<ChatTranscriptMessage>;
+			return (
+				typeof candidate.id === "string" &&
+				isChatRole(candidate.role) &&
+				typeof candidate.content === "string" &&
+				(candidate.images === undefined ||
+					(Array.isArray(candidate.images) &&
+						candidate.images.every((image) => typeof image === "string")))
+			);
+		})
+	);
+}
+
+function isChatRole(value: unknown): value is ChatTranscriptMessage["role"] {
+	return (
+		value === "user" ||
+		value === "assistant" ||
+		value === "tool" ||
+		value === "system"
+	);
+}
+
+// Session and queue file state owned by the chat runtime.
+interface ChatSession {
+	paneId: string;
+	agentKind: ChatAgentKind;
+	model?: string;
+	reasoningLevel?: string;
+	sessionId: string | null;
+	clients: Set<ServerWebSocket<any>>;
+	currentHandle: AgentHandle | null;
+	cwd: string;
+	referencePaths: string[];
+	messageBuffer: ChatMessageBuffer;
+	cleanupTimer: ReturnType<typeof setTimeout> | null;
+	transcriptPersistTimer: ReturnType<typeof setTimeout> | null;
+	cancelled: boolean;
+	goal: GoalState | null;
+	agentEvents: AgentEvent[];
+}
+
+interface ChatQueueFile {
+	queue: unknown[];
+	updatedAt: number;
+}
+
+function safePaneId(paneId: string): string {
+	if (/^[a-zA-Z0-9._:-]+$/.test(paneId)) return paneId;
+	throw new Error("Invalid pane id");
+}
+
+function chatQueuePath(paneId: string): string {
+	return join(CHAT_QUEUE_DIR, `${safePaneId(paneId)}.json`);
+}
+
+async function loadChatQueue(paneId: string): Promise<unknown[]> {
+	const stored = await readJson<ChatQueueFile>(chatQueuePath(paneId), {
+		queue: [],
+		updatedAt: 0,
+	});
+	return Array.isArray(stored.queue) ? stored.queue : [];
+}
+
+async function saveChatQueue(paneId: string, queue: unknown[]): Promise<void> {
+	await writeJson(chatQueuePath(paneId), {
+		queue,
+		updatedAt: Date.now(),
+	});
+}
+
+async function deleteChatQueue(paneId: string): Promise<void> {
+	await rm(chatQueuePath(paneId), { force: true });
+}
+
+const _g = globalThis as any;
+if (!_g.__inferay_chatSessions) {
+	_g.__inferay_chatSessions = new Map<string, ChatSession>();
+}
+const sessions: Map<string, ChatSession> = _g.__inferay_chatSessions;
+
+// Live session registry, websocket fanout, transcript flushing, and cleanup.
+const chatRuntime = {
+	async ensureSession(
+		paneId: string,
+		ws: ServerWebSocket<any> | undefined,
+		agentKind: ChatAgentKind,
+		cwd: string,
+		referencePaths: string[],
+		sessionId: string | null,
+		model?: string,
+		reasoningLevel?: string
+	): Promise<ChatSession> {
+		let session = sessions.get(paneId);
+		if (session) {
+			this.clearCleanupTimer(session);
+			if (ws) session.clients.add(ws);
+			return session;
+		}
+
+		const messageBuffer = new ChatMessageBuffer();
+		const transcript = await readAuthoritativeTranscript(paneId);
+		if (transcript?.length) messageBuffer.replaceMessages(transcript);
+		session = {
+			paneId,
+			agentKind,
+			model,
+			reasoningLevel,
+			sessionId,
+			clients: ws ? new Set([ws]) : new Set(),
+			currentHandle: null,
+			cwd,
+			referencePaths,
+			messageBuffer,
+			cleanupTimer: null,
+			transcriptPersistTimer: null,
+			cancelled: false,
+			goal: null,
+			agentEvents: [],
+		};
+		sessions.set(paneId, session);
+		return session;
+	},
+
+	getSession(paneId: string): ChatSession | undefined {
+		return sessions.get(paneId);
+	},
+
+	deleteSession(paneId: string) {
+		sessions.delete(paneId);
+	},
+
+	values(): IterableIterator<ChatSession> {
+		return sessions.values();
+	},
+
+	clear() {
+		sessions.clear();
+	},
+
+	send(
+		target: ServerWebSocket<any> | ChatSession,
+		msg: ChatServerMessage,
+		exclude?: ServerWebSocket<any>
+	) {
+		const json = JSON.stringify(msg);
+		if ("clients" in target) {
+			for (const ws of target.clients) {
+				if (ws !== exclude && ws.readyState === 1) ws.send(json);
+			}
+		} else if (target.readyState === 1) {
+			target.send(json);
+		}
+	},
+
+	persistTranscript(session: ChatSession, paneId = session.paneId): void {
+		if (session.transcriptPersistTimer) {
+			clearTimeout(session.transcriptPersistTimer);
+			session.transcriptPersistTimer = null;
+		}
+		writeChatTranscript(paneId, session.messageBuffer.getMessages()).catch(
+			(error) => {
+				console.error(
+					"[ChatService] Failed to persist chat transcript:",
+					error
+				);
+			}
+		);
+	},
+
+	scheduleTranscriptPersist(
+		session: ChatSession,
+		paneId = session.paneId
+	): void {
+		if (session.transcriptPersistTimer) return;
+		session.transcriptPersistTimer = setTimeout(() => {
+			session.transcriptPersistTimer = null;
+			this.persistTranscript(session, paneId);
+		}, TRANSCRIPT_PERSIST_DEBOUNCE_MS);
+	},
+
+	clearCleanupTimer(session: ChatSession) {
+		if (!session.cleanupTimer) return;
+		clearTimeout(session.cleanupTimer);
+		session.cleanupTimer = null;
+	},
+
+	scheduleCleanup(session: ChatSession) {
+		this.clearCleanupTimer(session);
+		if (session.currentHandle || session.clients.size > 0) return;
+		session.cleanupTimer = setTimeout(() => {
+			const current = sessions.get(session.paneId);
+			if (!current || current.currentHandle || current.clients.size > 0) return;
+			sessions.delete(session.paneId);
+		}, DISCONNECTED_SESSION_TTL_MS);
+	},
+
+	updateSessionId(session: ChatSession, nextSessionId: string | null) {
+		if (!nextSessionId || session.sessionId === nextSessionId) return;
+		session.sessionId = nextSessionId;
+		this.send(session, {
+			type: "chat:session",
+			paneId: session.paneId,
+			sessionId: nextSessionId,
+		});
+	},
+
+	finalizeTurn(session: ChatSession) {
+		session.messageBuffer.finalize();
+		this.persistTranscript(session);
+		this.send(session, {
+			type: "chat:sync",
+			paneId: session.paneId,
+			messages: session.messageBuffer.getMessages(),
+			revision: session.messageBuffer.getRevision(),
+			isStreaming: false,
+		});
+		this.send(session, { type: "chat:done", paneId: session.paneId });
+		this.scheduleCleanup(session);
+	},
+};
 
 interface AgentSessionInfo {
 	paneId: string;
@@ -57,14 +810,22 @@ type SendChatMessageInput = {
 	reasoningLevel?: string;
 	referencePaths?: string[];
 	displayText?: string;
+	images?: string[];
 	text: string;
 	ws?: ServerWebSocket<any>;
 };
 
 type EmitChatMessage = (message: ChatServerMessage) => void;
 
+export interface ChatReconnectSnapshot {
+	queue: ChatServerMessage;
+	status: ChatServerMessage;
+	sync: ChatServerMessage;
+}
+
 let chatQueueIdCounter = 0;
 
+// Request normalization, checkpoints, agent execution, and queue draining.
 function isQueuedMessageInfo(value: unknown): value is QueuedMessageInfo {
 	if (!value || typeof value !== "object") return false;
 	const candidate = value as {
@@ -123,9 +884,14 @@ async function createChatCheckpoint(
 			text
 		);
 		emit({ type: "checkpoint:created", paneId, checkpointId });
+		appendChatEvent(paneId, "checkpoint_created", { checkpointId });
 		return checkpointId;
 	} catch (error) {
 		console.error("[Checkpoint] Failed to create:", error);
+		appendChatEvent(paneId, "checkpoint_failed", {
+			stage: "create",
+			message: error instanceof Error ? error.message : String(error),
+		});
 		return null;
 	}
 }
@@ -136,13 +902,31 @@ async function finalizeChatCheckpoint(
 	checkpointId: string | null,
 	emit: EmitChatMessage
 ): Promise<number> {
-	if (!checkpointId) return 0;
+	if (!checkpointId) {
+		appendChatEvent(paneId, "checkpoint_skipped", { reason: "not_created" });
+		return 0;
+	}
 	try {
 		const cpMeta = await CheckpointService.finalizeCheckpoint(checkpointId);
-		if (!cpMeta || cpMeta.changedFileCount === 0) return 0;
+		if (!cpMeta) {
+			appendChatEvent(paneId, "checkpoint_skipped", {
+				checkpointId,
+				reason: "missing_metadata",
+			});
+			return 0;
+		}
+		if (cpMeta.changedFileCount === 0) {
+			appendChatEvent(paneId, "checkpoint_unchanged", { checkpointId });
+			return 0;
+		}
 		emit({
 			type: "checkpoint:finalized",
 			paneId,
+			checkpointId,
+			changedFileCount: cpMeta.changedFileCount,
+			changedFiles: cpMeta.changedFiles,
+		});
+		appendChatEvent(paneId, "checkpoint_finalized", {
 			checkpointId,
 			changedFileCount: cpMeta.changedFileCount,
 			changedFiles: cpMeta.changedFiles,
@@ -182,6 +966,11 @@ async function finalizeChatCheckpoint(
 		return cpMeta.changedFileCount;
 	} catch (error) {
 		console.error("[Checkpoint] Failed to finalize:", error);
+		appendChatEvent(paneId, "checkpoint_failed", {
+			checkpointId,
+			stage: "finalize",
+			message: error instanceof Error ? error.message : String(error),
+		});
 		return 0;
 	}
 }
@@ -360,6 +1149,50 @@ function getLastAssistantMessage(result: Awaited<ReturnType<typeof runAgent>>) {
 		: undefined;
 }
 
+async function runAgentTurnWithGoalLoop(
+	session: ChatSession,
+	paneId: string,
+	prompt: string
+): Promise<void> {
+	const isGoalRun = session.goal?.status === "active";
+	let result = await runAgent(session, paneId, prompt, false);
+	if (!isGoalRun || session.goal?.status !== "active") return;
+
+	session.goal.turns += 1;
+	let resultStatus = goalResultStatus(getLastAssistantMessage(result));
+	while (
+		!session.cancelled &&
+		session.goal?.status === "active" &&
+		resultStatus === "active" &&
+		session.goal.turns < GOAL_MAX_TURNS
+	) {
+		const nextPrompt = createGoalContinuationPrompt(session.goal);
+		result = await runAgent(session, paneId, nextPrompt, false);
+		session.goal.turns += 1;
+		resultStatus = goalResultStatus(getLastAssistantMessage(result));
+	}
+
+	if (session.goal && resultStatus === "complete") {
+		session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
+		const message = `Goal achieved after ${session.goal.turns} turns`;
+		session.goal = null;
+		emitSystemMessage(session, paneId, message);
+	} else if (session.goal && resultStatus === "paused") {
+		session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
+		session.goal.status = "paused";
+		const message =
+			"Goal paused because Codex needs input. Reply with the missing detail or use /goal resume.";
+		emitSystemMessage(session, paneId, message);
+	} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
+		session.goal.status = "paused";
+		emitSystemMessage(
+			session,
+			paneId,
+			`Goal paused after ${GOAL_MAX_TURNS} turns`
+		);
+	}
+}
+
 function emitSystemMessage(
 	session: ChatSession,
 	paneId: string,
@@ -379,6 +1212,78 @@ function sendChatStatus(
 	chatRuntime.send(target, { type: "chat:status", paneId, status, isLoading });
 }
 
+export function shouldAppendGenerationStoppedMessage(
+	messages: Pick<ChatTranscriptMessage, "content" | "role">[]
+): boolean {
+	const last = messages[messages.length - 1];
+	return !(
+		last?.role === "system" &&
+		last.content.trim() === GENERATION_STOPPED_MESSAGE
+	);
+}
+
+function emitGenerationStoppedMessage(session: ChatSession, paneId: string) {
+	if (
+		!shouldAppendGenerationStoppedMessage(session.messageBuffer.getMessages())
+	)
+		return;
+	emitSystemMessage(session, paneId, GENERATION_STOPPED_MESSAGE);
+}
+
+async function createChatReconnectSnapshot(
+	paneId: string,
+	session?: ChatSession
+): Promise<ChatReconnectSnapshot> {
+	const queue = (await loadChatQueue(paneId)).filter(isQueuedMessageInfo);
+	if (!session) {
+		const transcript = await readAuthoritativeTranscript(paneId);
+		return {
+			sync: {
+				type: "chat:sync",
+				paneId,
+				messages: transcript ?? [],
+				revision: 0,
+				isStreaming: false,
+			},
+			queue: { type: "chat:queue", paneId, queue },
+			status: {
+				type: "chat:status",
+				paneId,
+				status: "idle",
+				isLoading: false,
+			},
+		};
+	}
+
+	const isStreaming = session.messageBuffer.streaming;
+	return {
+		sync: {
+			type: "chat:sync",
+			paneId,
+			messages: session.messageBuffer.getMessages(),
+			revision: session.messageBuffer.getRevision(),
+			isStreaming,
+		},
+		queue: { type: "chat:queue", paneId, queue },
+		status: {
+			type: "chat:status",
+			paneId,
+			status: session.currentHandle
+				? isStreaming
+					? "responding"
+					: "thinking"
+				: "idle",
+			isLoading: !!session.currentHandle,
+		},
+	};
+}
+
+export async function readPersistedChatReconnectSnapshot(
+	paneId: string
+): Promise<ChatReconnectSnapshot> {
+	return createChatReconnectSnapshot(paneId);
+}
+
 async function saveAndBroadcastQueue(
 	session: ChatSession,
 	paneId: string,
@@ -386,6 +1291,10 @@ async function saveAndBroadcastQueue(
 ) {
 	if (queue.length === 0) await deleteChatQueue(paneId);
 	else await saveChatQueue(paneId, queue);
+	appendChatEvent(paneId, "queue_persisted", {
+		source: "runtime",
+		...queueEventPayload(queue),
+	});
 	appendChatEvent(paneId, "queue_changed", { queue });
 	chatRuntime.send(session, { type: "chat:queue", paneId, queue });
 }
@@ -394,7 +1303,8 @@ async function enqueueChatMessage(
 	session: ChatSession,
 	paneId: string,
 	text: string,
-	displayText?: string
+	displayText?: string,
+	images?: string[]
 ) {
 	const queue = (await loadChatQueue(paneId)).filter(isQueuedMessageInfo);
 	await saveAndBroadcastQueue(session, paneId, [
@@ -403,8 +1313,36 @@ async function enqueueChatMessage(
 			id: nextChatQueueId(),
 			text,
 			displayText: displayText || text,
+			images: images?.length ? images : undefined,
 		},
 	]);
+}
+
+export function createQueuedDrainSendInput(
+	session: Pick<
+		ChatSession,
+		| "agentKind"
+		| "cwd"
+		| "model"
+		| "reasoningLevel"
+		| "referencePaths"
+		| "sessionId"
+	>,
+	paneId: string,
+	message: QueuedMessageInfo
+): SendChatMessageInput {
+	return {
+		agentKind: session.agentKind,
+		clientSessionId: session.sessionId,
+		cwd: session.cwd,
+		model: session.model,
+		paneId,
+		reasoningLevel: session.reasoningLevel,
+		referencePaths: session.referencePaths,
+		displayText: message.displayText,
+		images: message.images,
+		text: message.text,
+	};
 }
 
 async function drainNextQueuedMessage(session: ChatSession, paneId: string) {
@@ -413,17 +1351,13 @@ async function drainNextQueuedMessage(session: ChatSession, paneId: string) {
 	const [next, ...rest] = queue;
 	if (!next) return;
 	await saveAndBroadcastQueue(session, paneId, rest);
-	void ChatService.sendMessage({
-		agentKind: session.agentKind,
-		clientSessionId: session.sessionId,
-		cwd: session.cwd,
-		model: session.model,
-		paneId,
-		reasoningLevel: session.reasoningLevel,
-		referencePaths: session.referencePaths,
-		displayText: next.displayText,
-		text: next.text,
+	appendChatEvent(paneId, "queue_drained", {
+		messageId: next.id,
+		remainingCount: rest.length,
 	});
+	void ChatService.sendMessage(
+		createQueuedDrainSendInput(session, paneId, next)
+	);
 }
 
 function createSystemPrefix(
@@ -511,6 +1445,49 @@ async function handleGoalCommand(
 	return null;
 }
 
+async function finalizeSuccessfulChatTurn(
+	session: ChatSession,
+	paneId: string,
+	checkpointId: string | null,
+	emit: EmitChatMessage
+): Promise<void> {
+	const changedFileCount = await finalizeChatCheckpoint(
+		session,
+		paneId,
+		checkpointId,
+		emit
+	);
+	ensureVisibleTurnCompletion(session, paneId, changedFileCount, emit);
+	chatRuntime.finalizeTurn(session);
+	await drainNextQueuedMessage(session, paneId);
+}
+
+async function finalizeFailedChatTurn(
+	session: ChatSession,
+	paneId: string,
+	checkpointId: string | null,
+	emit: EmitChatMessage,
+	error: unknown
+): Promise<void> {
+	session.currentHandle = null;
+	const errMsg =
+		error instanceof Error
+			? error.message
+			: `Failed to run ${session.agentKind}`;
+	emitSystemMessage(session, paneId, errMsg);
+	session.messageBuffer.finalize();
+	chatRuntime.persistTranscript(session, paneId);
+	chatRuntime.send(session, {
+		type: "chat:error",
+		paneId,
+		error: errMsg,
+	});
+	await finalizeChatCheckpoint(session, paneId, checkpointId, emit);
+	chatRuntime.scheduleCleanup(session);
+	await drainNextQueuedMessage(session, paneId);
+}
+
+// Public chat API used by websocket routes and HTTP route wrappers.
 export const ChatService = {
 	async sendMessage({
 		agentKind = "claude",
@@ -521,6 +1498,7 @@ export const ChatService = {
 		reasoningLevel,
 		referencePaths,
 		displayText,
+		images,
 		text,
 		ws,
 	}: SendChatMessageInput) {
@@ -557,14 +1535,15 @@ export const ChatService = {
 		);
 
 		if (session.currentHandle) {
-			await enqueueChatMessage(session, paneId, text, displayText);
+			await enqueueChatMessage(session, paneId, text, displayText, images);
 			return;
 		}
 
-		session.messageBuffer.pushUser(displayText || text);
+		session.messageBuffer.pushUser(displayText || text, images);
 		appendChatEvent(paneId, "user_message", {
 			text,
 			displayText: displayText || text,
+			images: images?.length ? images : undefined,
 		});
 		chatRuntime.persistTranscript(session, paneId);
 		chatRuntime.send(
@@ -601,67 +1580,10 @@ export const ChatService = {
 		);
 
 		try {
-			const isGoalRun = session.goal?.status === "active";
-			let result = await runAgent(session, paneId, prompt, false);
-			if (isGoalRun && session.goal?.status === "active") {
-				session.goal.turns += 1;
-				let resultStatus = goalResultStatus(getLastAssistantMessage(result));
-				while (
-					!session.cancelled &&
-					session.goal?.status === "active" &&
-					resultStatus === "active" &&
-					session.goal.turns < GOAL_MAX_TURNS
-				) {
-					const nextPrompt = createGoalContinuationPrompt(session.goal);
-					result = await runAgent(session, paneId, nextPrompt, false);
-					session.goal.turns += 1;
-					resultStatus = goalResultStatus(getLastAssistantMessage(result));
-				}
-
-				if (session.goal && resultStatus === "complete") {
-					session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
-					const message = `Goal achieved after ${session.goal.turns} turns`;
-					session.goal = null;
-					emitSystemMessage(session, paneId, message);
-				} else if (session.goal && resultStatus === "paused") {
-					session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
-					session.goal.status = "paused";
-					const message =
-						"Goal paused because Codex needs input. Reply with the missing detail or use /goal resume.";
-					emitSystemMessage(session, paneId, message);
-				} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
-					session.goal.status = "paused";
-					emitSystemMessage(
-						session,
-						paneId,
-						`Goal paused after ${GOAL_MAX_TURNS} turns`
-					);
-				}
-			}
-			const changedFileCount = await finalizeChatCheckpoint(
-				session,
-				paneId,
-				checkpointId,
-				emit
-			);
-			ensureVisibleTurnCompletion(session, paneId, changedFileCount, emit);
-			chatRuntime.finalizeTurn(session);
-			await drainNextQueuedMessage(session, paneId);
+			await runAgentTurnWithGoalLoop(session, paneId, prompt);
+			await finalizeSuccessfulChatTurn(session, paneId, checkpointId, emit);
 		} catch (e) {
-			session.currentHandle = null;
-			const errMsg =
-				e instanceof Error ? e.message : `Failed to run ${session.agentKind}`;
-			emitSystemMessage(session, paneId, errMsg);
-			session.messageBuffer.finalize();
-			chatRuntime.persistTranscript(session, paneId);
-			chatRuntime.send(session, {
-				type: "chat:error",
-				paneId,
-				error: errMsg,
-			});
-			await finalizeChatCheckpoint(session, paneId, checkpointId, emit);
-			chatRuntime.scheduleCleanup(session);
-			await drainNextQueuedMessage(session, paneId);
+			await finalizeFailedChatTurn(session, paneId, checkpointId, emit, e);
 		}
 	},
 
@@ -689,6 +1611,7 @@ export const ChatService = {
 		}
 		if (session) {
 			session.currentHandle = null;
+			emitGenerationStoppedMessage(session, paneId);
 			chatRuntime.finalizeTurn(session);
 			sendChatStatus(session, paneId, "idle", false);
 		}
@@ -722,15 +1645,10 @@ export const ChatService = {
 	async reassignWs(paneId: string, ws: ServerWebSocket<any>) {
 		const session = chatRuntime.getSession(paneId);
 		if (!session) {
-			const transcript = await readChatTranscript(paneId);
-			chatRuntime.send(ws, {
-				type: "chat:sync",
-				paneId,
-				messages: transcript ?? [],
-				revision: 0,
-				isStreaming: false,
-			});
-			sendChatStatus(ws, paneId, "idle", false);
+			const snapshot = await createChatReconnectSnapshot(paneId);
+			chatRuntime.send(ws, snapshot.sync);
+			chatRuntime.send(ws, snapshot.queue);
+			chatRuntime.send(ws, snapshot.status);
 			return;
 		}
 		chatRuntime.clearCleanupTimer(session);
@@ -741,24 +1659,10 @@ export const ChatService = {
 				paneId,
 				sessionId: session.sessionId,
 			});
-		const messages = session.messageBuffer.getMessages();
-		chatRuntime.send(ws, {
-			type: "chat:sync",
-			paneId,
-			messages,
-			revision: session.messageBuffer.getRevision(),
-			isStreaming: session.messageBuffer.streaming,
-		});
-		sendChatStatus(
-			ws,
-			paneId,
-			session.currentHandle
-				? session.messageBuffer.streaming
-					? "responding"
-					: "thinking"
-				: "idle",
-			!!session.currentHandle
-		);
+		const snapshot = await createChatReconnectSnapshot(paneId, session);
+		chatRuntime.send(ws, snapshot.sync);
+		chatRuntime.send(ws, snapshot.queue);
+		chatRuntime.send(ws, snapshot.status);
 	},
 
 	listSessions(): AgentSessionInfo[] {
@@ -774,6 +1678,43 @@ export const ChatService = {
 				clientCount: s.clients.size,
 				messageCount: s.messageBuffer.getMessages().length,
 			}));
+	},
+
+	async readEvents(
+		paneId: string,
+		afterSequence = 0,
+		limit = 500
+	): Promise<ChatEventLogEntry[]> {
+		return readChatEvents(paneId, afterSequence, limit);
+	},
+
+	async readRestoredMessages(paneId: string): Promise<ChatTranscriptMessage[]> {
+		return (await readAuthoritativeTranscript(paneId)) ?? [];
+	},
+
+	async listPersistedEventPaneIds(): Promise<string[]> {
+		return listEventLogPaneIds();
+	},
+
+	async readQueue(paneId: string): Promise<unknown[]> {
+		return loadChatQueue(paneId);
+	},
+
+	async saveQueue(paneId: string, queue: unknown[]): Promise<void> {
+		await saveChatQueue(paneId, queue);
+		appendChatEvent(paneId, "queue_persisted", {
+			source: "api",
+			...queueEventPayload(queue),
+		});
+	},
+
+	async deleteQueue(paneId: string): Promise<void> {
+		await deleteChatQueue(paneId);
+		appendChatEvent(paneId, "queue_persisted", {
+			source: "api",
+			count: 0,
+			messageIds: [],
+		});
 	},
 
 	listGoals() {

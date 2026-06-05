@@ -1,8 +1,8 @@
-import { access, readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { getChannel, CONFIG_PATH } from "./config.js";
+import { existsSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { CONFIG_PATH, getChannel } from "./config.js";
 import { findExistingApp, platformInfo } from "./platform.js";
 import { releaseApiUrl, releaseRepo } from "./releases.js";
 
@@ -41,8 +41,10 @@ async function appVersion(appPath) {
 export async function doctor({ dev = false } = {}) {
 	const platform = platformInfo();
 	const appPath = findExistingApp(process.cwd(), { includeDev: dev });
-	const version = await appVersion(appPath);
-	const channel = await getChannel();
+	const [version, channel] = await Promise.all([
+		appVersion(appPath),
+		getChannel(),
+	]);
 	const checks = [
 		[
 			"Platform",

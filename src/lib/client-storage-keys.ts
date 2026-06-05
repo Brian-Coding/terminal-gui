@@ -24,6 +24,7 @@ const CHAT_WORKTREE_INFO_KEY_PREFIX = "inferay-chat-worktree-";
 const CHAT_NON_MESSAGE_STORAGE_KEY_PREFIXES = [
 	CHAT_SESSION_KEY_PREFIX,
 	CHAT_INPUT_KEY_PREFIX,
+	CHAT_CHECKPOINT_KEY_PREFIX,
 	CHAT_MODEL_KEY_PREFIX,
 	CHAT_REASONING_KEY_PREFIX,
 	CHAT_PENDING_SEND_KEY_PREFIX,
@@ -34,6 +35,15 @@ const CHAT_NON_MESSAGE_STORAGE_KEY_PREFIXES = [
 	CHAT_COMPOSER_CONTEXT_KEY_PREFIX,
 	CHAT_WORKTREE_INFO_KEY_PREFIX,
 ] as const;
+
+export function isChatMessageStorageKey(key: string): boolean {
+	return (
+		key.startsWith(CHAT_MESSAGES_STORAGE_KEY_PREFIX) &&
+		!CHAT_NON_MESSAGE_STORAGE_KEY_PREFIXES.some((prefix) =>
+			key.startsWith(prefix)
+		)
+	);
+}
 
 const SYNCED_STORAGE_KEYS = new Set([
 	TERMINAL_STATE_STORAGE_KEY,
@@ -55,6 +65,8 @@ const SYNCED_STORAGE_PREFIXES = [
 
 export function shouldSyncClientStorageKey(key: string): boolean {
 	if (key === TERMINAL_STATE_STORAGE_KEY) return false;
+	if (isChatMessageStorageKey(key)) return false;
+	if (key.startsWith(CHAT_QUEUE_KEY_PREFIX)) return false;
 	if (key.startsWith(CHAT_LOADING_STATE_KEY_PREFIX)) return false;
 	return (
 		SYNCED_STORAGE_KEYS.has(key) ||

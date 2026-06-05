@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { PROJECT_ROOT } from "../../lib/path-utils.ts";
+import { PROJECT_ROOT } from "../../lib/user-data.ts";
 
 const BINARY_NAME = "inferay-native-diff";
 const MAX_NATIVE_PAYLOAD_BYTES = 512 * 1024;

@@ -1,4 +1,4 @@
-import { getServerWebSocketUrl } from "./server-origin.ts";
+import { getServerWebSocketUrl } from "./fetch-json.ts";
 
 interface WSMessage {
 	type: string;

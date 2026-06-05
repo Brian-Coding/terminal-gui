@@ -1,7 +1,7 @@
-import { homedir } from "node:os";
 import { realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { PROJECT_ROOT } from "../lib/path-utils.ts";
+import { PROJECT_ROOT } from "../lib/user-data.ts";
 
 const LOCAL_AUTH_COOKIE = "inferay_local_auth";
 const LOCAL_AUTH_TOKEN = crypto.randomUUID();

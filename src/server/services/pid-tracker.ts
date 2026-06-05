@@ -1,4 +1,4 @@
-import { atomicWriteJson } from "../../lib/atomic-write.ts";
+import { atomicWriteJson } from "../../lib/route-helpers.ts";
 import { userDataPath } from "../../lib/user-data.ts";
 
 const PID_FILE = userDataPath("runtime-pids.json");

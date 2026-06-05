@@ -93,6 +93,8 @@ export const websocketHandler = {
 					paneId: msg.paneId,
 					reasoningLevel: msg.reasoningLevel,
 					referencePaths: msg.referencePaths,
+					displayText: msg.displayText,
+					images: msg.images,
 					text: msg.text,
 					ws,
 				});

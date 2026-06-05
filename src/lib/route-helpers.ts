@@ -1,4 +1,32 @@
-import { atomicWriteJson } from "./atomic-write.ts";
+import { renameSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+
+const writeQueues = new Map<string, Promise<void>>();
+
+export async function atomicWriteJson(
+	filePath: string,
+	data: unknown,
+	indent?: number
+): Promise<void> {
+	const previous = writeQueues.get(filePath) ?? Promise.resolve();
+	const next = previous
+		.catch(() => {})
+		.then(async () => {
+			const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+			await mkdir(dirname(filePath), { recursive: true });
+			await Bun.write(tmpPath, JSON.stringify(data, null, indent));
+			renameSync(tmpPath, filePath);
+		});
+	writeQueues.set(filePath, next);
+	try {
+		await next;
+	} finally {
+		if (writeQueues.get(filePath) === next) {
+			writeQueues.delete(filePath);
+		}
+	}
+}
 
 function errorResponse(e: unknown, status = 500): Response {
 	const message = e instanceof Error ? e.message : "Unknown error";
