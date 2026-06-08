@@ -43,7 +43,6 @@ import {
 	dispatchTerminalShellChange,
 } from "../../features/terminal/terminal-utils.ts";
 import { hasId } from "../../lib/data.ts";
-import { measureTextareaHeight } from "../../lib/pretext-utils.ts";
 import { listenWindowEvent } from "../../lib/react-events.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { InlineDirectoryPicker } from "../../pages/Terminal/InlineDirectoryPicker.tsx";
@@ -270,20 +269,11 @@ function useChatViewport(
 		if (!isVisible) return;
 		const ta = textareaRef.current;
 		if (!ta) return;
-		const width = ta.clientWidth - 32;
-		if (width > 0 && input) {
-			const measured =
-				input.length > 6000
-					? 120
-					: measureTextareaHeight(
-							input,
-							width,
-							"13px Geist, -apple-system, system-ui, sans-serif",
-							20
-						);
-			ta.style.height = `${Math.min(Math.max(measured, 20), 120)}px`;
+		if (!input) {
+			ta.style.height = "20px";
 		} else {
 			ta.style.height = "20px";
+			ta.style.height = `${Math.min(Math.max(ta.scrollHeight, 20), 120)}px`;
 		}
 		if (highlightOverlayRef.current) {
 			highlightOverlayRef.current.style.transform = `translateY(-${ta.scrollTop}px)`;
