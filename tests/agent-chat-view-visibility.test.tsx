@@ -1,5 +1,6 @@
 import { expect, mock, test } from "bun:test";
 import { JSDOM } from "jsdom";
+import { memo } from "react";
 import { createRoot } from "react-dom/client";
 
 mock.module("@stylexjs/stylex", () => ({
@@ -26,11 +27,18 @@ mock.module("../src/lib/websocket.ts", () => ({
 	},
 }));
 
+let chatMessageListRenderCount = 0;
+
 mock.module("../src/components/chat/ChatMessageList.tsx", () => ({
-	ChatMessageList: ({ messages }: { messages: Array<{ content: string }> }) => (
-		<div data-testid="message-list">
-			{messages.map((message) => message.content).join("|")}
-		</div>
+	ChatMessageList: memo(
+		({ messages }: { messages: Array<{ content: string }> }) => {
+			chatMessageListRenderCount++;
+			return (
+				<div data-testid="message-list">
+					{messages.map((message) => message.content).join("|")}
+				</div>
+			);
+		}
 	),
 }));
 
@@ -176,6 +184,57 @@ test("hidden chat panes do not restore legacy localStorage transcripts", async (
 
 		expect(rootElement.textContent).not.toContain("new transcript");
 		expect(rootElement.textContent).not.toContain("old transcript");
+	} finally {
+		root.unmount();
+		globalThis.fetch = previousFetch;
+	}
+});
+
+test("draft typing does not re-render long chat message list", async () => {
+	const previousFetch = globalThis.fetch;
+	globalThis.fetch = mock((input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url.includes("/api/prompts")) return Promise.resolve(Response.json([]));
+		if (url.includes("/api/chat-queues/")) {
+			return Promise.resolve(Response.json({ queue: [] }));
+		}
+		return Promise.resolve(Response.json({ ok: true }));
+	}) as unknown as typeof fetch;
+	chatMessageListRenderCount = 0;
+	const { root, rootElement } = setupDom();
+	try {
+		const { getChatMessageReadModel } =
+			await import("../src/features/chat/chat-session-store.ts");
+		const { AgentChatView } =
+			await import("../src/components/chat/AgentChatView.tsx");
+		const paneId = "pane-long-draft-performance";
+		getChatMessageReadModel(paneId).set(
+			Array.from({ length: 1_200 }, (_, index) => ({
+				id: `m${index}`,
+				role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+				content: `message ${index}`,
+			}))
+		);
+
+		root.render(
+			<AgentChatView
+				paneId={paneId}
+				cwd="/tmp/project"
+				gitBranch="main"
+				agentKind="codex"
+				isVisible
+			/>
+		);
+		await tick(50);
+		const renderCountAfterMount = chatMessageListRenderCount;
+		const textarea = rootElement.querySelector("textarea");
+		if (!textarea) throw new Error("Missing chat textarea");
+
+		textarea.value = "typing should stay local";
+		textarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+		await tick(50);
+
+		expect(chatMessageListRenderCount).toBe(renderCountAfterMount);
 	} finally {
 		root.unmount();
 		globalThis.fetch = previousFetch;

@@ -86,6 +86,14 @@ export interface AgentChatHandle {
 
 const EMPTY_CWD_LIST: string[] = [];
 
+function useStableCallback<Args extends unknown[], Return>(
+	callback: (...args: Args) => Return
+): (...args: Args) => Return {
+	const callbackRef = useRef(callback);
+	callbackRef.current = callback;
+	return useCallback((...args: Args) => callbackRef.current(...args), []);
+}
+
 function usePersistentChatMessages(paneId: string) {
 	const messageReadModel = useMemo(
 		() => getChatMessageReadModel(paneId),
@@ -651,11 +659,11 @@ export const AgentChatView = memo(function AgentChatView({
 		slashMenu,
 		textareaRef,
 	});
-	const handleSendMessage = useCallback(
-		(text: string) =>
-			sendUserMessage({ text, workspaceOverride: consumePendingWorkspace() }),
-		[consumePendingWorkspace, sendUserMessage]
+	const handleSendMessage = useStableCallback((text: string) =>
+		sendUserMessage({ text, workspaceOverride: consumePendingWorkspace() })
 	);
+	const handleMdFileClickFromMessage = useStableCallback(handleMdFileClick);
+	const revertCheckpointFromMessage = useStableCallback(revertCheckpoint);
 	const stopGeneration = useCallback(() => {
 		wsClient.send({ type: "chat:stop", paneId });
 		setRunStatus({ isLoading: false, status: "idle", startTime: null });
@@ -805,11 +813,11 @@ export const AgentChatView = memo(function AgentChatView({
 							expandedTools={expandedTools}
 							toggleTool={toggleTool}
 							checkpoints={checkpoints}
-							revertCheckpoint={revertCheckpoint}
+							revertCheckpoint={revertCheckpointFromMessage}
 							isLoading={isLoading}
 							startTime={startTime}
 							handleSendMessage={handleSendMessage}
-							onMdFileClick={handleMdFileClick}
+							onMdFileClick={handleMdFileClickFromMessage}
 							slashCommandNames={slashCommandNames}
 						/>
 					</div>
