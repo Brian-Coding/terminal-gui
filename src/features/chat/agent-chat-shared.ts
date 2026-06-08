@@ -138,7 +138,7 @@ export function isChatServerMessage(
 	);
 }
 
-const CHAT_MESSAGE_RETAIN_LIMIT = 75;
+const CHAT_MESSAGE_RETAIN_LIMIT = 5_000;
 const CHAT_MESSAGE_CHAR_LIMIT = 1_000_000;
 
 let msgId = 0;

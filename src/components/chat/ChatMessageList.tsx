@@ -45,6 +45,11 @@ type ChatRenderRow =
 	| RenderItem
 	| { type: "thinking"; key: string; startTime: number };
 
+// Virtualizer padding is numeric; keep these in px so scroll-to-end accounts
+// for the composer fade instead of hiding the loader under it.
+const CHAT_LIST_TOP_PADDING_PX = 16;
+const CHAT_LIST_BOTTOM_PADDING_PX = 64;
+
 function getRowKey(row: ChatRenderRow | undefined, index: number) {
 	if (!row) return `row-${index}`;
 	if (row.type === "thinking") return row.key;
@@ -423,6 +428,8 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		estimateSize: () => 148,
 		overscan: 8,
 		gap: 8,
+		paddingEnd: CHAT_LIST_BOTTOM_PADDING_PX,
+		paddingStart: CHAT_LIST_TOP_PADDING_PX,
 	});
 	const virtualRows = rowVirtualizer.getVirtualItems();
 	const renderedVirtualRows =
@@ -848,7 +855,6 @@ const styles = stylex.create({
 		boxSizing: "border-box",
 		minHeight: "100%",
 		minWidth: 0,
-		paddingBlock: `${controlSize._4} ${controlSize._8}`,
 		paddingInline: controlSize._5,
 		position: "relative",
 		width: "100%",
@@ -858,6 +864,6 @@ const styles = stylex.create({
 		left: controlSize._5,
 		position: "absolute",
 		right: controlSize._5,
-		top: controlSize._4,
+		top: 0,
 	},
 });

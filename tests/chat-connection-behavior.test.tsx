@@ -217,3 +217,120 @@ test("live turn completion persists sync and reconnects after done", async () =>
 		root.unmount();
 	}
 });
+
+test("stale streaming sync does not cut local in-flight assistant content", async () => {
+	subscribe.mockClear();
+	send.mockClear();
+	const { root } = setupDom();
+	const { useChatConnection } =
+		await import("../src/components/chat/useChatConnection.ts");
+	let handleMessage: ((message: unknown) => void) | undefined;
+	let latestMessages: ChatMessage[] = [];
+	subscribe.mockImplementationOnce((_paneId, callback) => {
+		handleMessage = callback;
+		return subscribeCleanup;
+	});
+
+	function Harness() {
+		const [, setUiState] = useState<ChatActivityUiState>({
+			expandedTools: new Set(),
+			liveActivities: [],
+		});
+		const runStatusRef = useRef<ChatLoadingState>({
+			isLoading: true,
+			startTime: Date.now(),
+			status: "responding",
+		});
+		const messagesRef = useRef<ChatMessage[]>([
+			{ id: "u1", role: "user", content: "prompt" },
+		]);
+		latestMessages = messagesRef.current;
+		const saveMessagesNow = useCallback(
+			(messages: ChatMessage[]) => messages,
+			[]
+		);
+		const setMessages = useCallback(
+			(
+				update: ChatMessage[] | ((messages: ChatMessage[]) => ChatMessage[])
+			) => {
+				messagesRef.current =
+					typeof update === "function" ? update(messagesRef.current) : update;
+				latestMessages = messagesRef.current;
+			},
+			[]
+		);
+		const messageReadModel = useMemo(
+			() => ({
+				get: () => messagesRef.current,
+				saveNow: saveMessagesNow,
+				set: setMessages,
+			}),
+			[saveMessagesNow, setMessages]
+		);
+		const setRunStatus = useCallback(
+			(
+				value: ChatLoadingState | ((prev: ChatLoadingState) => ChatLoadingState)
+			) =>
+				(runStatusRef.current =
+					typeof value === "function" ? value(runStatusRef.current) : value),
+			[]
+		);
+		useChatConnection({
+			enabled: true,
+			messageReadModel,
+			paneId: "pane-stale-stream",
+			replaceQueuedMessages: () => {},
+			setChatUiState: setUiState,
+			setRunStatus,
+		});
+		return null;
+	}
+
+	try {
+		root.render(<Harness />);
+		await tick();
+		handleMessage?.({
+			type: "chat:event",
+			paneId: "pane-stale-stream",
+			event: {
+				type: "content_block_start",
+				content_block: { type: "text", text: "newer " },
+			},
+		});
+		handleMessage?.({
+			type: "chat:event",
+			paneId: "pane-stale-stream",
+			event: {
+				type: "content_block_delta",
+				delta: { type: "text_delta", text: "local stream" },
+			},
+		});
+		await tick();
+
+		handleMessage?.({
+			type: "chat:sync",
+			paneId: "pane-stale-stream",
+			messages: [
+				{ id: "u1", role: "user", content: "prompt" },
+				{
+					id: "server-a1",
+					role: "assistant",
+					content: "older",
+					isStreaming: true,
+				},
+			],
+			revision: 4,
+			isStreaming: true,
+		});
+		await tick();
+
+		expect(latestMessages).toHaveLength(2);
+		expect(latestMessages.at(-1)).toMatchObject({
+			role: "assistant",
+			content: "newer local stream",
+			isStreaming: true,
+		});
+	} finally {
+		root.unmount();
+	}
+});

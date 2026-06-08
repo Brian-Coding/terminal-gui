@@ -10,9 +10,9 @@ type ChatStateMessage = Pick<
 	"id" | "role" | "content" | "parts" | "isStreaming"
 >;
 
-const CHAT_RENDER_CHAR_WINDOW = 50_000;
+const CHAT_RENDER_CHAR_WINDOW = 500_000;
 const CHAT_RENDER_MIN_MESSAGES = 30;
-const CHAT_RENDER_MAX_MESSAGES = 200;
+const CHAT_RENDER_MAX_MESSAGES = 2_000;
 
 export interface ChatSyncReconcileInput {
 	currentMessages: ChatMessage[];
@@ -131,10 +131,29 @@ export function reconcileChatSync({
 	}
 
 	const serverMessages = dedupeChatMessagesById(rawServerMessages);
-	const shouldUpdateMessages = serverMessages.length > 0 || !isStreaming;
+	const localStreamingAssistantId =
+		currentMessages.findLast?.(
+			(message) => message.isStreaming && message.role === "assistant"
+		)?.id ?? null;
+	const localStreamingToolId =
+		currentMessages.findLast?.(
+			(message) => message.isStreaming && message.role === "tool"
+		)?.id ?? null;
+	const hasLocalStreamingRow =
+		!!localStreamingAssistantId || !!localStreamingToolId;
+	const shouldUpdateMessages =
+		!isStreaming || (serverMessages.length > 0 && !hasLocalStreamingRow);
 	const mergedMessages = shouldUpdateMessages
 		? trimMessages(mergeSyncedMessages(currentMessages, serverMessages))
 		: currentMessages;
+	const streamingAssistantId =
+		mergedMessages.findLast?.(
+			(message) => message.isStreaming && message.role === "assistant"
+		)?.id ?? null;
+	const streamingToolId =
+		mergedMessages.findLast?.(
+			(message) => message.isStreaming && message.role === "tool"
+		)?.id ?? null;
 
 	return {
 		mergedMessages,
@@ -143,14 +162,8 @@ export function reconcileChatSync({
 		shouldPersist: shouldUpdateMessages && !isStreaming,
 		shouldSkip: false,
 		shouldUpdateMessages,
-		streamingAssistantId:
-			serverMessages.findLast?.(
-				(message) => message.isStreaming && message.role === "assistant"
-			)?.id ?? null,
-		streamingToolId:
-			serverMessages.findLast?.(
-				(message) => message.isStreaming && message.role === "tool"
-			)?.id ?? null,
+		streamingAssistantId,
+		streamingToolId,
 	};
 }
 

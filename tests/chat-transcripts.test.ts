@@ -191,6 +191,34 @@ test("queue-only event logs do not mask transcript snapshots", async () => {
 	}
 });
 
+test("persisted reconnect snapshots preserve long transcript snapshots", async () => {
+	const paneId = `test-long-reconnect-${crypto.randomUUID()}`;
+	const transcriptPath = userDataPath("chat-transcripts", `${paneId}.json`);
+	try {
+		const messages = Array.from({ length: 1_200 }, (_, index) => ({
+			id: `m${index}`,
+			role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+			content: `short message ${index}`,
+		}));
+		await writeChatTranscript(paneId, messages);
+
+		const snapshot = await readPersistedChatReconnectSnapshot(paneId);
+
+		expect(snapshot.sync.messages).toHaveLength(1_200);
+		expect(snapshot.sync.messages[0]?.id).toBe("m0");
+		expect(snapshot.sync.messages.at(-1)?.id).toBe("m1199");
+		expect(snapshot.sync.isStreaming).toBe(false);
+		expect(snapshot.status).toMatchObject({
+			type: "chat:status",
+			paneId,
+			status: "idle",
+			isLoading: false,
+		});
+	} finally {
+		await rm(transcriptPath, { force: true });
+	}
+});
+
 test("chat queue persistence records compact runtime events", async () => {
 	const paneId = `test-queue-events-${crypto.randomUUID()}`;
 	const queuePath = userDataPath("chat-queues", `${paneId}.json`);

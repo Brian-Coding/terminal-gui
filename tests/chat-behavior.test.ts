@@ -43,19 +43,39 @@ describe("chat data behavior", () => {
 	 * back through the app. The behavior keeps the newest context and also trims
 	 * oversized payloads, which matters for long-running agent sessions.
 	 */
+	test("keeps long short-message transcripts before the durable row cap", () => {
+		const messages = Array.from({ length: 4_500 }, (_, index) =>
+			message(`short-${index}`, `message ${index}`)
+		);
+
+		expect(trimMessages(messages)).toBe(messages);
+		expect(
+			appendTrimmedMessage(message("short-4500", "next"), messages)
+		).toHaveLength(4_501);
+	});
+
 	test("trims chat history by message count and total character budget", () => {
-		const messages = Array.from({ length: 90 }, (_, index) =>
+		const shortMessages = Array.from({ length: 5_500 }, (_, index) =>
+			message(`m${index}`, "short")
+		);
+		const countTrimmed = trimMessages(shortMessages);
+
+		expect(countTrimmed).toHaveLength(5_000);
+		expect(countTrimmed[0]?.id).toBe("m500");
+		expect(countTrimmed.at(-1)?.id).toBe("m5499");
+
+		const messages = Array.from({ length: 600 }, (_, index) =>
 			message(`m${index}`, `${index}:`.padEnd(2_000, "x"))
 		);
 
 		const trimmed = trimMessages(messages);
 
-		expect(trimmed).toHaveLength(75);
-		expect(trimmed[0]?.id).toBe("m15");
-		expect(trimmed.at(-1)?.id).toBe("m89");
+		expect(trimmed).toHaveLength(500);
+		expect(trimmed[0]?.id).toBe("m100");
+		expect(trimmed.at(-1)?.id).toBe("m599");
 		expect(
-			appendTrimmedMessage(message("m90", "next"), trimmed).at(-1)?.id
-		).toBe("m90");
+			appendTrimmedMessage(message("m600", "next"), trimmed).at(-1)?.id
+		).toBe("m600");
 	});
 
 	/*
@@ -73,17 +93,25 @@ describe("chat data behavior", () => {
 			message(`large-${index}`, `${index}:`.padEnd(2_000, "x"))
 		);
 		const largeWindow = windowChatMessagesForRender(largeContentMessages);
-		expect(largeWindow).toHaveLength(30);
-		expect(largeWindow[0]?.id).toBe("large-970");
+		expect(largeWindow).toHaveLength(250);
+		expect(largeWindow[0]?.id).toBe("large-750");
 		expect(largeWindow.at(-1)?.id).toBe("large-999");
 
 		const tinyContentMessages = Array.from({ length: 1_000 }, (_, index) =>
 			message(`tiny-${index}`, "x")
 		);
 		const tinyWindow = windowChatMessagesForRender(tinyContentMessages);
-		expect(tinyWindow).toHaveLength(200);
-		expect(tinyWindow[0]?.id).toBe("tiny-800");
+		expect(tinyWindow).toHaveLength(1_000);
+		expect(tinyWindow[0]?.id).toBe("tiny-0");
 		expect(tinyWindow.at(-1)?.id).toBe("tiny-999");
+
+		const manyTinyMessages = Array.from({ length: 3_000 }, (_, index) =>
+			message(`many-tiny-${index}`, "x")
+		);
+		const manyTinyWindow = windowChatMessagesForRender(manyTinyMessages);
+		expect(manyTinyWindow).toHaveLength(2_000);
+		expect(manyTinyWindow[0]?.id).toBe("many-tiny-1000");
+		expect(manyTinyWindow.at(-1)?.id).toBe("many-tiny-2999");
 	});
 
 	/*

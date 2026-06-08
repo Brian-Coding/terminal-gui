@@ -79,3 +79,67 @@ test("chat sync reconciler exposes streaming assistant and tool ids", () => {
 		streamingToolId: "t1",
 	});
 });
+
+test("chat sync reconciler preserves local streaming rows during stale streaming sync", () => {
+	const currentMessages: ChatMessage[] = [
+		{ id: "u1", role: "user", content: "build the app" },
+		{
+			id: "local-a1",
+			role: "assistant",
+			content: "local streamed text that is ahead",
+			isStreaming: true,
+		},
+	];
+
+	const result = reconcileChatSync({
+		currentMessages,
+		isStreaming: true,
+		previousRevision: 3,
+		revision: 4,
+		serverMessages: [
+			{ id: "u1", role: "user", content: "build the app" },
+			{
+				id: "server-a1",
+				role: "assistant",
+				content: "older partial",
+				isStreaming: true,
+			},
+		],
+	});
+
+	expect(result).toMatchObject({
+		mergedMessages: currentMessages,
+		nextRevision: 4,
+		shouldPersist: false,
+		shouldSkip: false,
+		shouldUpdateMessages: false,
+		streamingAssistantId: "local-a1",
+	});
+});
+
+test("chat sync reconciler hydrates streaming rows when no local stream exists", () => {
+	const result = reconcileChatSync({
+		currentMessages: [{ id: "u1", role: "user", content: "build the app" }],
+		isStreaming: true,
+		previousRevision: 3,
+		revision: 4,
+		serverMessages: [
+			{ id: "u1", role: "user", content: "build the app" },
+			{
+				id: "server-a1",
+				role: "assistant",
+				content: "server partial",
+				isStreaming: true,
+			},
+		],
+	});
+
+	expect(result).toMatchObject({
+		nextRevision: 4,
+		shouldPersist: false,
+		shouldSkip: false,
+		shouldUpdateMessages: true,
+		streamingAssistantId: "server-a1",
+	});
+	expect(result.mergedMessages.at(-1)?.content).toBe("server partial");
+});
