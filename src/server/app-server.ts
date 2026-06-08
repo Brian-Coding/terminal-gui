@@ -31,6 +31,12 @@ const g = globalThis as typeof globalThis & {
 	__terminal_gui_server?: ReturnType<typeof Bun.serve>;
 	__terminal_gui_shutdown_handlers_installed?: boolean;
 };
+type AppUpgradeServer = {
+	upgrade: (
+		req: Request,
+		options: { data: { subscriptions: Set<string> } }
+	) => boolean;
+};
 
 function staticFile(
 	dir: string,
@@ -214,6 +220,86 @@ export function installShutdownHandlers() {
 	process.on("SIGHUP", cleanShutdown);
 }
 
+function routeHandlerFor(
+	routes: ReturnType<typeof buildApiRoutes>,
+	pathname: string,
+	method: string
+): ((req: Request) => Promise<Response>) | null {
+	return (
+		(
+			routes as unknown as Record<
+				string,
+				Record<string, (req: Request) => Promise<Response>>
+			>
+		)[pathname]?.[method] ?? null
+	);
+}
+
+export async function handleAppHttpRequest(
+	req: Request,
+	server?: AppUpgradeServer,
+	options?: {
+		corsApiRoutes?: ReturnType<typeof buildApiRoutes>;
+		viteBuildPresent?: boolean;
+	}
+): Promise<Response | undefined> {
+	const url = new URL(req.url);
+	const corsApiRoutes = options?.corsApiRoutes ?? addCorsToRoutes(apiRoutes);
+	const viteBuildPresent = options?.viteBuildPresent ?? (await hasViteBuild());
+
+	const appInfoHandler =
+		url.pathname === "/logo.png"
+			? staticFile(publicDir, "logo.png", "image/png")
+			: url.pathname === "/app-icon.png"
+				? staticFile(publicDir, "app-icon.png", "image/png")
+				: null;
+	if (appInfoHandler) return withCors(await appInfoHandler(), req);
+
+	const routeHandler = routeHandlerFor(corsApiRoutes, url.pathname, req.method);
+	if (routeHandler) return routeHandler(req);
+
+	if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+		if (!isTrustedLocalRequest(req)) {
+			return new Response("Forbidden", { status: 403 });
+		}
+		return new Response(null, {
+			status: 204,
+			headers: createCorsHeaders(req),
+		});
+	}
+
+	if (url.pathname === "/ws") {
+		if (!isTrustedLocalRequest(req)) {
+			return new Response("Forbidden", { status: 403 });
+		}
+		const upgraded = server?.upgrade(req, {
+			data: { subscriptions: new Set() },
+		});
+		if (upgraded) return undefined;
+		return new Response("WebSocket upgrade failed", { status: 400 });
+	}
+
+	if (url.pathname.startsWith("/api/prompts/") && !isTrustedLocalRequest(req)) {
+		return new Response("Forbidden", { status: 403 });
+	}
+	const promptResponse = handlePromptRequest(req);
+	if (promptResponse) {
+		return withCors(await promptResponse, req);
+	}
+
+	if (viteBuildPresent) {
+		const distResponse = await serveDistFile(url.pathname);
+		if (distResponse) return withCors(distResponse, req);
+
+		if (!url.pathname.startsWith("/api/")) {
+			const indexResponse = await serveRendererIndex();
+			if (indexResponse) return withCors(indexResponse, req);
+		}
+	}
+
+	return new Response("Not found", { status: 404 });
+}
+
 export async function startAppServer(port = 4001) {
 	if (g.__terminal_gui_server) {
 		return g.__terminal_gui_server;
@@ -244,52 +330,11 @@ export async function startAppServer(port = 4001) {
 			},
 		},
 		websocket: websocketHandler,
-		async fetch(req, server) {
-			const url = new URL(req.url);
-
-			if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
-				if (!isTrustedLocalRequest(req)) {
-					return new Response("Forbidden", { status: 403 });
-				}
-				return new Response(null, {
-					status: 204,
-					headers: createCorsHeaders(req),
-				});
-			}
-
-			if (url.pathname === "/ws") {
-				if (!isTrustedLocalRequest(req)) {
-					return new Response("Forbidden", { status: 403 });
-				}
-				const upgraded = server.upgrade(req, {
-					data: { subscriptions: new Set() },
-				});
-				if (upgraded) return undefined;
-				return new Response("WebSocket upgrade failed", { status: 400 });
-			}
-
-			if (
-				url.pathname.startsWith("/api/prompts/") &&
-				!isTrustedLocalRequest(req)
-			) {
-				return new Response("Forbidden", { status: 403 });
-			}
-			const promptResponse = handlePromptRequest(req);
-			if (promptResponse) {
-				return withCors(await promptResponse, req);
-			}
-
-			if (viteBuildPresent) {
-				const distResponse = await serveDistFile(url.pathname);
-				if (distResponse) return withCors(distResponse, req);
-
-				if (!url.pathname.startsWith("/api/")) {
-					const indexResponse = await serveRendererIndex();
-					if (indexResponse) return withCors(indexResponse, req);
-				}
-			}
-
-			return new Response("Not found", { status: 404 });
+		fetch(req, server) {
+			return handleAppHttpRequest(req, server, {
+				corsApiRoutes,
+				viteBuildPresent,
+			});
 		},
 	});
 

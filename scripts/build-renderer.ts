@@ -18,7 +18,8 @@ await mkdir(distDir, { recursive: true });
 
 const cssProc = Bun.spawn(
 	[
-		"./node_modules/.bin/tailwindcss",
+		"bun",
+		"node_modules/@tailwindcss/cli/dist/index.mjs",
 		"-i",
 		"src/index.css",
 		"-o",

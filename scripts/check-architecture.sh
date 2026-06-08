@@ -3,6 +3,7 @@ set -euo pipefail
 
 echo "==> Biome focused architecture files"
 bunx biome check \
+	scripts/build-renderer.ts \
 	src/components/chat/AgentChatView.tsx \
 	src/components/chat/ChatMessageList.tsx \
 	src/components/chat/useAgentChatComposerState.ts \
@@ -38,6 +39,7 @@ bunx biome check \
 	tests/chat-connection-behavior.test.tsx \
 	tests/chat-header-behavior.test.tsx \
 	tests/chat-input-actions-behavior.test.tsx \
+	tests/app-server-smoke.test.ts \
 	tests/chat-message-list-memo.test.tsx \
 	tests/chat-queue-behavior.test.tsx \
 	tests/chat-session-store.test.ts \
@@ -77,6 +79,10 @@ bun test \
 echo
 echo "==> Renderer build"
 bun scripts/build-renderer.ts
+
+echo
+echo "==> App server renderer smoke"
+bun test tests/app-server-smoke.test.ts
 
 echo
 echo "==> React Doctor diff"
