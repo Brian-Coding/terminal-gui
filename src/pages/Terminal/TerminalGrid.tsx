@@ -133,9 +133,12 @@ export const TerminalGrid = memo(function TerminalGrid(
 	const [containerHeight, setContainerHeight] = useState(0);
 	const dragIndexRef = useRef<number | null>(null);
 	const clearDragStateRef = useRef<() => void>(() => {});
-	const wheelPaneIdRef = useRef<string | null>(null);
+	const interactionPaneIdRef = useRef<string | null>(null);
 	const [dragIndex, setDragIndex] = useState<number | null>(null);
 	const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+	const [interactionPaneId, setInteractionPaneId] = useState<string | null>(
+		null
+	);
 	const chatStatusCwds = useMemo(() => {
 		if (!active) return EMPTY_CWD_LIST;
 		const seen = new Set<string>();
@@ -209,15 +212,11 @@ export const TerminalGrid = memo(function TerminalGrid(
 		[clearDragState, onReorderPanes]
 	);
 
-	const scrollGridBy = useCallback((deltaY: number) => {
-		const grid = containerRef.current;
-		if (!grid) return;
-		scrollElementBy(grid, deltaY);
-	}, []);
-
 	const handleGridWheelCapture = useCallback(
 		(event: React.WheelEvent<HTMLDivElement>) => {
 			if (layoutMode !== "grid" || event.deltaY === 0) return;
+			const grid = containerRef.current;
+			if (!grid) return;
 			const target =
 				event.target instanceof Element
 					? event.target.closest<HTMLElement>("[data-terminal-grid-pane-id]")
@@ -226,20 +225,17 @@ export const TerminalGrid = memo(function TerminalGrid(
 			const targetPaneId = target.dataset.terminalGridPaneId ?? null;
 			const innerScroller = findVerticalScroller(event.target, target);
 			if (
-				targetPaneId === wheelPaneIdRef.current &&
+				targetPaneId === interactionPaneIdRef.current &&
 				innerScroller &&
 				canScrollInDirection(innerScroller, event.deltaY)
 			) {
-				event.preventDefault();
-				event.stopPropagation();
-				scrollElementBy(innerScroller, event.deltaY);
 				return;
 			}
 			event.preventDefault();
 			event.stopPropagation();
-			scrollGridBy(event.deltaY);
+			scrollElementBy(grid, event.deltaY);
 		},
-		[layoutMode, scrollGridBy]
+		[layoutMode]
 	);
 
 	useEffect(() => {
@@ -316,7 +312,9 @@ export const TerminalGrid = memo(function TerminalGrid(
 					data-terminal-grid-pane-id={pane.id}
 					style={cellStyle(idx)}
 					onPointerDownCapture={() => {
-						wheelPaneIdRef.current = pane.id;
+						interactionPaneIdRef.current = pane.id;
+						setInteractionPaneId(pane.id);
+						props.onSelectPane(pane.id);
 					}}
 					onDragOver={(e) => handleDragOver(e, idx)}
 					onDrop={(e) => handleDrop(e, idx)}
@@ -331,6 +329,9 @@ export const TerminalGrid = memo(function TerminalGrid(
 							handleHeaderDragEnd,
 							pane.cwd ? (chatProjectMap.get(pane.cwd)?.branch ?? null) : null
 						)}
+						interactionEnabled={
+							layoutMode !== "grid" || pane.id === interactionPaneId
+						}
 					/>
 				</div>
 			))}

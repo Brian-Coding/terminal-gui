@@ -336,14 +336,30 @@ test("grid layout owns wheel scrolling until a chat pane is clicked", async () =
 		const firstChat = document.querySelector<HTMLElement>(
 			'[data-testid="agent-chat"]'
 		);
+		const secondChat = document.querySelectorAll<HTMLElement>(
+			'[data-testid="agent-chat"]'
+		)[1];
 		const firstChatScroll = document.querySelector<HTMLElement>(
 			'[data-testid="agent-chat-scroll"]'
 		);
-		if (!grid || !firstChat || !firstChatScroll) {
+		const secondChatScroll = document.querySelectorAll<HTMLElement>(
+			'[data-testid="agent-chat-scroll"]'
+		)[1];
+		if (
+			!grid ||
+			!firstChat ||
+			!secondChat ||
+			!firstChatScroll ||
+			!secondChatScroll
+		) {
 			throw new Error("Missing grid test elements");
 		}
 		setScrollMetrics(grid, { clientHeight: 600, scrollHeight: 1200 });
 		setScrollMetrics(firstChatScroll, { clientHeight: 100, scrollHeight: 400 });
+		setScrollMetrics(secondChatScroll, {
+			clientHeight: 100,
+			scrollHeight: 400,
+		});
 
 		firstChat.dispatchEvent(
 			new window.WheelEvent("wheel", {
@@ -360,6 +376,35 @@ test("grid layout owns wheel scrolling until a chat pane is clicked", async () =
 				cancelable: true,
 			})
 		);
+		const firstChatWheelWasNotCancelled = firstChat.dispatchEvent(
+			new window.WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				deltaY: 120,
+			})
+		);
+		expect(firstChatWheelWasNotCancelled).toBe(true);
+		expect(grid.scrollTop).toBe(120);
+		expect(firstChatScroll.scrollTop).toBe(0);
+		expect(secondChatScroll.scrollTop).toBe(0);
+
+		const secondChatWheelWasNotCancelled = secondChat.dispatchEvent(
+			new window.WheelEvent("wheel", {
+				bubbles: true,
+				cancelable: true,
+				deltaY: 120,
+			})
+		);
+		expect(secondChatWheelWasNotCancelled).toBe(false);
+		expect(grid.scrollTop).toBe(240);
+		expect(secondChatScroll.scrollTop).toBe(0);
+
+		secondChat.dispatchEvent(
+			new window.Event("pointerdown", {
+				bubbles: true,
+				cancelable: true,
+			})
+		);
 		firstChat.dispatchEvent(
 			new window.WheelEvent("wheel", {
 				bubbles: true,
@@ -367,28 +412,37 @@ test("grid layout owns wheel scrolling until a chat pane is clicked", async () =
 				deltaY: 120,
 			})
 		);
-		expect(grid.scrollTop).toBe(120);
-		expect(firstChatScroll.scrollTop).toBe(120);
+		expect(grid.scrollTop).toBe(360);
+		expect(firstChatScroll.scrollTop).toBe(0);
+
+		firstChat.dispatchEvent(
+			new window.Event("pointerdown", {
+				bubbles: true,
+				cancelable: true,
+			})
+		);
 
 		firstChatScroll.scrollTop = 300;
-		firstChat.dispatchEvent(
+		const firstBoundaryDownWasNotCancelled = firstChat.dispatchEvent(
 			new window.WheelEvent("wheel", {
 				bubbles: true,
 				cancelable: true,
 				deltaY: 120,
 			})
 		);
-		expect(grid.scrollTop).toBe(240);
+		expect(firstBoundaryDownWasNotCancelled).toBe(false);
+		expect(grid.scrollTop).toBe(480);
 
 		firstChatScroll.scrollTop = 0;
-		firstChat.dispatchEvent(
+		const firstBoundaryUpWasNotCancelled = firstChat.dispatchEvent(
 			new window.WheelEvent("wheel", {
 				bubbles: true,
 				cancelable: true,
 				deltaY: -120,
 			})
 		);
-		expect(grid.scrollTop).toBe(120);
+		expect(firstBoundaryUpWasNotCancelled).toBe(false);
+		expect(grid.scrollTop).toBe(360);
 	} finally {
 		root.unmount();
 	}

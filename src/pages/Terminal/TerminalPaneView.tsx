@@ -39,6 +39,7 @@ interface TerminalPaneViewProps {
 	chatRef: (paneId: string, handle: AgentChatHandle | null) => void;
 	onAgentStatusChange?: (paneId: string, status: string) => void;
 	paneIndex?: number;
+	interactionEnabled?: boolean;
 	onHeaderDragStart?: (e: React.DragEvent, index: number) => void;
 	onHeaderDragEnd?: () => void;
 	onAddPane?: (agentKind: AgentKind) => void;
@@ -60,6 +61,7 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 	chatRef,
 	onAgentStatusChange,
 	paneIndex,
+	interactionEnabled = true,
 	onHeaderDragStart,
 	onHeaderDragEnd,
 	onAddPane,
@@ -209,7 +211,12 @@ export const TerminalPaneView = memo(function TerminalPaneView({
 				aria-label={pane.title || "Terminal"}
 			/>
 			{isAgentChatPane && (
-				<div {...stylex.props(styles.agentPane)}>
+				<div
+					{...stylex.props(
+						styles.agentPane,
+						!interactionEnabled && styles.agentPaneDisabled
+					)}
+				>
 					<AgentChatView
 						paneId={pane.id}
 						cwd={pane.cwd}
@@ -319,5 +326,8 @@ const styles = stylex.create({
 		flex: 1,
 		flexDirection: "column",
 		overflow: "hidden",
+	},
+	agentPaneDisabled: {
+		pointerEvents: "none",
 	},
 });
