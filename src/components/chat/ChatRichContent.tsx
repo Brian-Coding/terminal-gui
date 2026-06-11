@@ -345,10 +345,11 @@ const styles = stylex.create({
 		flexDirection: "column",
 		gap: controlSize._1,
 		minWidth: 0,
-		overflowWrap: "break-word",
-		wordBreak: "break-word",
+		width: "100%",
+		wordBreak: "normal",
 	},
 	codeWrap: {
+		minWidth: 0,
 		position: "relative",
 	},
 	codeBlock: {
@@ -395,6 +396,8 @@ const styles = stylex.create({
 	},
 	listContent: {
 		minWidth: 0,
+		overflowWrap: "break-word",
+		wordBreak: "normal",
 	},
 	tableWrap: {
 		backgroundColor: color.backgroundRaised,
@@ -430,6 +433,8 @@ const styles = stylex.create({
 	},
 	paragraph: {
 		margin: 0,
+		overflowWrap: "break-word",
+		wordBreak: "normal",
 	},
 	streamingText: {
 		whiteSpace: "pre-wrap",

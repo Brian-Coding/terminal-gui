@@ -65,6 +65,7 @@ const CLAUDE_NATIVE_COMMANDS = [
 ] as const satisfies readonly NativeSlashCommand[];
 
 const CLAUDE_MODELS: readonly ModelOption[] = [
+	{ id: "claude-fable-5", label: "Fable 5", detail: "Hardest tasks" },
 	{ id: "claude-opus-4-7", label: "Opus 4.7", detail: "★ Most capable" },
 	{ id: "claude-opus-4-6", label: "Opus 4.6", detail: "Previous Opus" },
 	{ id: "claude-sonnet-4-6", label: "Sonnet 4.6", detail: "Best value" },

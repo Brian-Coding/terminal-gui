@@ -49,6 +49,7 @@ type ChatRenderRow =
 // for the composer fade instead of hiding the loader under it.
 const CHAT_LIST_TOP_PADDING_PX = 16;
 const CHAT_LIST_BOTTOM_PADDING_PX = 64;
+const CHAT_LIST_INLINE_GUTTER = "clamp(0.75rem, 3vw, 1.25rem)";
 
 function getRowKey(row: ChatRenderRow | undefined, index: number) {
 	if (!row) return `row-${index}`;
@@ -855,15 +856,16 @@ const styles = stylex.create({
 		boxSizing: "border-box",
 		minHeight: "100%",
 		minWidth: 0,
-		paddingInline: controlSize._5,
+		paddingInline: CHAT_LIST_INLINE_GUTTER,
 		position: "relative",
 		width: "100%",
 	},
 	messageRow: {
 		boxSizing: "border-box",
-		left: controlSize._5,
+		left: CHAT_LIST_INLINE_GUTTER,
+		minWidth: 0,
 		position: "absolute",
-		right: controlSize._5,
+		right: CHAT_LIST_INLINE_GUTTER,
 		top: 0,
 	},
 });
