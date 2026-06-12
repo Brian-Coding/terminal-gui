@@ -550,7 +550,8 @@ export function useShikiSnippet(
 	theme: SyntaxHighlightTheme = DEFAULT_SYNTAX_HIGHLIGHT_THEME
 ): { highlighted: Map<number, string>; isReady: boolean } {
 	const language = getLanguageFromPath(filePath);
-	const snippetKey = `${enabled}\0${filePath}\0${language ?? ""}\0${theme}\0${lines.join("\0")}`;
+	const linesHash = useMemo(() => createLineContentKey(lines), [lines]);
+	const snippetKey = `${enabled}\0${filePath}\0${language ?? ""}\0${theme}\0${linesHash}`;
 	const [highlightedState, setHighlightedState] = useState<{
 		key: string;
 		highlighted: Map<number, string>;

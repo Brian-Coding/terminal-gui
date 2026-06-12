@@ -4,7 +4,6 @@ import {
 	useShikiSnippet,
 	useSyntaxHighlightTheme,
 } from "../../hooks/useShikiHighlighter.ts";
-import { contentOf } from "../../lib/data.ts";
 import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { IconChevronRight, IconFilePlus } from "../ui/Icons.tsx";
@@ -484,7 +483,6 @@ export function MiniEditDiff({
 
 	return (
 		<EditDiffCard
-			key={`${filePath}:${oldStr}:${newStr}:${isStreaming ? "streaming" : "done"}`}
 			fileName={fileName}
 			filePath={filePath}
 			hunks={hunks}
@@ -505,6 +503,13 @@ export function GroupedEditDiff({
 }) {
 	const fileName = filePath.split("/").pop() || filePath;
 	const isStreaming = edits.some((edit) => edit.isStreaming);
+	// Stable signature: when buildRenderItems hands us a new edits array
+	// per streaming token, this skips the diff recompute unless an edit's
+	// content actually changed.
+	const editsSignature = useMemo(
+		() => edits.map((edit) => edit.content ?? "").join("\u0001"),
+		[edits]
+	);
 	const { hunks, stats, allLines, totalHidden } = useMemo(() => {
 		const parsedEdits: { old_string: string; new_string: string }[] = [];
 
@@ -530,13 +535,13 @@ export function GroupedEditDiff({
 		}
 
 		return summarizeDiff(result.originalText, result.finalText, 2);
-	}, [edits]);
+		// biome-ignore lint/correctness/useExhaustiveDependencies: editsSignature already covers edit content; including `edits` retriggers on identity churn.
+	}, [editsSignature]);
 
 	if (hunks.length === 0) return null;
 
 	return (
 		<EditDiffCard
-			key={`${filePath}:${edits.length}:${edits.map(contentOf).join("\u0000")}`}
 			fileName={fileName}
 			filePath={filePath}
 			hunks={hunks}

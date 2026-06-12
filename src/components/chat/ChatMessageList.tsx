@@ -2,9 +2,11 @@ import * as stylex from "@stylexjs/stylex";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import React, {
 	useCallback,
+	useEffect,
 	useImperativeHandle,
 	useLayoutEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import type { CheckpointInfo } from "../../features/chat/agent-chat-shared.ts";
@@ -50,6 +52,10 @@ type ChatRenderRow =
 const CHAT_LIST_TOP_PADDING_PX = 16;
 const CHAT_LIST_BOTTOM_PADDING_PX = 64;
 const CHAT_LIST_INLINE_GUTTER = "clamp(0.75rem, 3vw, 1.25rem)";
+
+function measureVirtualRow(element: HTMLElement) {
+	return Math.ceil(element.getBoundingClientRect().height);
+}
 
 function getRowKey(row: ChatRenderRow | undefined, index: number) {
 	if (!row) return `row-${index}`;
@@ -197,6 +203,13 @@ const Bubble = React.memo(function Bubble({
 	slashCommandNames: readonly string[];
 }) {
 	const [copied, setCopied] = useState(false);
+	const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(
+		() => () => {
+			if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+		},
+		[]
+	);
 	const editPayload = useMemo(
 		() =>
 			msg.role === "tool" && msg.toolName === "Edit" && msg.content
@@ -230,7 +243,11 @@ const Bubble = React.memo(function Bubble({
 			.writeText(msg.content)
 			.then(() => {
 				setCopied(true);
-				setTimeout(() => setCopied(false), 1500);
+				if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+				copiedTimerRef.current = setTimeout(() => {
+					copiedTimerRef.current = null;
+					setCopied(false);
+				}, 1500);
 			})
 			.catch(() => setCopied(false));
 	}, [msg.content]);
@@ -427,10 +444,12 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		getScrollElement: () => scrollElementRef.current,
 		getItemKey: getVirtualRowKey,
 		estimateSize: () => 148,
+		measureElement: measureVirtualRow,
 		overscan: 8,
 		gap: 8,
 		paddingEnd: CHAT_LIST_BOTTOM_PADDING_PX,
 		paddingStart: CHAT_LIST_TOP_PADDING_PX,
+		useAnimationFrameWithResizeObserver: true,
 	});
 	const virtualRows = rowVirtualizer.getVirtualItems();
 	const renderedVirtualRows =
@@ -479,11 +498,22 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 
 	useLayoutEffect(() => {
 		if (renderRows.length === 0) return;
+		const scrollElement = scrollElementRef.current;
+		if (scrollElement) {
+			const distanceFromBottom =
+				scrollElement.scrollHeight -
+				scrollElement.scrollTop -
+				scrollElement.clientHeight;
+			// Only auto-stick to the bottom when the user is already there.
+			// Yanking the viewport mid-read is both jarring and an extra
+			// layout/paint we can't afford on every new message.
+			if (distanceFromBottom > 120) return;
+		}
 		const raf = requestAnimationFrame(() => {
 			rowVirtualizer.scrollToIndex(renderRows.length - 1, { align: "end" });
 		});
 		return () => cancelAnimationFrame(raf);
-	}, [renderRows.length, rowVirtualizer]);
+	}, [renderRows.length, rowVirtualizer, scrollElementRef]);
 
 	return (
 		<div
@@ -501,7 +531,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 							data-index={index}
 							ref={rowVirtualizer.measureElement}
 							{...stylex.props(styles.messageRow)}
-							style={{ transform: `translateY(${virtualRow.start}px)` }}
+							style={{ transform: `translate3d(0, ${virtualRow.start}px, 0)` }}
 						>
 							<ThinkingIndicator startTime={item.startTime} />
 						</div>
@@ -514,7 +544,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 							data-index={index}
 							ref={rowVirtualizer.measureElement}
 							{...stylex.props(styles.messageRow)}
-							style={{ transform: `translateY(${virtualRow.start}px)` }}
+							style={{ transform: `translate3d(0, ${virtualRow.start}px, 0)` }}
 						>
 							<GroupedEditDiff filePath={item.filePath} edits={item.edits} />
 						</div>
@@ -531,7 +561,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 						data-index={index}
 						ref={rowVirtualizer.measureElement}
 						{...stylex.props(styles.messageRow)}
-						style={{ transform: `translateY(${virtualRow.start}px)` }}
+						style={{ transform: `translate3d(0, ${virtualRow.start}px, 0)` }}
 					>
 						<Bubble
 							msg={msg}
@@ -733,6 +763,8 @@ const styles = stylex.create({
 	systemText: {
 		color: color.textMuted,
 		fontSize: font.size_2,
+		lineHeight: 1.5,
+		margin: 0,
 		textAlign: "center",
 	},
 	btwCard: {
@@ -808,6 +840,7 @@ const styles = stylex.create({
 		fontFamily: font.familyMono,
 		fontSize: font.size_1,
 		lineHeight: 1.6,
+		marginBottom: 0,
 		marginTop: "0.125rem",
 		paddingBlock: controlSize._1,
 		paddingInline: controlSize._2,
@@ -867,5 +900,6 @@ const styles = stylex.create({
 		position: "absolute",
 		right: CHAT_LIST_INLINE_GUTTER,
 		top: 0,
+		willChange: "transform",
 	},
 });

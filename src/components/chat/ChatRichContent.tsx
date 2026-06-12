@@ -1,5 +1,11 @@
 import * as stylex from "@stylexjs/stylex";
-import React, { useCallback, useMemo, useState } from "react";
+import React, {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { noop } from "../../lib/data.ts";
 import {
 	color,
@@ -33,13 +39,24 @@ function findParentScrollContainer(
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
 	const [copied, setCopied] = useState(false);
+	const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(
+		() => () => {
+			if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+		},
+		[]
+	);
 
 	const handleCopy = useCallback(() => {
 		navigator.clipboard
 			.writeText(text)
 			.then(() => {
 				setCopied(true);
-				setTimeout(() => setCopied(false), 1500);
+				if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+				copiedTimerRef.current = setTimeout(() => {
+					copiedTimerRef.current = null;
+					setCopied(false);
+				}, 1500);
 			})
 			.catch(noop);
 	}, [text]);
@@ -178,9 +195,13 @@ export const Markdown = React.memo(function Markdown({
 	onMdFileClick?: (path: string) => void;
 	streaming?: boolean;
 }) {
-	const { parsedText, tailText } = streaming
-		? splitStreamingMarkdown(text)
-		: { parsedText: text, tailText: "" };
+	const { parsedText, tailText } = useMemo(
+		() =>
+			streaming
+				? splitStreamingMarkdown(text)
+				: { parsedText: text, tailText: "" },
+		[streaming, text]
+	);
 	const blocks = useMemo(() => parseMarkdownBlocks(parsedText), [parsedText]);
 	const handleTableWheel = useCallback(
 		(event: React.WheelEvent<HTMLDivElement>) => {
@@ -344,6 +365,7 @@ const styles = stylex.create({
 		display: "flex",
 		flexDirection: "column",
 		gap: controlSize._1,
+		lineHeight: 1.6,
 		minWidth: 0,
 		width: "100%",
 		wordBreak: "normal",
@@ -362,6 +384,7 @@ const styles = stylex.create({
 		fontFamily: font.familyMono,
 		fontSize: font.size_2,
 		lineHeight: 1.625,
+		margin: 0,
 		overflowX: "auto",
 		paddingBlock: controlSize._1_5,
 		paddingInline: controlSize._2,
@@ -382,11 +405,14 @@ const styles = stylex.create({
 		color: color.textMain,
 		fontSize: font.size_4,
 		fontWeight: font.weight_5,
+		lineHeight: 1.45,
+		margin: 0,
 	},
 	listItem: {
 		display: "flex",
 		fontSize: font.size_3,
 		gap: controlSize._1,
+		lineHeight: 1.6,
 		paddingLeft: controlSize._0_5,
 	},
 	listBullet: {
@@ -432,6 +458,7 @@ const styles = stylex.create({
 		whiteSpace: "pre-wrap",
 	},
 	paragraph: {
+		lineHeight: 1.6,
 		margin: 0,
 		overflowWrap: "break-word",
 		wordBreak: "normal",
