@@ -259,7 +259,9 @@ export function useChatConnection({
 			});
 			currentAssistantRef.current = null;
 			currentToolRef.current = null;
-			hasStreamedRef.current = false;
+			// hasStreamedRef stays true for the rest of the turn so that any
+			// trailing `assistant` finalize event (codex emits the full message
+			// after streaming) is ignored instead of appended as a duplicate.
 		} else if (event.type === "result" && event.result) {
 			flushPendingContent();
 			const result = event.result;
