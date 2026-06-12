@@ -88,6 +88,7 @@ export function useChatConnection({
 	) => void;
 }) {
 	const currentAssistantRef = useRef<string | null>(null);
+	const lastAssistantRef = useRef<string | null>(null);
 	const currentBtwRef = useRef<string | null>(null);
 	const currentToolRef = useRef<string | null>(null);
 	const hasStreamedRef = useRef(false);
@@ -147,6 +148,7 @@ export function useChatConnection({
 	const resetStreamState = useCallback(() => {
 		flushPendingContent();
 		currentAssistantRef.current = null;
+		lastAssistantRef.current = null;
 		currentToolRef.current = null;
 		hasStreamedRef.current = false;
 	}, [flushPendingContent]);
@@ -162,6 +164,7 @@ export function useChatConnection({
 	function appendAssistant(content: string, isStreaming: boolean) {
 		const id = nextId();
 		currentAssistantRef.current = id;
+		lastAssistantRef.current = id;
 		setRunStatus(markRespondingState);
 		messageReadModel.set(
 			appendTrimmedMessage.bind(null, {
@@ -196,6 +199,7 @@ export function useChatConnection({
 					setRunStatus(markRespondingState);
 					if (currentAssistantRef.current) {
 						const targetId = currentAssistantRef.current;
+						lastAssistantRef.current = targetId;
 						messageReadModel.set((prev) =>
 							patchMessageById(
 								prev,
@@ -260,11 +264,13 @@ export function useChatConnection({
 			flushPendingContent();
 			const result = event.result;
 			setRunStatus(markRespondingState);
-			const assistantId = currentAssistantRef.current;
+			const assistantId =
+				currentAssistantRef.current ?? lastAssistantRef.current;
 			messageReadModel.set((prev) =>
 				applyAssistantResultMessage(prev, assistantId, result)
 			);
 			currentAssistantRef.current = null;
+			lastAssistantRef.current = null;
 		}
 	}
 	const handleChatEventRef = useRef(handleChatEvent);
@@ -353,6 +359,7 @@ export function useChatConnection({
 					}));
 					if (syncResult.streamingAssistantId) {
 						currentAssistantRef.current = syncResult.streamingAssistantId;
+						lastAssistantRef.current = syncResult.streamingAssistantId;
 					}
 					if (syncResult.streamingToolId) {
 						currentToolRef.current = syncResult.streamingToolId;

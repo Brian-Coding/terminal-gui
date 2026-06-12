@@ -208,6 +208,7 @@ function deriveGoalView(session: {
 class ChatMessageBuffer {
 	private messages: ChatTranscriptMessage[] = [];
 	private currentAssistantIdx = -1;
+	private lastAssistantIdx = -1;
 	private currentToolIdx = -1;
 	private hasStreamed = false;
 	private revision = 0;
@@ -232,6 +233,7 @@ class ChatMessageBuffer {
 
 	private appendAssistant(content: string, isStreaming: boolean) {
 		this.currentAssistantIdx = this.messages.length;
+		this.lastAssistantIdx = this.currentAssistantIdx;
 		this.push("assistant", content, { isStreaming });
 	}
 
@@ -266,6 +268,7 @@ class ChatMessageBuffer {
 						})
 					)
 						this.appendAssistant(block.text, !msg.stop_reason);
+					else this.lastAssistantIdx = this.currentAssistantIdx;
 				} else if (block.type === "tool_use") {
 					this.appendTool(
 						block.name,
@@ -306,13 +309,19 @@ class ChatMessageBuffer {
 			this.currentAssistantIdx = -1;
 			this.currentToolIdx = -1;
 		} else if (event.type === "result" && event.result) {
-			if (
-				this.patchCurrent("currentAssistantIdx", {
+			const assistantIdx =
+				this.currentAssistantIdx >= 0
+					? this.currentAssistantIdx
+					: this.lastAssistantIdx;
+			if (assistantIdx >= 0 && assistantIdx < this.messages.length) {
+				this.messages[assistantIdx] = {
+					...this.messages[assistantIdx]!,
 					content: event.result,
 					isStreaming: false,
-				})
-			) {
+				};
+				this.revision++;
 				this.currentAssistantIdx = -1;
+				this.lastAssistantIdx = -1;
 			} else {
 				this.push("assistant", event.result);
 			}
@@ -326,6 +335,7 @@ class ChatMessageBuffer {
 			message.isStreaming = false;
 		}
 		this.currentAssistantIdx = -1;
+		this.lastAssistantIdx = -1;
 		this.currentToolIdx = -1;
 		this.hasStreamed = false;
 		if (changed) this.revision++;
@@ -360,6 +370,7 @@ class ChatMessageBuffer {
 			isStreaming: false,
 		}));
 		this.currentAssistantIdx = -1;
+		this.lastAssistantIdx = -1;
 		this.currentToolIdx = -1;
 		this.hasStreamed = false;
 		this.revision++;
@@ -374,6 +385,8 @@ class ChatMessageBuffer {
 		this.revision++;
 		this.currentAssistantIdx =
 			this.currentAssistantIdx >= drop ? this.currentAssistantIdx - drop : -1;
+		this.lastAssistantIdx =
+			this.lastAssistantIdx >= drop ? this.lastAssistantIdx - drop : -1;
 		this.currentToolIdx =
 			this.currentToolIdx >= drop ? this.currentToolIdx - drop : -1;
 	}

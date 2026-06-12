@@ -55,9 +55,9 @@ function getRowKey(row: ChatRenderRow | undefined, index: number) {
 	if (!row) return `row-${index}`;
 	if (row.type === "thinking") return row.key;
 	if (row.type === "edit-group") {
-		return `edit-group:${index}:${row.filePath}:${row.edits.map((edit) => edit.id).join(":")}`;
+		return `edit-group:${row.filePath}:${row.edits.map((edit) => edit.id).join(":")}`;
 	}
-	return `${row.message.id}:${index}`;
+	return row.message.id;
 }
 
 function ToolOutputHighlight({ content }: { content: string }) {
