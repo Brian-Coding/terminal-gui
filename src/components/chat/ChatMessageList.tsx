@@ -430,6 +430,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 	onMdFileClick?: (path: string) => void;
 	slashCommandNames: readonly string[];
 }) {
+	const didInitialScrollRef = useRef(false);
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
 	const renderRows = useMemo<ChatRenderRow[]>(() => {
 		if (!isLoading || !startTime) return renderItems;
@@ -498,6 +499,21 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 
 	useLayoutEffect(() => {
 		if (renderRows.length === 0) return;
+		if (!didInitialScrollRef.current) {
+			didInitialScrollRef.current = true;
+			let raf2 = 0;
+			const raf1 = requestAnimationFrame(() => {
+				rowVirtualizer.measure();
+				rowVirtualizer.scrollToIndex(renderRows.length - 1, { align: "end" });
+				raf2 = requestAnimationFrame(() => {
+					rowVirtualizer.scrollToIndex(renderRows.length - 1, { align: "end" });
+				});
+			});
+			return () => {
+				cancelAnimationFrame(raf1);
+				if (raf2) cancelAnimationFrame(raf2);
+			};
+		}
 		const scrollElement = scrollElementRef.current;
 		if (scrollElement) {
 			const distanceFromBottom =
@@ -514,6 +530,11 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		});
 		return () => cancelAnimationFrame(raf);
 	}, [renderRows.length, rowVirtualizer, scrollElementRef]);
+
+	useLayoutEffect(() => {
+		if (renderRows.length > 0) return;
+		didInitialScrollRef.current = false;
+	}, [renderRows.length]);
 
 	return (
 		<div
