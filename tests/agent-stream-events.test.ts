@@ -4,6 +4,7 @@ import {
 	getToolBlockInitialContent,
 	stringifyToolInput,
 } from "../src/features/chat/agent-chat-shared.ts";
+import { resolveCompletedCodexAssistantMessage } from "../src/server/agents/codex-adapter.ts";
 
 describe("agent stream event normalization", () => {
 	/*
@@ -61,5 +62,17 @@ describe("agent stream event normalization", () => {
 			'{"command":"bun test"}'
 		);
 		expect(stringifyToolInput(null)).toBe("");
+	});
+
+	test("does not replay completed Codex agent messages already streamed", () => {
+		expect(resolveCompletedCodexAssistantMessage("done", "done")).toEqual({
+			mode: "skip",
+		});
+		expect(
+			resolveCompletedCodexAssistantMessage("partial", "partial answer")
+		).toEqual({ mode: "delta", text: " answer" });
+		expect(resolveCompletedCodexAssistantMessage("draft", "final")).toEqual({
+			mode: "replace",
+		});
 	});
 });
