@@ -916,10 +916,10 @@ const styles = stylex.create({
 	},
 	messageRow: {
 		boxSizing: "border-box",
-		left: CHAT_LIST_INLINE_GUTTER,
+		left: 0,
 		minWidth: 0,
 		position: "absolute",
-		right: CHAT_LIST_INLINE_GUTTER,
+		right: 0,
 		top: 0,
 		willChange: "transform",
 	},

@@ -95,7 +95,8 @@ function splitStreamingMarkdown(text: string): {
 	if (text.length < STREAMING_MARKDOWN_PARSE_THRESHOLD) {
 		return { parsedText: text, tailText: "" };
 	}
-	let splitAt = text.lastIndexOf("\n\n");
+	const searchEnd = Math.max(0, text.length - 240);
+	let splitAt = text.lastIndexOf("\n\n", searchEnd);
 	while (splitAt > 0) {
 		const parsedText = text.slice(0, splitAt).trimEnd();
 		if (parsedText && hasBalancedCodeFences(parsedText)) {
