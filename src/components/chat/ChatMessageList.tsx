@@ -416,6 +416,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 	handleSendMessage,
 	onMdFileClick,
 	slashCommandNames,
+	stickToBottom,
 }: {
 	messages: ChatMessage[];
 	scrollElementRef: React.RefObject<HTMLDivElement | null>;
@@ -429,6 +430,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 	handleSendMessage?: (text: string) => void;
 	onMdFileClick?: (path: string) => void;
 	slashCommandNames: readonly string[];
+	stickToBottom: boolean;
 }) {
 	const didInitialScrollRef = useRef(false);
 	const renderItems = useMemo(() => buildRenderItems(messages), [messages]);
@@ -436,6 +438,11 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		if (!isLoading || !startTime) return renderItems;
 		return [...renderItems, { type: "thinking", key: "thinking", startTime }];
 	}, [isLoading, renderItems, startTime]);
+	const lastRow = renderRows.at(-1);
+	const lastRowChangeKey =
+		lastRow?.type === "message"
+			? `${lastRow.message.id}:${lastRow.message.content.length}:${lastRow.message.isStreaming ? 1 : 0}`
+			: `${lastRow?.type ?? "none"}:${renderRows.length}`;
 	const getVirtualRowKey = useCallback(
 		(index: number) => getRowKey(renderRows[index], index),
 		[renderRows]
@@ -530,6 +537,14 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		});
 		return () => cancelAnimationFrame(raf);
 	}, [renderRows.length, rowVirtualizer, scrollElementRef]);
+
+	useLayoutEffect(() => {
+		if (!stickToBottom || renderRows.length === 0) return;
+		const raf = requestAnimationFrame(() => {
+			rowVirtualizer.scrollToIndex(renderRows.length - 1, { align: "end" });
+		});
+		return () => cancelAnimationFrame(raf);
+	}, [lastRowChangeKey, renderRows.length, rowVirtualizer, stickToBottom]);
 
 	useLayoutEffect(() => {
 		if (renderRows.length > 0) return;

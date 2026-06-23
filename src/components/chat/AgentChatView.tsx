@@ -809,6 +809,7 @@ export const AgentChatView = memo(function AgentChatView({
 							handleSendMessage={handleSendMessage}
 							onMdFileClick={handleMdFileClickFromMessage}
 							slashCommandNames={slashCommandNames}
+							stickToBottom={isAtBottom}
 						/>
 					</div>
 					{!isAtBottom && (
@@ -922,6 +923,7 @@ const styles = stylex.create({
 		height: "100%",
 		overflowX: "hidden",
 		overflowY: "auto",
+		overflowAnchor: "none",
 		overscrollBehavior: "contain",
 		scrollbarWidth: "none",
 		"::-webkit-scrollbar": {
