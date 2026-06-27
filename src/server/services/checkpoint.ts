@@ -1,6 +1,5 @@
 import { mkdir, readdir, unlink } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
-import { hasId } from "../../lib/data.ts";
 import { atomicWriteJson, readJson } from "../../lib/route-helpers.ts";
 import { isWithinDirectory, resolveAllowedLocalPath } from "../security.ts";
 
@@ -239,7 +238,7 @@ async function captureGitSnapshot(
 
 	for (const { status, path } of parsePorcelain(output)) {
 		if (isBinary(path)) continue;
-		if (status.includes("D")) {
+		if (status[0] === "D" || status[1] === "D") {
 			const content = await gitShowFile(gitRoot, "HEAD", path);
 			snapshot[path] =
 				content !== null ? await storeBlob(gitRoot, content) : null;
@@ -264,14 +263,11 @@ async function captureFileSnapshot(
 }
 
 const checkpoints = new Map<string, Checkpoint[]>();
+const checkpointsById = new Map<string, Checkpoint>();
 const pending = new Map<string, string>();
 
 function findCheckpoint(checkpointId: string): Checkpoint | null {
-	for (const list of checkpoints.values()) {
-		const cp = list.find(hasId.bind(null, checkpointId));
-		if (cp) return cp;
-	}
-	return null;
+	return checkpointsById.get(checkpointId) ?? null;
 }
 
 function resolveContent(
@@ -326,7 +322,11 @@ export const CheckpointService = {
 		const list = checkpoints.get(paneId);
 		if (!list) return id;
 		list.push(checkpoint);
-		while (list.length > MAX_CHECKPOINTS_PER_PANE) list.shift();
+		checkpointsById.set(checkpoint.id, checkpoint);
+		while (list.length > MAX_CHECKPOINTS_PER_PANE) {
+			const removed = list.shift();
+			if (removed) checkpointsById.delete(removed.id);
+		}
 
 		pending.set(paneId, id);
 		return id;
@@ -463,7 +463,8 @@ export const CheckpointService = {
 			}
 			if (!oldestPane) break;
 			const list = checkpoints.get(oldestPane)!;
-			list.shift();
+			const removed = list.shift();
+			if (removed) checkpointsById.delete(removed.id);
 			if (list.length === 0) checkpoints.delete(oldestPane);
 			total--;
 		}
@@ -504,7 +505,12 @@ export const CheckpointService = {
 					if (!cp.beforeSnapshot) cp.beforeSnapshot = {};
 					valid.push(cp as Checkpoint);
 				}
-				if (valid.length > 0) checkpoints.set(paneId, valid);
+				if (valid.length > 0) {
+					checkpoints.set(paneId, valid);
+					for (const checkpoint of valid) {
+						checkpointsById.set(checkpoint.id, checkpoint);
+					}
+				}
 			}
 		} catch (e) {
 			console.error("[Checkpoint] Failed to load:", e);

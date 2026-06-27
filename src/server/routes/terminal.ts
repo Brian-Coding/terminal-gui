@@ -113,13 +113,13 @@ export async function readTerminalState<T>(fallback: T): Promise<T> {
 	return await readJson<T>(TERMINAL_STATE_PATH, fallback);
 }
 
-export async function writeTerminalState(data: unknown): Promise<void> {
+async function writeTerminalState(data: unknown): Promise<void> {
 	const current = await readJson<unknown | null>(TERMINAL_STATE_PATH, null);
 	if (isTerminalStateRegression(current, data)) return;
 	return writeJson(TERMINAL_STATE_PATH, data);
 }
 
-export async function applyTerminalWorkspaceAction(
+async function applyTerminalWorkspaceAction(
 	action: TerminalWorkspaceAction
 ): Promise<TerminalSavedState | null> {
 	const current = normalizeTerminalState(
@@ -344,10 +344,11 @@ export const TerminalService = {
 
 	destroyAll() {
 		for (const [paneId, session] of sessions) {
+			const { pid } = session.proc;
 			try {
-				if (session.proc.pid) {
-					killProcessTree(session.proc.pid);
-					PidTracker.untrackPid(session.proc.pid);
+				if (pid) {
+					killProcessTree(pid);
+					PidTracker.untrackPid(pid);
 				}
 			} catch {}
 			try {
@@ -381,11 +382,12 @@ async function getConfiguredSearchPaths(): Promise<string[]> {
 			resolve(home, "dev"),
 		];
 	}
-	return folders
-		.map((f: string) =>
-			f.startsWith("~/") ? resolve(home, f.slice(2)) : resolve(f)
-		)
-		.filter(isAllowedLocalPath);
+	return folders.flatMap((f: string) => {
+		const folderPath = f.startsWith("~/")
+			? resolve(home, f.slice(2))
+			: resolve(f);
+		return isAllowedLocalPath(folderPath) ? [folderPath] : [];
+	});
 }
 
 async function listDirectories(
@@ -692,13 +694,13 @@ async function getClaudeProcesses(): Promise<ClaudeProcess[]> {
 		}
 
 		const claudePids = new Set(processes.map((p) => p.pid));
-		return processes
-			.filter((process) => !claudePids.has(process.ppid))
-			.map((parent) => {
-				const children = processes.filter(
-					(process) => process.ppid === parent.pid
-				);
-				return {
+		return processes.flatMap((parent) => {
+			if (claudePids.has(parent.ppid)) return [];
+			const children = processes.filter(
+				(process) => process.ppid === parent.pid
+			);
+			return [
+				{
 					...parent,
 					cpu:
 						Math.round(
@@ -709,8 +711,9 @@ async function getClaudeProcesses(): Promise<ClaudeProcess[]> {
 						Math.round(
 							children.reduce((sum, c) => sum + c.mem, parent.mem) * 10
 						) / 10,
-				};
-			});
+				},
+			];
+		});
 	} catch {
 		return [];
 	}

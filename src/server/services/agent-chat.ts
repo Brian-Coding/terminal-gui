@@ -543,9 +543,9 @@ async function readAuthoritativeTranscript(
 }
 
 async function listEventLogPaneIds(): Promise<string[]> {
-	return (await readdir(userDataPath(CHAT_EVENTS_DIR)).catch(() => []))
-		.filter((file) => file.endsWith(".jsonl"))
-		.map((file) => file.slice(0, -".jsonl".length));
+	return (await readdir(userDataPath(CHAT_EVENTS_DIR)).catch(() => [])).flatMap(
+		(file) => (file.endsWith(".jsonl") ? [file.slice(0, -".jsonl".length)] : [])
+	);
 }
 
 // Transcript snapshots are a fast cache; event replay is the restore authority.
@@ -1173,53 +1173,53 @@ async function runAgentTurnWithGoalLoop(
 ): Promise<void> {
 	const isGoalRun = session.goal?.status === "active";
 	let result = await runAgent(session, paneId, prompt, false);
-	if (!isGoalRun || session.goal?.status !== "active") return;
-
-	session.goal.turns += 1;
-	let resultStatus = goalResultStatus(getLastAssistantMessage(result));
-	while (
-		!session.cancelled &&
-		session.goal?.status === "active" &&
-		resultStatus === "active" &&
-		session.goal.turns < GOAL_MAX_TURNS
-	) {
-		const nextPrompt = createGoalContinuationPrompt(session.goal);
-		result = await runAgent(session, paneId, nextPrompt, false);
+	if (isGoalRun && session.goal?.status === "active") {
 		session.goal.turns += 1;
-		resultStatus = goalResultStatus(getLastAssistantMessage(result));
-	}
+		let resultStatus = goalResultStatus(getLastAssistantMessage(result));
+		while (
+			!session.cancelled &&
+			session.goal?.status === "active" &&
+			resultStatus === "active" &&
+			session.goal.turns < GOAL_MAX_TURNS
+		) {
+			const nextPrompt = createGoalContinuationPrompt(session.goal);
+			result = await runAgent(session, paneId, nextPrompt, false);
+			session.goal.turns += 1;
+			resultStatus = goalResultStatus(getLastAssistantMessage(result));
+		}
 
-	if (session.goal && resultStatus === "complete") {
-		session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
-		const message: GoalSystemMessage = {
-			type: "inferay.goal",
-			status: "complete",
-			objective: session.goal.objective,
-			turns: session.goal.turns,
-			detail: "Goal achieved",
-		};
-		session.goal = null;
-		emitGoalSystemMessage(session, paneId, message);
-	} else if (session.goal && resultStatus === "paused") {
-		session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
-		session.goal.status = "paused";
-		emitGoalSystemMessage(session, paneId, {
-			type: "inferay.goal",
-			status: "paused",
-			objective: session.goal.objective,
-			turns: session.goal.turns,
-			detail:
-				"Codex needs input. Reply with the missing detail or use /goal resume.",
-		});
-	} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
-		session.goal.status = "paused";
-		emitGoalSystemMessage(session, paneId, {
-			type: "inferay.goal",
-			status: "paused",
-			objective: session.goal.objective,
-			turns: session.goal.turns,
-			detail: `Paused after ${GOAL_MAX_TURNS} turns`,
-		});
+		if (session.goal && resultStatus === "complete") {
+			session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
+			const message: GoalSystemMessage = {
+				type: "inferay.goal",
+				status: "complete",
+				objective: session.goal.objective,
+				turns: session.goal.turns,
+				detail: "Goal achieved",
+			};
+			session.goal = null;
+			emitGoalSystemMessage(session, paneId, message);
+		} else if (session.goal && resultStatus === "paused") {
+			session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
+			session.goal.status = "paused";
+			emitGoalSystemMessage(session, paneId, {
+				type: "inferay.goal",
+				status: "paused",
+				objective: session.goal.objective,
+				turns: session.goal.turns,
+				detail:
+					"Codex needs input. Reply with the missing detail or use /goal resume.",
+			});
+		} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
+			session.goal.status = "paused";
+			emitGoalSystemMessage(session, paneId, {
+				type: "inferay.goal",
+				status: "paused",
+				objective: session.goal.objective,
+				turns: session.goal.turns,
+				detail: `Paused after ${GOAL_MAX_TURNS} turns`,
+			});
+		}
 	}
 }
 
@@ -1755,18 +1755,22 @@ export const ChatService = {
 	},
 
 	listSessions(): AgentSessionInfo[] {
-		return Array.from(chatRuntime.values())
-			.filter((s) => s.currentHandle || s.clients.size > 0)
-			.map((s) => ({
-				paneId: s.paneId,
-				agentKind: s.agentKind,
-				cwd: s.cwd,
-				referencePaths: s.referencePaths,
-				sessionId: s.sessionId,
-				isRunning: !!s.currentHandle,
-				clientCount: s.clients.size,
-				messageCount: s.messageBuffer.getMessages().length,
-			}));
+		return Array.from(chatRuntime.values()).flatMap((s) =>
+			s.currentHandle || s.clients.size > 0
+				? [
+						{
+							paneId: s.paneId,
+							agentKind: s.agentKind,
+							cwd: s.cwd,
+							referencePaths: s.referencePaths,
+							sessionId: s.sessionId,
+							isRunning: !!s.currentHandle,
+							clientCount: s.clients.size,
+							messageCount: s.messageBuffer.getMessages().length,
+						},
+					]
+				: []
+		);
 	},
 
 	async readEvents(
@@ -1808,11 +1812,11 @@ export const ChatService = {
 
 	listGoals() {
 		const now = Date.now();
-		return Array.from(chatRuntime.values())
-			.filter((session) => !!session.goal)
-			.map((session) => {
-				const view = deriveGoalView(session);
-				return {
+		return Array.from(chatRuntime.values()).flatMap((session) => {
+			if (!session.goal) return [];
+			const view = deriveGoalView(session);
+			return [
+				{
 					paneId: session.paneId,
 					agentKind: session.agentKind,
 					cwd: session.cwd,
@@ -1825,8 +1829,9 @@ export const ChatService = {
 					startedAt: session.goal!.startedAt,
 					elapsedMs: now - session.goal!.startedAt,
 					...view,
-				};
-			});
+				},
+			];
+		});
 	},
 
 	destroyAll() {

@@ -94,7 +94,9 @@ async function loadLocalPrompts(): Promise<Prompt[]> {
 export function mergePrompts(bundled: Prompt[], local: Prompt[]): Prompt[] {
 	const localById = new Map(local.map((prompt) => [prompt._id, prompt]));
 	const localBuiltInByCommand = new Map(
-		local.filter(isBuiltIn).map((prompt) => [prompt.command, prompt])
+		local.flatMap((prompt) =>
+			isBuiltIn(prompt) ? [[prompt.command, prompt] as const] : []
+		)
 	);
 	const bundledBuiltIns = bundled.filter(isBuiltIn);
 	const builtInIds = new Set(bundledBuiltIns.map((prompt) => prompt._id));
@@ -623,9 +625,9 @@ async function listLocalSessions(): Promise<LocalSessionInfo[]> {
 		ChatService.listPersistedEventPaneIds(),
 	]);
 	const paneIds = new Set([
-		...transcriptFiles
-			.filter((file) => file.endsWith(".json"))
-			.map((file) => file.slice(0, -".json".length)),
+		...transcriptFiles.flatMap((file) =>
+			file.endsWith(".json") ? [file.slice(0, -".json".length)] : []
+		),
 		...eventPaneIds,
 	]);
 	const sessions: LocalSessionInfo[] = [];
@@ -1149,14 +1151,18 @@ async function listGithubAccounts(): Promise<ForgeAccount[]> {
 		const parsed = JSON.parse(stdout) as GhAuthStatus;
 		const entries = Object.entries(parsed.hosts ?? {}).flatMap(
 			([host, accounts]) =>
-				accounts
-					.filter((account) => account.state === "success")
-					.map((account) => ({
-						host,
-						login: account.login?.trim() ?? "",
-						active: Boolean(account.active),
-					}))
-					.filter((account) => account.login)
+				accounts.flatMap((account) => {
+					if (account.state !== "success") return [];
+					const login = account.login?.trim() ?? "";
+					if (!login) return [];
+					return [
+						{
+							host,
+							login,
+							active: Boolean(account.active),
+						},
+					];
+				})
 		);
 
 		const accounts = await Promise.all(
@@ -1833,11 +1839,12 @@ function fileRoutes() {
 					if (!IMAGE_EXTENSIONS.has(ext)) continue;
 					const full = resolve(TMP_DIR, entry);
 					const info = await stat(full);
-					const dashIdx = entry.indexOf("-");
-					const ts =
-						dashIdx > 0 ? Number(entry.substring(0, dashIdx)) : info.mtimeMs;
+					const timestampedNameMatch = /^([^-]+)-(.+)$/.exec(entry);
+					const ts = timestampedNameMatch
+						? Number(timestampedNameMatch[1])
+						: info.mtimeMs;
 					images.push({
-						name: dashIdx > 0 ? entry.substring(dashIdx + 1) : entry,
+						name: timestampedNameMatch ? timestampedNameMatch[2]! : entry,
 						path: full,
 						timestamp: ts,
 						size: info.size,

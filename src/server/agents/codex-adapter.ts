@@ -100,8 +100,10 @@ function extractText(value: unknown): string {
 	const content = record.content;
 	if (Array.isArray(content)) {
 		return content
-			.map((item) => extractText(item))
-			.filter(Boolean)
+			.flatMap((item) => {
+				const text = extractText(item);
+				return text ? [text] : [];
+			})
 			.join("");
 	}
 	return "";

@@ -38,6 +38,31 @@ interface BuildTarget {
 }
 
 let baguetteProcess: Subprocess | null = null;
+
+const simulatorAppValueRegexByKey = new Map<string, RegExp>();
+const literalRegexByValue = new Map<string, RegExp>();
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function literalRegex(value: string): RegExp {
+	let regex = literalRegexByValue.get(value);
+	if (!regex) {
+		regex = new RegExp(escapeRegExp(value));
+		literalRegexByValue.set(value, regex);
+	}
+	return regex;
+}
+
+function simulatorAppValue(block: string, key: string): string | null {
+	let regex = simulatorAppValueRegexByKey.get(key);
+	if (!regex) {
+		regex = new RegExp(`${key} = (?:"([^"]+)"|([^;\\n]+));`);
+		simulatorAppValueRegexByKey.set(key, regex);
+	}
+	return regex.exec(block)?.slice(1).find(Boolean)?.trim() ?? null;
+}
 const configManager = new ConfigManager();
 const execAsync = promisify(exec);
 
@@ -302,18 +327,12 @@ async function getInstalledApps(
 		const apps: InstalledSimulatorApp[] = [];
 		for (const match of text.matchAll(/"([^"]+)" =\s+\{([\s\S]*?)\n {4}\};/g)) {
 			const block = match[2] ?? "";
-			const valueFor = (key: string) =>
-				block
-					.match(new RegExp(`${key} = (?:"([^"]+)"|([^;\\n]+));`))
-					?.slice(1)
-					.find(Boolean)
-					?.trim() ?? null;
 			if (match[1]) {
 				apps.push({
 					bundleId: match[1],
-					displayName: valueFor("CFBundleDisplayName"),
-					name: valueFor("CFBundleName"),
-					executable: valueFor("CFBundleExecutable"),
+					displayName: simulatorAppValue(block, "CFBundleDisplayName"),
+					name: simulatorAppValue(block, "CFBundleName"),
+					executable: simulatorAppValue(block, "CFBundleExecutable"),
 				});
 			}
 		}
@@ -406,8 +425,8 @@ async function startBaguetteServer(): Promise<BaguetteStatus> {
 	});
 
 	for (let attempt = 0; attempt < 15; attempt++) {
-		await Bun.sleep(250);
 		if (await isBaguetteServerRunning()) return getBaguetteStatus();
+		await Bun.sleep(250);
 	}
 
 	return {
@@ -507,6 +526,9 @@ async function listSimulatorProjects(): Promise<SimulatorProject[]> {
 	const installedApps = bootedDevice
 		? await getInstalledApps(bootedDevice.udid)
 		: [];
+	const installedAppsByBundleId = new Map(
+		installedApps.map((app) => [app.bundleId, app])
+	);
 	const installed = new Set(installedApps.map((app) => app.bundleId));
 	const runningSnapshot = bootedDevice
 		? await getRunningBundleSnapshot(bootedDevice.udid)
@@ -521,9 +543,8 @@ async function listSimulatorProjects(): Promise<SimulatorProject[]> {
 		const projectName = basename(target.path);
 		const projectBundleId = await getBundleIdFromProject(target);
 		const installedApp =
-			(projectBundleId
-				? installedApps.find((app) => app.bundleId === projectBundleId)
-				: null) ?? findInstalledAppForProject(installedApps, projectName);
+			(projectBundleId ? installedAppsByBundleId.get(projectBundleId) : null) ??
+			findInstalledAppForProject(installedApps, projectName);
 		const bundleId = installedApp?.bundleId ?? projectBundleId;
 		projects.push({
 			id: target.workspacePath ?? target.projectPath ?? target.path,
@@ -538,7 +559,7 @@ async function listSimulatorProjects(): Promise<SimulatorProject[]> {
 			bundleId,
 			bootedDeviceUdid: bootedDevice?.udid ?? null,
 			installed: bundleId ? installed.has(bundleId) : false,
-			running: bundleId ? runningSnapshot.includes(bundleId) : false,
+			running: bundleId ? literalRegex(bundleId).test(runningSnapshot) : false,
 		});
 	}
 

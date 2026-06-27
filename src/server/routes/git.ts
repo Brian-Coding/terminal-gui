@@ -109,10 +109,10 @@ async function getStatus(cwd: string): Promise<GitProjectStatus | null> {
 			if (dotDot !== -1) {
 				branch = branchLine.slice(0, dotDot);
 				const rest = branchLine.slice(dotDot + 3);
-				const bracketStart = rest.indexOf("[");
-				if (bracketStart !== -1) {
-					upstream = rest.slice(0, bracketStart).trim();
-					const info = rest.slice(bracketStart + 1, rest.indexOf("]"));
+				const bracketMatch = /^(.*?)\[(.*?)]/.exec(rest);
+				if (bracketMatch) {
+					upstream = bracketMatch[1]?.trim() ?? "";
+					const info = bracketMatch[2] ?? "";
 					const aheadMatch = info.match(/ahead (\d+)/);
 					const behindMatch = info.match(/behind (\d+)/);
 					if (aheadMatch) ahead = Number(aheadMatch[1]);
@@ -378,10 +378,10 @@ async function getGraphLog(cwd: string, limit = 50): Promise<GitCommit[]> {
 			const hash = parts[0] || "";
 			const parents = (parts[1] || "").split(" ").filter(Boolean);
 			const refsRaw = parts[2] || "";
-			const refs = refsRaw
-				.split(",")
-				.map((r) => r.trim())
-				.filter(Boolean);
+			const refs = refsRaw.split(",").flatMap((ref) => {
+				const trimmed = ref.trim();
+				return trimmed ? [trimmed] : [];
+			});
 			const message = parts[3] || "";
 			const author = parts[4] || "";
 			const date = parts[5] || "";
@@ -840,6 +840,10 @@ const IMAGE_EXTENSIONS = new Set([
 	".bmp",
 ]);
 
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function isImageFile(filePath: string): boolean {
 	const ext = filePath.toLowerCase().slice(filePath.lastIndexOf("."));
 	return IMAGE_EXTENSIONS.has(ext);
@@ -920,17 +924,16 @@ function createUntrackedPatch(filePath: string, content: string): string {
 
 function extractPatchForPath(patch: string, filePath: string): string | null {
 	if (!patch.trim()) return null;
-	const blocks = patch
-		.split(/(?=^diff --git )/m)
-		.map((block) => block.trimEnd())
-		.filter(Boolean);
+	const blocks = patch.split(/(?=^diff --git )/m).flatMap((block) => {
+		const trimmed = block.trimEnd();
+		return trimmed ? [trimmed] : [];
+	});
+	const fileMarkerRegex = new RegExp(
+		`\\n(?:rename to |\\+\\+\\+ b/)${escapeRegExp(filePath)}\\n`
+	);
 	for (const block of blocks) {
 		const header = block.split("\n", 1)[0] ?? "";
-		if (
-			header.endsWith(` b/${filePath}`) ||
-			block.includes(`\nrename to ${filePath}\n`) ||
-			block.includes(`\n+++ b/${filePath}\n`)
-		) {
+		if (header.endsWith(` b/${filePath}`) || fileMarkerRegex.test(block)) {
 			return `${block}\n`;
 		}
 	}
@@ -986,7 +989,7 @@ export async function getHunkDiff(
 					};
 				}
 				currentContent = await f.text();
-				if (currentContent.includes("\0")) {
+				if (/\0/.test(currentContent)) {
 					return {
 						oldLines: [],
 						newLines: [],
