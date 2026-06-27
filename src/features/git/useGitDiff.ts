@@ -267,88 +267,125 @@ function diffCacheKey(req: DiffRequest): string {
 // Hook for loading and managing git diff state
 export function useGitDiff(autoRequest: DiffRequest | null = null) {
 	const [loading, setLoading] = useState(false);
-	const [diff, setDiff] = useState<HunkDiff | null>(null);
-	const [request, setRequest] = useState<DiffRequest | null>(null);
+	const [diffState, setDiffState] = useState<{
+		key: string;
+		diff: HunkDiff;
+	} | null>(null);
+	const [manualRequest, setManualRequest] = useState<DiffRequest | null>(null);
 	const activeId = useRef(0);
 	const activeAbort = useRef<AbortController | null>(null);
 
-	const loadDiff = useCallback((req: DiffRequest) => {
-		const id = ++requestCounter;
-		activeAbort.current?.abort();
-		const controller = new AbortController();
-		activeAbort.current = controller;
-		const timeout = setTimeout(controller.abort.bind(controller), 12000);
-		const cacheKey = diffCacheKey(req);
-		const cached = diffCache.get(cacheKey);
-		const canUseCached =
-			cached && Date.now() - cached.storedAt <= DIFF_CACHE_TTL_MS;
-		activeId.current = id;
-		setRequest((current) =>
-			areDiffRequestsEqual(current, req) ? current : req
-		);
-		setLoading(!canUseCached);
-		if (canUseCached) {
-			setDiff((current) =>
-				areHunkDiffsEqual(current, cached.diff) ? current : cached.diff
-			);
-		}
+	const startDiffLoad = useCallback(
+		(req: DiffRequest, trackManual: boolean) => {
+			const id = ++requestCounter;
+			activeAbort.current?.abort();
+			const controller = new AbortController();
+			activeAbort.current = controller;
+			const timeout = setTimeout(controller.abort.bind(controller), 12000);
+			const cacheKey = diffCacheKey(req);
+			const cached = diffCache.get(cacheKey);
+			const canUseCached =
+				cached && Date.now() - cached.storedAt <= DIFF_CACHE_TTL_MS;
+			activeId.current = id;
+			if (trackManual) {
+				setManualRequest((current) =>
+					areDiffRequestsEqual(current, req) ? current : req
+				);
+			}
+			setLoading(!canUseCached);
+			if (canUseCached) {
+				setDiffState((current) =>
+					current?.key === cacheKey &&
+					areHunkDiffsEqual(current.diff, cached.diff)
+						? current
+						: { key: cacheKey, diff: cached.diff }
+				);
+			}
 
-		fetch(
-			`/api/git/full-diff?cwd=${encodeURIComponent(req.cwd)}&file=${encodeURIComponent(req.file)}&staged=${req.staged}`,
-			{ signal: controller.signal }
-		)
-			.then((resp) => {
-				if (activeId.current !== id) return null;
-				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-				return resp.json();
-			})
-			.then((result) => {
-				if (activeId.current !== id || !result) return;
-				const nextDiff = isHunkDiff(result)
-					? result
-					: safeDiffMessage("Diff response could not be rendered safely");
-				diffCache.set(cacheKey, { diff: nextDiff, storedAt: Date.now() });
-				setDiff((current) =>
-					areHunkDiffsEqual(current, nextDiff) ? current : nextDiff
-				);
-				setLoading(false);
-			})
-			.catch(() => {
-				if (activeId.current !== id) return;
-				const nextDiff = safeDiffMessage(
-					"Diff timed out before it could render safely"
-				);
-				setDiff((current) =>
-					areHunkDiffsEqual(current, nextDiff) ? current : nextDiff
-				);
-				setLoading(false);
-			})
-			.finally(() => {
-				clearTimeout(timeout);
-				if (activeId.current === id && activeAbort.current === controller) {
-					activeAbort.current = null;
-				}
-			});
-	}, []);
+			fetch(
+				`/api/git/full-diff?cwd=${encodeURIComponent(req.cwd)}&file=${encodeURIComponent(req.file)}&staged=${req.staged}`,
+				{ signal: controller.signal }
+			)
+				.then((resp) => {
+					if (activeId.current !== id) return null;
+					if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+					return resp.json();
+				})
+				.then((result) => {
+					if (activeId.current !== id || !result) return;
+					const nextDiff = isHunkDiff(result)
+						? result
+						: safeDiffMessage("Diff response could not be rendered safely");
+					diffCache.set(cacheKey, { diff: nextDiff, storedAt: Date.now() });
+					setDiffState((current) =>
+						current?.key === cacheKey &&
+						areHunkDiffsEqual(current.diff, nextDiff)
+							? current
+							: { key: cacheKey, diff: nextDiff }
+					);
+					setLoading(false);
+				})
+				.catch(() => {
+					if (activeId.current !== id) return;
+					const nextDiff = safeDiffMessage(
+						"Diff timed out before it could render safely"
+					);
+					setDiffState((current) =>
+						current?.key === cacheKey &&
+						areHunkDiffsEqual(current.diff, nextDiff)
+							? current
+							: { key: cacheKey, diff: nextDiff }
+					);
+					setLoading(false);
+				})
+				.finally(() => {
+					clearTimeout(timeout);
+					if (activeId.current === id && activeAbort.current === controller) {
+						activeAbort.current = null;
+					}
+				});
+		},
+		[]
+	);
+
+	const loadDiff = useCallback(
+		(req: DiffRequest) => startDiffLoad(req, true),
+		[startDiffLoad]
+	);
 
 	// Clear current diff state
 	const clear = useCallback(() => {
 		activeId.current = ++requestCounter;
 		activeAbort.current?.abort();
 		activeAbort.current = null;
-		setDiff(null);
-		setRequest(null);
+		setDiffState(null);
+		setManualRequest(null);
 		setLoading(false);
 	}, []);
 
 	useEffect(() => {
 		if (!autoRequest) {
-			clear();
+			activeId.current = ++requestCounter;
+			activeAbort.current?.abort();
+			activeAbort.current = null;
 			return;
 		}
-		if (areDiffRequestsEqual(request, autoRequest)) return;
-		loadDiff(autoRequest);
-	}, [autoRequest, clear, loadDiff, request]);
+		const autoKey = diffCacheKey(autoRequest);
+		if (diffState?.key === autoKey) return;
+		startDiffLoad(autoRequest, false);
+	}, [autoRequest, diffState?.key, startDiffLoad]);
 
-	return { diff, request, loading, loadDiff, clear };
+	const visibleRequest = autoRequest ?? manualRequest;
+	const visibleKey = visibleRequest ? diffCacheKey(visibleRequest) : null;
+	const visibleDiff =
+		visibleKey && diffState?.key === visibleKey ? diffState.diff : null;
+	const visibleLoading = visibleRequest ? loading || !visibleDiff : loading;
+
+	return {
+		diff: visibleDiff,
+		request: visibleRequest,
+		loading: visibleLoading,
+		loadDiff,
+		clear,
+	};
 }

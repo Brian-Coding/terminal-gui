@@ -85,15 +85,14 @@ function buildGraphNodes(
 
 	const byDir = new Map<string, FileSearchEntry[]>();
 	for (const file of fileEntries) {
-		const dir = file.path.includes("/")
-			? file.path.split("/").slice(0, -1).join("/")
-			: ".";
+		const lastSlash = file.path.lastIndexOf("/");
+		const dir = lastSlash === -1 ? "." : file.path.slice(0, lastSlash);
 		const bucket = byDir.get(dir) ?? [];
 		bucket.push(file);
 		byDir.set(dir, bucket);
 	}
 
-	const dirEntries = [...byDir.entries()].sort((a, b) =>
+	const dirEntries = Array.from(byDir.entries()).toSorted((a, b) =>
 		a[0].localeCompare(b[0])
 	);
 	const nodes: FileGraphNode[] = [];

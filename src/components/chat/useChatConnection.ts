@@ -93,7 +93,12 @@ export function useChatConnection({
 	const currentToolRef = useRef<string | null>(null);
 	const hasStreamedRef = useRef(false);
 	const transcriptRevisionRef = useRef<number | null>(null);
-	const pendingContentRef = useRef<Map<string, string>>(new Map());
+	const pendingContentRef = useRef<Map<string, string>>(
+		undefined as unknown as Map<string, string>
+	);
+	if (!pendingContentRef.current) {
+		pendingContentRef.current = new Map();
+	}
 	const flushFrameRef = useRef<number | null>(null);
 	const checkpointReadModel = useMemo(
 		() => getChatCheckpointReadModel(paneId),

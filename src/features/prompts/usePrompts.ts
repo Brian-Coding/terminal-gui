@@ -67,8 +67,18 @@ export function usePrompts(enabled = true) {
 
 	useEffect(() => {
 		if (!enabled) return;
-		reload();
-	}, [enabled, reload]);
+		let cancelled = false;
+		loadPrompts().then((data) => {
+			if (cancelled) return;
+			updatePromptsCache(data);
+			setPrompts((current) =>
+				arePromptsEqual(current, data) ? current : data
+			);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [enabled]);
 
 	const createPrompt = useCallback(
 		async (data: {

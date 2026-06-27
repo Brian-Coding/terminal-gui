@@ -3,6 +3,7 @@ import {
 	type PointerEvent as ReactPointerEvent,
 	useCallback,
 	useEffect,
+	useEffectEvent,
 	useMemo,
 	useRef,
 	useReducer,
@@ -484,6 +485,37 @@ function getOutputPortY(node: AutomationNode): number {
 	);
 }
 
+type AutomationEdgeLine = {
+	fromId: string;
+	toId: string;
+	fromNode: AutomationNode;
+	toNode: AutomationNode;
+	x1: number;
+	y1: number;
+	x2: number;
+	y2: number;
+};
+
+function buildEdgePath(
+	edge: AutomationEdgeLine,
+	override?: { nodeId: string; x: number; y: number }
+) {
+	const x1 =
+		override && edge.fromId === override.nodeId
+			? override.x + NODE_WIDTH
+			: edge.x1;
+	const y1 =
+		override && edge.fromId === override.nodeId
+			? getOutputPortY({ ...edge.fromNode, x: override.x, y: override.y })
+			: edge.y1;
+	const x2 = override && edge.toId === override.nodeId ? override.x : edge.x2;
+	const y2 =
+		override && edge.toId === override.nodeId
+			? getInputPortY({ ...edge.toNode, x: override.x, y: override.y })
+			: edge.y2;
+	return `M ${x1} ${y1} C ${x1 + 80} ${y1}, ${x2 - 80} ${y2}, ${x2} ${y2}`;
+}
+
 function statusLabel(status: AutomationStatus) {
 	if (status === "running") return "Running";
 	if (status === "scheduled") return "Scheduled";
@@ -564,7 +596,12 @@ export function AutomationsPage() {
 	const dragStateRef = useRef<NodeDragState | null>(null);
 	const dragCleanupRef = useRef<(() => void) | null>(null);
 	const dragFrameRef = useRef<number | null>(null);
-	const edgePathRefs = useRef(new Map<string, SVGPathElement>());
+	const edgePathRefs = useRef<Map<string, SVGPathElement>>(
+		undefined as unknown as Map<string, SVGPathElement>
+	);
+	if (!edgePathRefs.current) {
+		edgePathRefs.current = new Map();
+	}
 	const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const selectedFlow =
@@ -573,10 +610,11 @@ export function AutomationsPage() {
 		selectedFlow.nodes.find(hasId.bind(null, selectedNodeId)) ??
 		selectedFlow.nodes[0]!;
 	const selectedNodeConfig = getNodeConfig(selectedNode.kind);
-	const outgoingNodes = selectedFlow.edges
-		.filter(([fromId]) => fromId === selectedNode.id)
-		.map(([, toId]) => selectedFlow.nodes.find(hasId.bind(null, toId)))
-		.filter((value) => value != null);
+	const outgoingNodes = selectedFlow.edges.flatMap(([fromId, toId]) => {
+		if (fromId !== selectedNode.id) return [];
+		const node = selectedFlow.nodes.find(hasId.bind(null, toId));
+		return node ? [node] : [];
+	});
 
 	useEffect(() => {
 		flowsRef.current = flows;
@@ -650,26 +688,6 @@ export function AutomationsPage() {
 			];
 		});
 	}, [selectedFlow]);
-
-	const buildEdgePath = (
-		edge: (typeof edgeLines)[number],
-		override?: { nodeId: string; x: number; y: number }
-	) => {
-		const x1 =
-			override && edge.fromId === override.nodeId
-				? override.x + NODE_WIDTH
-				: edge.x1;
-		const y1 =
-			override && edge.fromId === override.nodeId
-				? getOutputPortY({ ...edge.fromNode, x: override.x, y: override.y })
-				: edge.y1;
-		const x2 = override && edge.toId === override.nodeId ? override.x : edge.x2;
-		const y2 =
-			override && edge.toId === override.nodeId
-				? getInputPortY({ ...edge.toNode, x: override.x, y: override.y })
-				: edge.y2;
-		return `M ${x1} ${y1} C ${x1 + 80} ${y1}, ${x2 - 80} ${y2}, ${x2} ${y2}`;
-	};
 
 	const selectFlow = (flow: AutomationFlow) => {
 		setSelectedFlow(flow.id, flow.nodes[0]?.id ?? "");
@@ -772,15 +790,17 @@ export function AutomationsPage() {
 		return listenWindowEvent("keydown", handleKeyDown);
 	}, [handleDeleteSelectedNode]);
 
+	const closeAddMenuEvent = useEffectEvent(() => setShowAddMenu(false));
+
 	useEffect(() => {
 		const handleClick = (e: MouseEvent) => {
-			if (showAddMenu) setShowAddMenu(false);
+			if (showAddMenu) closeAddMenuEvent();
 		};
 		if (showAddMenu) {
 			window.addEventListener("click", handleClick, true);
 			return () => window.removeEventListener("click", handleClick, true);
 		}
-	}, [setShowAddMenu, showAddMenu]);
+	}, [showAddMenu]);
 
 	const handleRunOnce = async () => {
 		const nodes = selectedFlow.nodes;
@@ -1085,10 +1105,9 @@ export function AutomationsPage() {
 					</button>
 				</div>
 
-				<div
+				<section
 					{...stylex.props(styles.canvas, showGrid && styles.canvasGrid)}
 					aria-label="Automation canvas"
-					role="region"
 				>
 					<div {...stylex.props(styles.addButtonWrap)}>
 						<button
@@ -1218,7 +1237,7 @@ export function AutomationsPage() {
 							</button>
 						);
 					})}
-				</div>
+				</section>
 			</section>
 
 			<aside {...stylex.props(styles.detailPane)}>

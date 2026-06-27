@@ -547,14 +547,16 @@ function chooseSelectedGroupId(
 	selectedGroupId: GroupId | null
 ): GroupId | null {
 	if (groups.some(hasId.bind(null, selectedGroupId))) return selectedGroupId;
-	return (
-		[...groups].sort((a, b) => {
-			const scoreDelta =
-				terminalStateScore({ groups: [b] }) -
-				terminalStateScore({ groups: [a] });
-			return scoreDelta || groups.indexOf(a) - groups.indexOf(b);
-		})[0]?.id ?? null
-	);
+	let bestGroup: TerminalGroupModel | null = null;
+	let bestScore = -Infinity;
+	for (const group of groups) {
+		const score = terminalStateScore({ groups: [group] });
+		if (score > bestScore) {
+			bestGroup = group;
+			bestScore = score;
+		}
+	}
+	return bestGroup?.id ?? null;
 }
 
 export function normalizeTerminalState(
@@ -602,43 +604,51 @@ export function compactTerminalState(
 	const selectedGroup =
 		state.groups.find(hasId.bind(null, state.selectedGroupId)) ??
 		state.groups[0];
-	const groups = state.groups
-		.filter(
-			(group) =>
-				(!hasDurableGroup && group.id === selectedGroup?.id) ||
-				(options.keepSelectedDraft && group.id === state.selectedGroupId) ||
-				hasDurablePane(group)
-		)
-		.map((group) => {
-			if (!hasDurablePane(group)) {
-				if (options.keepSelectedDraft && group.id === state.selectedGroupId) {
-					return group;
-				}
-				const selectedPane =
-					group.panes.find(hasId.bind(null, group.selectedPaneId)) ??
-					group.panes[0];
-				const panes = selectedPane ? [selectedPane] : [];
-				if (panes.length === group.panes.length) return group;
-				changed = true;
-				return {
+	const groups = state.groups.flatMap((group) => {
+		const groupIsDurable = hasDurablePane(group);
+		if (
+			hasDurableGroup &&
+			!(options.keepSelectedDraft && group.id === state.selectedGroupId) &&
+			!groupIsDurable
+		) {
+			return [];
+		}
+		if (!hasDurableGroup && group.id !== selectedGroup?.id) {
+			return [];
+		}
+		if (!groupIsDurable) {
+			if (options.keepSelectedDraft && group.id === state.selectedGroupId) {
+				return [group];
+			}
+			const selectedPane =
+				group.panes.find(hasId.bind(null, group.selectedPaneId)) ??
+				group.panes[0];
+			const panes = selectedPane ? [selectedPane] : [];
+			if (panes.length === group.panes.length) return [group];
+			changed = true;
+			return [
+				{
 					...group,
 					panes,
 					selectedPaneId: selectedPane?.id ?? null,
-				};
-			}
-			const panes = group.panes.filter(
-				(pane) => pane.id === group.selectedPaneId || !isEmptyPendingPane(pane)
-			);
-			if (panes.length === group.panes.length) return group;
-			changed = true;
-			return {
+				},
+			];
+		}
+		const panes = group.panes.filter(
+			(pane) => pane.id === group.selectedPaneId || !isEmptyPendingPane(pane)
+		);
+		if (panes.length === group.panes.length) return [group];
+		changed = true;
+		return [
+			{
 				...group,
 				panes,
 				selectedPaneId: panes.some(hasId.bind(null, group.selectedPaneId))
 					? group.selectedPaneId
 					: (panes[0]?.id ?? null),
-			};
-		});
+			},
+		];
+	});
 	return changed || groups.length !== state.groups.length
 		? {
 				...state,

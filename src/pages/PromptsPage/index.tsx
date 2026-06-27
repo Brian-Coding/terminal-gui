@@ -152,10 +152,10 @@ export function PromptsPage() {
 				description: form.description.trim() || form.name.trim(),
 				promptTemplate: form.promptTemplate.trim(),
 				category: form.category,
-				tags: form.tags
-					.split(",")
-					.map((t) => t.trim())
-					.filter(Boolean),
+				tags: form.tags.split(",").flatMap((tag) => {
+					const trimmed = tag.trim();
+					return trimmed ? [trimmed] : [];
+				}),
 			};
 			if (isInlineEdit && selectedPrompt) {
 				await updatePrompt(selectedPrompt._id, data);

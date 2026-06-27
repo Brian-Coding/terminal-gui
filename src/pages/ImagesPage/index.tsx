@@ -28,11 +28,13 @@ interface FileEntry {
 	size: number;
 }
 
+const addedDateFormatter = new Intl.DateTimeFormat(undefined, {
+	month: "short",
+	day: "numeric",
+});
+
 function formatAddedDate(timestamp: number): string {
-	return new Intl.DateTimeFormat(undefined, {
-		month: "short",
-		day: "numeric",
-	}).format(new Date(timestamp));
+	return addedDateFormatter.format(new Date(timestamp));
 }
 
 function selectedFiles(

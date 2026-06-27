@@ -159,7 +159,10 @@ export function useAgentChatMenus({
 	}, [allCommands, slashMenu.query, slashMenu.show, slashMenu.slashIndex]);
 
 	const filteredCommands = slashCommandInfo.filtered;
-	const showCommands = slashMenu.show && filteredCommands.length > 0;
+	const visibleFileMenu = enabled ? fileMenu : hideMenuState(fileMenu);
+	const visibleSlashMenu = enabled ? slashMenu : hideMenuState(slashMenu);
+	const showCommands =
+		enabled && visibleSlashMenu.show && filteredCommands.length > 0;
 
 	useEffect(() => {
 		if (!enabled) return;
@@ -186,8 +189,6 @@ export function useAgentChatMenus({
 			clearTimeout(fileSearchTimerRef.current);
 			fileSearchTimerRef.current = null;
 		}
-		setFileMenu((prev) => (prev.show ? hideMenuState(prev) : prev));
-		setSlashMenu((prev) => (prev.show ? hideMenuState(prev) : prev));
 	}, [enabled]);
 
 	useEffect(
@@ -284,15 +285,17 @@ export function useAgentChatMenus({
 					limit: "15",
 				});
 				if (cwd) params.set("cwd", cwd);
+				if (requestId !== fileSearchRequestRef.current) return;
 				const data = await fetchJsonOr<{ results?: FileSearchResult[] }>(
 					`/api/files/search?${params}`,
 					{}
 				);
-				if (requestId !== fileSearchRequestRef.current) return;
-				const next = data.results || [];
-				setFileResults((prev) =>
-					areFileResultsEqual(prev, next) ? prev : next
-				);
+				if (requestId === fileSearchRequestRef.current) {
+					const next = data.results || [];
+					setFileResults((prev) =>
+						areFileResultsEqual(prev, next) ? prev : next
+					);
+				}
 			}, 150);
 		},
 		[cwd, enabled, getMenuPosition]
@@ -346,10 +349,10 @@ export function useAgentChatMenus({
 
 	return {
 		allCommands,
-		fileMenu,
+		fileMenu: visibleFileMenu,
 		setFileMenu,
 		fileResults,
-		slashMenu,
+		slashMenu: visibleSlashMenu,
 		setSlashMenu,
 		filteredCommands,
 		showCommands,

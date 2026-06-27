@@ -27,6 +27,9 @@ export function expandInlineCommandPrompts(
 ): { expandedText: string; usedCommandIds: string[] } {
 	let expandedText = text;
 	const usedCommandIds: string[] = [];
+	const commandsByName = new Map(
+		commands.map((command) => [command.name.toLowerCase(), command])
+	);
 	const commandRegex = /(^|\s)(\/[a-zA-Z][\w-]*)(?=\s|$)/g;
 	let match: RegExpExecArray | null;
 
@@ -34,9 +37,7 @@ export function expandInlineCommandPrompts(
 	while (match !== null) {
 		const commandToken = match[2]!;
 		const commandName = commandToken.slice(1).toLowerCase();
-		const command = commands.find(
-			(candidate) => candidate.name.toLowerCase() === commandName
-		);
+		const command = commandsByName.get(commandName);
 		if (command) {
 			const expanded = command.promptTemplate
 				? command.promptTemplate.replace("{args}", "").trim()

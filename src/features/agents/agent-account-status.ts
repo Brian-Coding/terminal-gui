@@ -18,7 +18,7 @@ export interface AgentAccountProviderStatus extends AgentAccountStatusInput {
 	summary: string;
 }
 
-export function buildAgentAccountStatus(
+function buildAgentAccountStatus(
 	input: AgentAccountStatusInput
 ): AgentAccountProviderStatus {
 	if (!input.installed) {

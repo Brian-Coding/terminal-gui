@@ -99,5 +99,12 @@ export function rangeContainsLine(
 }
 
 export function uniqueTrimmedStrings(values: Iterable<string>): string[] {
-	return [...new Set([...values].map((value) => value.trim()).filter(Boolean))];
+	return [
+		...new Set(
+			[...values].flatMap((value) => {
+				const trimmed = value.trim();
+				return trimmed ? [trimmed] : [];
+			})
+		),
+	];
 }

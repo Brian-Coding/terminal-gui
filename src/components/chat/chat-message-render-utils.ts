@@ -56,8 +56,10 @@ export function formatAskUserAnswer(
 		if (!selected?.size) continue;
 		const labels = Array.from(selected)
 			.sort()
-			.map((oi) => question.options?.[oi]?.label)
-			.filter(Boolean);
+			.flatMap((oi) => {
+				const label = question.options?.[oi]?.label;
+				return label ? [label] : [];
+			});
 		if (question.header)
 			parts.push(`**${question.header}**: ${labels.join(", ")}`);
 		else parts.push(labels.join(", "));

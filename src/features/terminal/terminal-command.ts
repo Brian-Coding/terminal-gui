@@ -47,11 +47,12 @@ function getAgentPathCandidates(kind: ChatAgentKind): string[] {
 				"/usr/local/bin/codex",
 			];
 
-	return candidates.filter(isNonEmptyString).map((pathname) => {
+	return candidates.flatMap((pathname) => {
+		if (!isNonEmptyString(pathname)) return [];
 		if (!isWin || pathname.endsWith(".cmd") || pathname.endsWith(".exe")) {
-			return pathname;
+			return [pathname];
 		}
-		return `${pathname}.cmd`;
+		return [`${pathname}.cmd`];
 	});
 }
 
@@ -73,10 +74,12 @@ export function createAgentEnv(kind: ChatAgentKind): Record<string, string> {
 	const env = { ...process.env } as Record<string, string>;
 	if (kind === "claude") delete env.CLAUDECODE;
 	const pathEntries = (env.PATH || "").split(delimiter).filter(Boolean);
+	const pathEntrySet = new Set(pathEntries);
 	for (const candidate of getAgentPathCandidates(kind)) {
 		const candidateDir = dirname(candidate);
-		if (candidateDir && !pathEntries.includes(candidateDir)) {
+		if (candidateDir && !pathEntrySet.has(candidateDir)) {
 			pathEntries.unshift(candidateDir);
+			pathEntrySet.add(candidateDir);
 		}
 	}
 	if (pathEntries.length > 0) {

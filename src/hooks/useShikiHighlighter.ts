@@ -371,11 +371,16 @@ export function useShikiHighlighter({
 	const visibleEnd = visibleRange[1];
 	const [readyKey, setReadyKey] = useState<string | null>(null);
 	const [, setHighlightVersion] = useState(0); // Force re-render when highlighting completes
-	const cacheRef = useRef<Map<number, ShikiLineToken[]>>(new Map());
+	const cacheRef = useRef<Map<number, ShikiLineToken[]>>(
+		undefined as unknown as Map<number, ShikiLineToken[]>
+	);
+	if (!cacheRef.current) {
+		cacheRef.current = new Map();
+	}
 	const highlighterRef = useRef<Highlighter | null>(null);
 	const langRef = useRef<BundledLanguage | null>(null);
 
-	const isReady = readyKey === highlightKey;
+	const isReady = !enabled || !language || readyKey === highlightKey;
 
 	// Store visible range in ref so we can use it in init
 	const visibleRangeRef = useRef(visibleRange);
@@ -388,7 +393,6 @@ export function useShikiHighlighter({
 		cacheRef.current.clear();
 
 		if (!enabled || !language) {
-			setReadyKey(highlightKey); // Ready but won't highlight
 			return;
 		}
 		const resolvedLanguage = language;
@@ -558,14 +562,21 @@ export function useShikiSnippet(
 	} | null>(null);
 	const linesRef = useRef<string[]>([]);
 
-	const isReady = highlightedState?.key === snippetKey;
+	const isReady =
+		!enabled ||
+		!language ||
+		lines.length === 0 ||
+		highlightedState?.key === snippetKey;
 	const fallbackHighlighted = useMemo(
 		() => fallbackHighlightLines(lines),
 		[lines]
 	);
-	const highlighted = isReady
-		? highlightedState.highlighted
-		: fallbackHighlighted;
+	const highlighted =
+		highlightedState?.key === snippetKey
+			? highlightedState.highlighted
+			: !enabled || !language || lines.length === 0
+				? EMPTY_HIGHLIGHTS
+				: fallbackHighlighted;
 
 	useEffect(() => {
 		// Only re-highlight if lines actually changed
@@ -576,10 +587,7 @@ export function useShikiSnippet(
 		if (!linesChanged && isReady) return;
 		linesRef.current = lines;
 
-		if (!enabled || !language || lines.length === 0) {
-			setHighlightedState({ key: snippetKey, highlighted: EMPTY_HIGHLIGHTS });
-			return;
-		}
+		if (!enabled || !language || lines.length === 0) return;
 		const resolvedLanguage = language;
 
 		const controller = new AbortController();

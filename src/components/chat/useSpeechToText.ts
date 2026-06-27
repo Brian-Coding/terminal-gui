@@ -156,10 +156,8 @@ export function useSpeechToText({
 				ignoreAbortErrorRef,
 				recognitionRef,
 			});
-			setIsListening(false);
 			return;
 		}
-		setIsSupported(Boolean(getSpeechRecognition()));
 		return () => {
 			cleanupSpeechRecognition({
 				shouldApplyResultsRef,
@@ -264,12 +262,14 @@ export function useSpeechToText({
 		if (isListening) stopListening();
 		else startListening();
 	}, [isListening, startListening, stopListening]);
+	const visibleIsListening = enabled && isListening;
+	const visibleIsSupported = enabled && isSupported;
 
 	return {
 		cancelListening,
 		error,
-		isListening,
-		isSupported,
+		isListening: visibleIsListening,
+		isSupported: visibleIsSupported,
 		stopListening,
 		toggleListening,
 	};

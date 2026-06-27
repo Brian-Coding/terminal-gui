@@ -37,7 +37,7 @@ export function measureTextHeight(
 	const result = layout(p, maxWidth, lineHeight);
 	return result.height;
 }
-export function measureTextareaHeight(
+function measureTextareaHeight(
 	text: string,
 	maxWidth: number,
 	font: string = UI_FONT,

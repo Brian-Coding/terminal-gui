@@ -42,7 +42,7 @@ export function stopPropagationAndCall(
 	action();
 }
 
-export function activateOnEnterOrSpace(
+function activateOnEnterOrSpace(
 	action: () => void,
 	event: React.KeyboardEvent
 ): void {

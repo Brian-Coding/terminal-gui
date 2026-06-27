@@ -56,9 +56,7 @@ export function windowChatMessagesForRender<T extends { content: string }>(
 	return start <= 0 ? messages : messages.slice(start);
 }
 
-export function dedupeChatMessagesById<T extends { id: string }>(
-	messages: T[]
-): T[] {
+function dedupeChatMessagesById<T extends { id: string }>(messages: T[]): T[] {
 	let hasDuplicate = false;
 	const seen = new Set<string>();
 	for (const message of messages) {
