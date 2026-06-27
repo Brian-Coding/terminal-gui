@@ -117,7 +117,7 @@ function EditDiffCard({
 						setIsScrollActive.bind(null, true)
 					)}
 					onMouseLeave={() => setIsScrollActive(false)}
-					title={
+					aria-label={
 						isScrollActive
 							? "Diff scrolling active"
 							: "Click to scroll this diff"
