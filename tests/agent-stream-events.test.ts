@@ -4,7 +4,10 @@ import {
 	getToolBlockInitialContent,
 	stringifyToolInput,
 } from "../src/features/chat/agent-chat-shared.ts";
-import { resolveCompletedCodexAssistantMessage } from "../src/server/agents/codex-adapter.ts";
+import {
+	handleCodexEvent,
+	resolveCompletedCodexAssistantMessage,
+} from "../src/server/agents/codex-adapter.ts";
 
 describe("agent stream event normalization", () => {
 	/*
@@ -74,5 +77,69 @@ describe("agent stream event normalization", () => {
 		expect(resolveCompletedCodexAssistantMessage("draft", "final")).toEqual({
 			mode: "replace",
 		});
+	});
+
+	test("Codex file_change events do not synthesize filesystem edit diffs", () => {
+		const chatEvents: unknown[] = [];
+		const agentEvents: unknown[] = [];
+		const state = {
+			outputPath: "",
+			debugLogPath: "",
+			assistantOpen: false,
+			toolOpen: false,
+			sawAssistantStream: false,
+			hasFinalAssistantMessage: false,
+			completedFromEvent: false,
+			lastAssistantMessage: "",
+			lastChatBlockRole: null,
+			currentToolId: null,
+			fileSnapshots: new Map<string, string | null>(),
+			fileWatchers: new Map<string, ReturnType<typeof setInterval>>(),
+			activePatchPaths: [],
+			commandOutputs: new Map<string, string>(),
+		};
+		const ctx = {
+			paneId: "pane-1",
+			cwd: process.cwd(),
+			getSessionId: () => null,
+			isCancelled: () => false,
+			updateSessionId: () => {},
+			emitChatEvent: (event: unknown) => chatEvents.push(event),
+			emitAgentEvent: (event: unknown) => agentEvents.push(event),
+			emitStatus: () => {},
+			emitActivity: () => {},
+			emitSystemMessage: () => {},
+		};
+
+		handleCodexEvent(ctx as any, state as any, {
+			type: "item.started",
+			item: { type: "file_change", changes: ["src/app.ts"] },
+		});
+		handleCodexEvent(ctx as any, state as any, {
+			type: "item.completed",
+			item: { type: "file_change", changes: ["src/app.ts"] },
+		});
+
+		expect(
+			chatEvents.some(
+				(event: any) =>
+					event?.type === "content_block_start" &&
+					event.content_block?.type === "tool_use" &&
+					event.content_block.name === "Edit"
+			)
+		).toBe(false);
+		expect(
+			chatEvents.some(
+				(event: any) =>
+					event?.type === "content_block_start" &&
+					event.content_block?.type === "tool_use" &&
+					event.content_block.name === "patch"
+			)
+		).toBe(true);
+		expect(state.fileSnapshots.size).toBe(0);
+		expect(state.fileWatchers.size).toBe(0);
+		expect(
+			agentEvents.some((event: any) => event?.type === "tool-call-start")
+		).toBe(true);
 	});
 });

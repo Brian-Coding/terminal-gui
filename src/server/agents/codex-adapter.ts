@@ -247,7 +247,7 @@ function getFileChangePaths(ctx: AgentRunContext, item: unknown): string[] {
 	return Array.from(new Set<string>(paths));
 }
 
-function handleCodexEvent(
+export function handleCodexEvent(
 	ctx: AgentRunContext,
 	state: CodexRunState,
 	event: unknown
@@ -368,11 +368,14 @@ function handleCodexEvent(
 			}
 		}
 		if (!keepWatching) {
-			const watcher = state.fileWatchers.get(path);
-			if (watcher) clearInterval(watcher);
-			state.fileWatchers.delete(path);
-			state.fileSnapshots.delete(path);
+			clearPathWatcher(path);
 		}
+	};
+	const clearPathWatcher = (path: string) => {
+		const watcher = state.fileWatchers.get(path);
+		if (watcher) clearInterval(watcher);
+		state.fileWatchers.delete(path);
+		state.fileSnapshots.delete(path);
 	};
 	const watchPaths = (paths: readonly string[]) => {
 		for (const path of paths) {
@@ -390,7 +393,7 @@ function handleCodexEvent(
 		watchPaths(paths);
 	};
 	const emitDiffsForPaths = (paths: readonly string[]) => {
-		for (const path of paths) {
+		for (const path of Array.from(new Set(paths))) {
 			emitLiveDiffForPath(path, false);
 		}
 	};
@@ -461,7 +464,9 @@ function handleCodexEvent(
 		itemRecord?.type === "file_change"
 	) {
 		const paths = getFileChangePaths(ctx, item);
-		snapshotPaths(paths);
+		// `file_change` is provider-reported workspace state, not a scoped edit
+		// operation. Do not snapshot and diff it; in multi-agent workspaces it can
+		// include build artifacts or files touched by another process.
 		const payload = { changes: itemRecord.changes ?? paths };
 		ctx.emitStatus("tool:patch", true);
 		ctx.emitActivity({
@@ -474,9 +479,7 @@ function handleCodexEvent(
 		eventType === "item.completed" &&
 		itemRecord?.type === "file_change"
 	) {
-		const paths = getFileChangePaths(ctx, item);
 		closeTool();
-		emitDiffsForPaths(paths);
 	} else if (
 		eventType === "item.completed" &&
 		itemRecord?.type === "agent_message"
