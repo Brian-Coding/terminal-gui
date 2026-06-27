@@ -282,6 +282,26 @@ export function applyAssistantResultMessage(
 
 	const last = messages[messages.length - 1];
 	if (last?.role === "assistant" && last.content === result) return messages;
+	const latestAssistantIndex = messages.findLastIndex?.(
+		(message) => message.role === "assistant"
+	);
+	if (latestAssistantIndex !== undefined && latestAssistantIndex >= 0) {
+		const latestAssistant = messages[latestAssistantIndex];
+		if (latestAssistant?.content === result) return messages;
+		if (
+			latestAssistant?.isStreaming ||
+			(result.startsWith(latestAssistant?.content ?? "") &&
+				latestAssistantIndex >= messages.length - 3)
+		) {
+			const updated = messages.slice();
+			updated[latestAssistantIndex] = {
+				...latestAssistant!,
+				content: result,
+				isStreaming: false,
+			};
+			return trimMessages(updated);
+		}
+	}
 	return trimMessages([
 		...messages,
 		{ id: nextId(), role: "assistant", content: result },

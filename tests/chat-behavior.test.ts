@@ -220,6 +220,36 @@ describe("chat data behavior", () => {
 		];
 		expect(applyAssistantResultMessage(settled, null, "final")).toBe(settled);
 
+		const settledBeforeTool: ChatMessage[] = [
+			{ id: "u1", role: "user", content: "prompt" },
+			{ id: "a1", role: "assistant", content: "final" },
+			{ id: "t1", role: "tool", toolName: "patch", content: "{}" },
+		];
+		expect(applyAssistantResultMessage(settledBeforeTool, null, "final")).toBe(
+			settledBeforeTool
+		);
+
+		expect(
+			applyAssistantResultMessage(
+				[
+					{ id: "u1", role: "user", content: "prompt" },
+					{ id: "a1", role: "assistant", content: "partial" },
+					{ id: "t1", role: "tool", toolName: "patch", content: "{}" },
+				],
+				null,
+				"partial response"
+			)
+		).toEqual([
+			{ id: "u1", role: "user", content: "prompt" },
+			{
+				id: "a1",
+				role: "assistant",
+				content: "partial response",
+				isStreaming: false,
+			},
+			{ id: "t1", role: "tool", toolName: "patch", content: "{}" },
+		]);
+
 		const appended = applyAssistantResultMessage(
 			[{ id: "u1", role: "user", content: "prompt" }],
 			null,
