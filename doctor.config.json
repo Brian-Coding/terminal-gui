@@ -1,0 +1,6 @@
+{
+	"$schema": "https://react.doctor/config.schema.json",
+	"ignore": {
+		"files": ["site/**"]
+	}
+}
