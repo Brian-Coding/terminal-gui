@@ -43,6 +43,27 @@ function loadMermaid(): Promise<unknown> {
 	return mermaidPromise;
 }
 
+function sanitizeMermaidSvg(svg: string): string {
+	const document = new DOMParser().parseFromString(svg, "image/svg+xml");
+	for (const element of document.querySelectorAll("script, foreignObject")) {
+		element.remove();
+	}
+	for (const element of document.querySelectorAll("*")) {
+		for (const attribute of Array.from(element.attributes)) {
+			const name = attribute.name.toLowerCase();
+			const value = attribute.value.trim().toLowerCase();
+			if (
+				name.startsWith("on") ||
+				((name === "href" || name === "xlink:href") &&
+					value.startsWith("javascript:"))
+			) {
+				element.removeAttribute(attribute.name);
+			}
+		}
+	}
+	return new XMLSerializer().serializeToString(document.documentElement);
+}
+
 function MermaidBlock({ code }: { code: string }) {
 	const ref = useRef<HTMLDivElement>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -61,7 +82,7 @@ function MermaidBlock({ code }: { code: string }) {
 			})
 			.then((result) => {
 				if (signal.aborted || !ref.current || !result) return;
-				ref.current.innerHTML = result.svg;
+				ref.current.innerHTML = sanitizeMermaidSvg(result.svg);
 			})
 			.catch((err) => {
 				if (!signal.aborted) setError(String(err));
@@ -84,8 +105,8 @@ function MermaidBlock({ code }: { code: string }) {
 function InlineTokens({ tokens }: { tokens: MdInlineToken[] }) {
 	return (
 		<>
-			{tokens.map((tok, i) => (
-				<InlineToken key={i} token={tok} />
+			{tokens.map((tok) => (
+				<InlineToken key={JSON.stringify(tok)} token={tok} />
 			))}
 		</>
 	);
@@ -322,8 +343,8 @@ export const MarkdownPreview = memo(function MarkdownPreview({
 	const blocks = parseBlocks(content);
 	return (
 		<div {...stylex.props(styles.root)}>
-			{blocks.map((block, i) => (
-				<BlockRenderer key={i} block={block} />
+			{blocks.map((block) => (
+				<BlockRenderer key={JSON.stringify(block)} block={block} />
 			))}
 		</div>
 	);

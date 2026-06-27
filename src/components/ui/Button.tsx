@@ -29,6 +29,7 @@ export function Button({
 			{...buttonProps}
 			className={`${buttonProps.className ?? ""} ${className}`}
 			{...props}
+			type={props.type ?? "button"}
 		>
 			{children}
 		</button>

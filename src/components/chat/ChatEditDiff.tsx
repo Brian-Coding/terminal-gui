@@ -4,7 +4,6 @@ import {
 	useShikiSnippet,
 	useSyntaxHighlightTheme,
 } from "../../hooks/useShikiHighlighter.ts";
-import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import { color, controlSize, font } from "../../tokens.stylex.ts";
 import { IconChevronRight, IconFilePlus } from "../ui/Icons.tsx";
 import {
@@ -105,23 +104,12 @@ function EditDiffCard({
 			</button>
 			{isExpanded && (
 				<div
-					role="button"
-					tabIndex={0}
 					{...stylex.props(
 						styles.body,
 						isScrollActive && styles.bodyScrollActive
 					)}
-					onClick={() => setIsScrollActive(true)}
-					onKeyDown={activateOnEnterOrSpacePreventDefault.bind(
-						null,
-						setIsScrollActive.bind(null, true)
-					)}
+					onPointerDown={() => setIsScrollActive(true)}
 					onMouseLeave={() => setIsScrollActive(false)}
-					aria-label={
-						isScrollActive
-							? "Diff scrolling active"
-							: "Click to scroll this diff"
-					}
 				>
 					<div
 						{...stylex.props(styles.bodyInner)}
@@ -503,13 +491,6 @@ export function GroupedEditDiff({
 }) {
 	const fileName = filePath.split("/").pop() || filePath;
 	const isStreaming = edits.some((edit) => edit.isStreaming);
-	// Stable signature: when buildRenderItems hands us a new edits array
-	// per streaming token, this skips the diff recompute unless an edit's
-	// content actually changed.
-	const editsSignature = useMemo(
-		() => edits.map((edit) => edit.content ?? "").join("\u0001"),
-		[edits]
-	);
 	const { hunks, stats, allLines, totalHidden } = useMemo(() => {
 		const parsedEdits: { old_string: string; new_string: string }[] = [];
 
@@ -535,8 +516,7 @@ export function GroupedEditDiff({
 		}
 
 		return summarizeDiff(result.originalText, result.finalText, 2);
-		// biome-ignore lint/correctness/useExhaustiveDependencies: editsSignature already covers edit content; including `edits` retriggers on identity churn.
-	}, [editsSignature]);
+	}, [edits]);
 
 	if (hunks.length === 0) return null;
 

@@ -15,7 +15,6 @@ import {
 } from "../../features/terminal/terminal-utils.ts";
 import { useAsyncResource } from "../../hooks/useAsyncResource.ts";
 import { useAppInfo } from "../../hooks/useAppInfo.ts";
-import { activateOnEnterOrSpacePreventDefault } from "../../lib/react-events.ts";
 import {
 	SYNTAX_HIGHLIGHT_THEMES,
 	type SyntaxHighlightTheme,
@@ -344,9 +343,6 @@ export const TerminalSettingsContent = memo(function TerminalSettingsContent({
 			}),
 		[]
 	);
-	useEffect(() => {
-		if (terminalThemeId === "custom") saveCustomTheme(custom);
-	}, [custom, terminalThemeId]);
 	const isCustom = appThemeId === "custom";
 
 	return (
@@ -451,18 +447,14 @@ export const TerminalSettingsPanel = memo(function TerminalSettingsPanel({
 	onClose,
 }: TerminalSettingsPanelProps) {
 	return (
-		<div
-			role="button"
-			tabIndex={0}
-			aria-label="Close terminal settings"
-			{...stylex.props(styles.overlay)}
-			onClick={onClose}
-			onKeyDown={activateOnEnterOrSpacePreventDefault.bind(null, onClose)}
-		>
-			<div
-				{...stylex.props(styles.panel)}
-				onClick={(event) => event.stopPropagation()}
-			>
+		<div {...stylex.props(styles.overlay)}>
+			<button
+				type="button"
+				aria-label="Close terminal settings"
+				{...stylex.props(styles.backdrop)}
+				onClick={onClose}
+			/>
+			<div {...stylex.props(styles.panel)}>
 				<TerminalSettingsContent
 					themeId={themeId}
 					onThemeChange={onThemeChange}
@@ -483,7 +475,15 @@ const styles = stylex.create({
 		backgroundColor: color.backgroundOverlay,
 		padding: controlSize._4,
 	},
+	backdrop: {
+		position: "absolute",
+		inset: 0,
+		borderWidth: 0,
+		padding: 0,
+		backgroundColor: "transparent",
+	},
 	panel: {
+		position: "relative",
 		width: "min(22rem, 100%)",
 		maxHeight: "calc(100vh - 2rem)",
 		overflowY: "auto",

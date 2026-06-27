@@ -22,7 +22,7 @@ export function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function formatKilobytes(kilobytes: number): string {
+function formatKilobytes(kilobytes: number): string {
 	if (kilobytes >= 1024 * 1024) {
 		return `${(kilobytes / (1024 * 1024)).toFixed(1)}G`;
 	}
