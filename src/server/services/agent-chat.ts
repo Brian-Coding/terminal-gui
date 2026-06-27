@@ -7,6 +7,10 @@ import type {
 	QueuedMessageInfo,
 } from "../../features/chat/agent-chat-shared.ts";
 import {
+	type GoalSystemMessage,
+	serializeGoalSystemMessage,
+} from "../../features/chat/goal-system-message.ts";
+import {
 	getToolBlockInitialContent,
 	isChatStreamEvent,
 	prepareTranscriptForStorage,
@@ -1187,22 +1191,35 @@ async function runAgentTurnWithGoalLoop(
 
 	if (session.goal && resultStatus === "complete") {
 		session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
-		const message = `Goal achieved after ${session.goal.turns} turns`;
+		const message: GoalSystemMessage = {
+			type: "inferay.goal",
+			status: "complete",
+			objective: session.goal.objective,
+			turns: session.goal.turns,
+			detail: "Goal achieved",
+		};
 		session.goal = null;
-		emitSystemMessage(session, paneId, message);
+		emitGoalSystemMessage(session, paneId, message);
 	} else if (session.goal && resultStatus === "paused") {
 		session.messageBuffer.replaceInAssistantMessages(stripGoalMarkers);
 		session.goal.status = "paused";
-		const message =
-			"Goal paused because Codex needs input. Reply with the missing detail or use /goal resume.";
-		emitSystemMessage(session, paneId, message);
+		emitGoalSystemMessage(session, paneId, {
+			type: "inferay.goal",
+			status: "paused",
+			objective: session.goal.objective,
+			turns: session.goal.turns,
+			detail:
+				"Codex needs input. Reply with the missing detail or use /goal resume.",
+		});
 	} else if (session.goal && session.goal.turns >= GOAL_MAX_TURNS) {
 		session.goal.status = "paused";
-		emitSystemMessage(
-			session,
-			paneId,
-			`Goal paused after ${GOAL_MAX_TURNS} turns`
-		);
+		emitGoalSystemMessage(session, paneId, {
+			type: "inferay.goal",
+			status: "paused",
+			objective: session.goal.objective,
+			turns: session.goal.turns,
+			detail: `Paused after ${GOAL_MAX_TURNS} turns`,
+		});
 	}
 }
 
@@ -1214,6 +1231,14 @@ function emitSystemMessage(
 	session.messageBuffer.pushSystem(message);
 	appendChatEvent(paneId, "system_message", { message });
 	chatRuntime.send(session, { type: "chat:system", paneId, message });
+}
+
+function emitGoalSystemMessage(
+	session: ChatSession,
+	paneId: string,
+	message: GoalSystemMessage
+) {
+	emitSystemMessage(session, paneId, serializeGoalSystemMessage(message));
 }
 
 function sendChatStatus(
@@ -1425,36 +1450,87 @@ async function handleGoalCommand(
 			turns: 0,
 			startedAt: Date.now(),
 		};
-		emitSystemMessage(session, paneId, `Goal started: ${command.objective}`);
+		emitGoalSystemMessage(session, paneId, {
+			type: "inferay.goal",
+			status: "active",
+			objective: command.objective,
+			turns: 0,
+			detail: "Goal started",
+		});
 		return createGoalPrompt(command.objective);
 	}
 
 	if (command.action === "pause") {
 		if (session.goal) session.goal.status = "paused";
-		const message = session.goal ? "Goal paused" : "No active goal";
-		emitSystemMessage(session, paneId, message);
+		emitGoalSystemMessage(
+			session,
+			paneId,
+			session.goal
+				? {
+						type: "inferay.goal",
+						status: "paused",
+						objective: session.goal.objective,
+						turns: session.goal.turns,
+						detail: "Goal paused",
+					}
+				: {
+						type: "inferay.goal",
+						status: "empty",
+						detail: "No active goal",
+					}
+		);
 		return null;
 	}
 
 	if (command.action === "resume") {
 		if (!session.goal) {
-			emitSystemMessage(session, paneId, "No goal to resume");
+			emitGoalSystemMessage(session, paneId, {
+				type: "inferay.goal",
+				status: "empty",
+				detail: "No goal to resume",
+			});
 			return null;
 		}
 		session.goal.status = "active";
+		emitGoalSystemMessage(session, paneId, {
+			type: "inferay.goal",
+			status: "active",
+			objective: session.goal.objective,
+			turns: session.goal.turns,
+			detail: "Goal resumed",
+		});
 		return createGoalContinuationPrompt(session.goal);
 	}
 
 	if (command.action === "clear") {
+		const previousGoal = session.goal;
 		session.goal = null;
-		emitSystemMessage(session, paneId, "Goal cleared");
+		emitGoalSystemMessage(session, paneId, {
+			type: "inferay.goal",
+			status: "cleared",
+			objective: previousGoal?.objective,
+			turns: previousGoal?.turns,
+			detail: "Goal cleared",
+		});
 		return null;
 	}
 
-	const message = session.goal
-		? `Goal ${session.goal.status}: ${session.goal.objective} (${session.goal.turns} turns)`
-		: "No active goal";
-	emitSystemMessage(session, paneId, message);
+	emitGoalSystemMessage(
+		session,
+		paneId,
+		session.goal
+			? {
+					type: "inferay.goal",
+					status: session.goal.status,
+					objective: session.goal.objective,
+					turns: session.goal.turns,
+				}
+			: {
+					type: "inferay.goal",
+					status: "empty",
+					detail: "No active goal",
+				}
+	);
 	return null;
 }
 

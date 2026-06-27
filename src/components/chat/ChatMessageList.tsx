@@ -11,18 +11,24 @@ import React, {
 } from "react";
 import type { CheckpointInfo } from "../../features/chat/agent-chat-shared.ts";
 import {
+	type GoalSystemMessage,
+	parseGoalSystemMessage,
+} from "../../features/chat/goal-system-message.ts";
+import {
 	color,
 	controlSize,
 	font,
 	motion,
 	radius,
 } from "../../tokens.stylex.ts";
-import { ThinkingIndicator } from "../ui/DotMatrixLoader.tsx";
+import { DotMatrixRipple, ThinkingIndicator } from "../ui/DotMatrixLoader.tsx";
 import {
+	IconAlertTriangle,
 	IconCheck,
 	IconChevronDown,
 	IconClock,
 	IconCopy,
+	IconTarget,
 } from "../ui/Icons.tsx";
 import { GroupedEditDiff, MiniEditDiff } from "./ChatEditDiff.tsx";
 import { AskUserQuestionCard, Markdown } from "./ChatRichContent.tsx";
@@ -99,6 +105,71 @@ function ToolOutputHighlight({ content }: { content: string }) {
 		);
 	}
 	return <>{summary.value}</>;
+}
+
+function goalStatusLabel(status: GoalSystemMessage["status"]) {
+	if (status === "active") return "Pursuing Goal";
+	if (status === "paused") return "Goal Paused";
+	if (status === "complete") return "Goal Achieved";
+	if (status === "cleared") return "Goal Cleared";
+	return "No Active Goal";
+}
+
+function GoalSystemCard({ goal }: { goal: GoalSystemMessage }) {
+	const turnsLabel =
+		typeof goal.turns === "number"
+			? `${goal.turns} turn${goal.turns === 1 ? "" : "s"}`
+			: null;
+	return (
+		<div
+			{...stylex.props(
+				styles.goalCard,
+				goal.status === "active" && styles.goalCardActive,
+				goal.status === "paused" && styles.goalCardPaused,
+				goal.status === "complete" && styles.goalCardComplete
+			)}
+		>
+			<span
+				{...stylex.props(
+					styles.goalIconSlot,
+					goal.status === "active" && styles.goalIconActive,
+					goal.status === "paused" && styles.goalIconPaused,
+					goal.status === "complete" && styles.goalIconComplete
+				)}
+			>
+				{goal.status === "active" ? (
+					<DotMatrixRipple
+						dotSize={1.35}
+						gap={1}
+						speed={1.1}
+						ariaLabel="Goal running"
+					/>
+				) : goal.status === "complete" ? (
+					<IconCheck size={12} />
+				) : goal.status === "paused" ? (
+					<IconAlertTriangle size={12} />
+				) : (
+					<IconTarget size={12} />
+				)}
+			</span>
+			<div {...stylex.props(styles.goalCardBody)}>
+				<div {...stylex.props(styles.goalCardHeader)}>
+					<span {...stylex.props(styles.goalCardTitle)}>
+						{goalStatusLabel(goal.status)}
+					</span>
+					{turnsLabel && (
+						<span {...stylex.props(styles.goalTurns)}>{turnsLabel}</span>
+					)}
+				</div>
+				{goal.objective && (
+					<div {...stylex.props(styles.goalObjective)}>{goal.objective}</div>
+				)}
+				{goal.detail && (
+					<div {...stylex.props(styles.goalDetail)}>{goal.detail}</div>
+				)}
+			</div>
+		</div>
+	);
 }
 
 function CheckpointMarker({
@@ -289,6 +360,8 @@ const Bubble = React.memo(function Bubble({
 	}
 
 	if (msg.role === "system") {
+		const goalMessage = parseGoalSystemMessage(msg.content);
+		if (goalMessage) return <GoalSystemCard goal={goalMessage} />;
 		const runningMatch = msg.content.match(/^Running \/(.+)\.\.\.$/);
 		if (runningMatch?.[1]) {
 			const commandName = runningMatch[1];
@@ -643,6 +716,88 @@ const styles = stylex.create({
 		borderWidth: 1,
 		marginBlock: controlSize._1,
 		overflow: "hidden",
+	},
+	goalCard: {
+		alignItems: "flex-start",
+		backgroundColor: color.backgroundRaised,
+		borderColor: color.border,
+		borderRadius: radius.md,
+		borderStyle: "solid",
+		borderWidth: 1,
+		color: color.textSoft,
+		display: "flex",
+		gap: controlSize._2,
+		marginBlock: controlSize._1,
+		paddingBlock: controlSize._2,
+		paddingInline: controlSize._2_5,
+	},
+	goalCardActive: {
+		borderColor: color.accentBorder,
+	},
+	goalCardPaused: {
+		borderColor: color.warningBorder,
+	},
+	goalCardComplete: {
+		borderColor: color.successBorder,
+	},
+	goalIconSlot: {
+		alignItems: "center",
+		backgroundColor: color.surfaceControl,
+		borderRadius: radius.sm,
+		color: color.textMuted,
+		display: "flex",
+		flexShrink: 0,
+		height: controlSize._6,
+		justifyContent: "center",
+		marginTop: 1,
+		width: controlSize._6,
+	},
+	goalIconActive: {
+		color: color.accent,
+	},
+	goalIconPaused: {
+		color: color.warning,
+	},
+	goalIconComplete: {
+		color: color.success,
+	},
+	goalCardBody: {
+		minWidth: 0,
+		flex: 1,
+	},
+	goalCardHeader: {
+		alignItems: "center",
+		display: "flex",
+		gap: controlSize._2,
+		minWidth: 0,
+	},
+	goalCardTitle: {
+		color: color.textMain,
+		fontSize: font.size_2,
+		fontWeight: font.weight_6,
+		lineHeight: 1.35,
+	},
+	goalTurns: {
+		color: color.textMuted,
+		fontFamily: font.familyMono,
+		fontSize: font.size_1,
+		fontVariantNumeric: "tabular-nums",
+		marginLeft: "auto",
+		whiteSpace: "nowrap",
+	},
+	goalObjective: {
+		color: color.textSoft,
+		fontSize: font.size_3,
+		lineHeight: 1.45,
+		marginTop: controlSize._0_5,
+		overflowWrap: "break-word",
+	},
+	goalDetail: {
+		color: color.textMuted,
+		fontSize: font.size_2,
+		lineHeight: 1.45,
+		marginTop: controlSize._0_5,
+		overflowWrap: "break-word",
 	},
 	checkpointHeader: {
 		alignItems: "center",

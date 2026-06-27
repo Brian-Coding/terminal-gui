@@ -28,6 +28,10 @@ import {
 	type ToolActivity,
 	trimMessages,
 } from "../src/features/chat/agent-chat-shared.ts";
+import {
+	parseGoalSystemMessage,
+	serializeGoalSystemMessage,
+} from "../src/features/chat/goal-system-message.ts";
 
 function message(
 	id: string,
@@ -259,6 +263,37 @@ describe("chat data behavior", () => {
 			role: "assistant",
 			content: "final",
 		});
+	});
+
+	test("parses structured and legacy goal system messages", () => {
+		const structured = serializeGoalSystemMessage({
+			type: "inferay.goal",
+			status: "active",
+			objective: "Ship the feature",
+			turns: 2,
+			detail: "Goal resumed",
+		});
+
+		expect(parseGoalSystemMessage(structured)).toEqual({
+			type: "inferay.goal",
+			status: "active",
+			objective: "Ship the feature",
+			turns: 2,
+			detail: "Goal resumed",
+		});
+		expect(parseGoalSystemMessage("Goal started: Fix checkout")).toEqual({
+			type: "inferay.goal",
+			status: "active",
+			objective: "Fix checkout",
+			detail: "Goal started",
+		});
+		expect(parseGoalSystemMessage("Goal achieved after 3 turns")).toEqual({
+			type: "inferay.goal",
+			status: "complete",
+			turns: 3,
+			detail: "Goal achieved",
+		});
+		expect(parseGoalSystemMessage("ordinary system message")).toBeNull();
 	});
 
 	test("projects live activity ui state without duplicating adjacent updates", () => {
