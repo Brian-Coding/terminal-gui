@@ -77,38 +77,6 @@ function formatSpeechError(event: BrowserSpeechRecognitionErrorEvent) {
 	}
 }
 
-function formatMicrophoneError(error: unknown) {
-	if (error instanceof DOMException) {
-		if (
-			error.name === "NotAllowedError" ||
-			error.name === "SecurityError" ||
-			error.name === "PermissionDeniedError"
-		) {
-			return "Microphone access was blocked. Allow microphone access for inferay in System Settings.";
-		}
-		if (
-			error.name === "NotFoundError" ||
-			error.name === "DevicesNotFoundError"
-		) {
-			return "No microphone was found.";
-		}
-	}
-	return "Microphone access could not start.";
-}
-
-async function requestMicrophoneAccess() {
-	if (!navigator.mediaDevices?.getUserMedia) return true;
-	let stream: MediaStream | null = null;
-	try {
-		stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-		return true;
-	} catch (error) {
-		throw new Error(formatMicrophoneError(error));
-	} finally {
-		for (const track of stream?.getTracks() ?? []) track.stop();
-	}
-}
-
 function cleanupSpeechRecognition({
 	shouldApplyResultsRef,
 	ignoreAbortErrorRef,
@@ -187,19 +155,6 @@ export function useSpeechToText({
 		if (!Recognition) {
 			setIsSupported(false);
 			setError("Speech recognition is not supported in this browser.");
-			return;
-		}
-
-		setError(null);
-		try {
-			await requestMicrophoneAccess();
-		} catch (error) {
-			setIsListening(false);
-			setError(
-				error instanceof Error
-					? error.message
-					: "Microphone access could not start."
-			);
 			return;
 		}
 
