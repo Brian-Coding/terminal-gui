@@ -2,7 +2,15 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
@@ -94,6 +102,63 @@ async function hashTree(root: string, skip: Set<string>) {
 	return hash.digest("hex").slice(0, 12);
 }
 
+async function listMachOFiles(root: string) {
+	const files: string[] = [];
+
+	async function visit(path: string) {
+		const entries = await readdir(path, { withFileTypes: true });
+		for (const entry of entries) {
+			const child = join(path, entry.name);
+			if (entry.isDirectory()) {
+				await visit(child);
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			const output = await run(["file", "-b", child]);
+			if (output.includes("Mach-O")) files.push(child);
+		}
+	}
+
+	await visit(root);
+	return files;
+}
+
+async function adHocSignApp(appPath: string) {
+	const tempDir = await mkdtemp(join(tmpdir(), "inferay-sign-"));
+	const entitlements = join(tempDir, "entitlements.plist");
+	await writeFile(
+		entitlements,
+		`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>com.apple.security.device.microphone</key>
+\t<true/>
+\t<key>com.apple.security.personal-information.speech-recognition</key>
+\t<true/>
+</dict>
+</plist>
+`
+	);
+
+	try {
+		for (const file of await listMachOFiles(appPath)) {
+			await run(["codesign", "--force", "--sign", "-", file]);
+		}
+		await run([
+			"codesign",
+			"--force",
+			"--sign",
+			"-",
+			"--entitlements",
+			entitlements,
+			appPath,
+		]);
+	} finally {
+		await rm(tempDir, { force: true, recursive: true });
+	}
+}
+
 async function main() {
 	const appPath = process.argv[2] ? resolve(process.argv[2]) : usage();
 	if (!appPath.endsWith(".app") || !existsSync(appPath)) usage();
@@ -134,6 +199,7 @@ async function main() {
 	};
 
 	await writeFile(versionJson, `${JSON.stringify(versionInfo, null, "\t")}\n`);
+	await adHocSignApp(appPath);
 	console.log(
 		`[release-app] prepared ${APP_NAME}.app ${version} (${contentHash})`
 	);
