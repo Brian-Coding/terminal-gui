@@ -92,6 +92,25 @@ function cleanupSpeechRecognition({
 	recognitionRef.current = null;
 }
 
+function releaseSpeechRecognition({
+	shouldApplyResultsRef,
+	ignoreAbortErrorRef,
+	recognitionRef,
+	setIsListening,
+}: {
+	shouldApplyResultsRef: { current: boolean };
+	ignoreAbortErrorRef: { current: boolean };
+	recognitionRef: { current: BrowserSpeechRecognition | null };
+	setIsListening: (value: boolean) => void;
+}) {
+	cleanupSpeechRecognition({
+		shouldApplyResultsRef,
+		ignoreAbortErrorRef,
+		recognitionRef,
+	});
+	setIsListening(false);
+}
+
 export function useSpeechToText({
 	enabled = true,
 	value,
@@ -119,19 +138,45 @@ export function useSpeechToText({
 
 	useEffect(() => {
 		if (!enabled) {
-			cleanupSpeechRecognition({
+			releaseSpeechRecognition({
 				shouldApplyResultsRef,
 				ignoreAbortErrorRef,
 				recognitionRef,
+				setIsListening,
 			});
 			return;
 		}
 		return () => {
-			cleanupSpeechRecognition({
+			releaseSpeechRecognition({
 				shouldApplyResultsRef,
 				ignoreAbortErrorRef,
 				recognitionRef,
+				setIsListening,
 			});
+		};
+	}, [enabled]);
+
+	useEffect(() => {
+		if (!enabled || typeof window === "undefined") return;
+		const releaseIfListening = () => {
+			if (!recognitionRef.current) return;
+			releaseSpeechRecognition({
+				shouldApplyResultsRef,
+				ignoreAbortErrorRef,
+				recognitionRef,
+				setIsListening,
+			});
+		};
+		const releaseWhenHidden = () => {
+			if (document.visibilityState === "hidden") releaseIfListening();
+		};
+		window.addEventListener("blur", releaseIfListening);
+		window.addEventListener("pagehide", releaseIfListening);
+		document.addEventListener("visibilitychange", releaseWhenHidden);
+		return () => {
+			window.removeEventListener("blur", releaseIfListening);
+			window.removeEventListener("pagehide", releaseIfListening);
+			document.removeEventListener("visibilitychange", releaseWhenHidden);
 		};
 	}, [enabled]);
 
@@ -201,16 +246,21 @@ export function useSpeechToText({
 	}, [applyTranscript, enabled]);
 
 	const stopListening = useCallback(() => {
-		recognitionRef.current?.stop();
-		setIsListening(false);
+		releaseSpeechRecognition({
+			shouldApplyResultsRef,
+			ignoreAbortErrorRef,
+			recognitionRef,
+			setIsListening,
+		});
 	}, []);
 
 	const cancelListening = useCallback(() => {
-		shouldApplyResultsRef.current = false;
-		ignoreAbortErrorRef.current = true;
-		recognitionRef.current?.abort();
-		recognitionRef.current = null;
-		setIsListening(false);
+		releaseSpeechRecognition({
+			shouldApplyResultsRef,
+			ignoreAbortErrorRef,
+			recognitionRef,
+			setIsListening,
+		});
 	}, []);
 
 	const toggleListening = useCallback(() => {
