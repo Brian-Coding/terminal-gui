@@ -460,7 +460,7 @@ describe("terminal state and git change behavior", () => {
 		expect(cleaned.selectedGroupId).toBe(second.id);
 	});
 
-	test("removes inactive draft panes and workspaces after switching back to real work", () => {
+	test("keeps inactive chat draft panes while switching among active workspace chats", () => {
 		const realPane = pane("real", {
 			agentKind: "codex",
 			paneType: "codex",
@@ -507,8 +507,50 @@ describe("terminal state and git change behavior", () => {
 		]);
 		expect(cleaned.groups[0]?.panes.map((item) => item.id)).toEqual([
 			"real" as PaneId,
+			"draft" as PaneId,
 		]);
 		expect(cleaned.selectedGroupId).toBe("default" as GroupId);
+	});
+
+	test("keeps unsent chat draft panes when selecting another pane", () => {
+		const realPane = pane("real", {
+			agentKind: "codex",
+			paneType: "codex",
+			cwd: "/Users/ray/Developer/inferay",
+			pendingCwd: false,
+		});
+		const draftPane = pane("draft", {
+			agentKind: "codex",
+			paneType: "codex",
+			title: "Codex",
+			pendingCwd: true,
+		});
+		const selected = reduceTerminalWorkspaceState(
+			{
+				groups: [
+					{
+						id: "default" as GroupId,
+						name: "Default",
+						panes: [realPane, draftPane],
+						selectedPaneId: draftPane.id,
+						columns: 3,
+						rows: 2,
+					},
+				],
+				selectedGroupId: "default" as GroupId,
+				themeId: "default",
+				fontSize: 13,
+				fontFamily: "SF Mono",
+				opacity: 1,
+			},
+			{ type: "selectPane", groupId: "default", paneId: realPane.id }
+		)!;
+
+		expect(selected.groups[0]?.panes.map((item) => item.id)).toEqual([
+			"real" as PaneId,
+			"draft" as PaneId,
+		]);
+		expect(selected.groups[0]?.selectedPaneId).toBe(realPane.id);
 	});
 
 	test("preserves pending panes inside the selected draft workspace", () => {

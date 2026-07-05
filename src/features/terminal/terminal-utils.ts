@@ -591,6 +591,20 @@ function isEmptyPendingPane(pane: TerminalPaneModel): boolean {
 	);
 }
 
+function shouldKeepEmptyPendingPane(
+	pane: TerminalPaneModel,
+	group: TerminalGroupModel,
+	state: TerminalSavedState,
+	options: { keepSelectedDraft?: boolean }
+): boolean {
+	return (
+		pane.id === group.selectedPaneId ||
+		(options.keepSelectedDraft === true &&
+			group.id === state.selectedGroupId &&
+			isChatAgentKind(pane.agentKind))
+	);
+}
+
 function hasDurablePane(group: TerminalGroupModel): boolean {
 	return group.panes.some((pane) => pane.cwd || pane.pendingCwd === false);
 }
@@ -635,7 +649,9 @@ export function compactTerminalState(
 			];
 		}
 		const panes = group.panes.filter(
-			(pane) => pane.id === group.selectedPaneId || !isEmptyPendingPane(pane)
+			(pane) =>
+				shouldKeepEmptyPendingPane(pane, group, state, options) ||
+				!isEmptyPendingPane(pane)
 		);
 		if (panes.length === group.panes.length) return [group];
 		changed = true;
