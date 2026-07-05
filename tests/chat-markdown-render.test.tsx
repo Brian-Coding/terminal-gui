@@ -35,4 +35,28 @@ describe("chat markdown rendering", () => {
 		expect(html.match(/<strong/g)?.length).toBe(1);
 		expect(html).toContain("**still raw**");
 	});
+
+	test("renders copy controls for fenced code blocks", async () => {
+		const { Markdown } =
+			await import("../src/components/chat/ChatRichContent.tsx");
+		const html = renderToStaticMarkup(
+			<Markdown text={"```ts\nconst value = 1;\n```"} />
+		);
+
+		expect(html).toContain("<pre");
+		expect(html).toContain("const value = 1;");
+		expect(html).toContain('title="Copy"');
+	});
+
+	test("renders copy controls for raw tool question output", async () => {
+		const { AskUserQuestionCard } =
+			await import("../src/components/chat/ChatRichContent.tsx");
+		const html = renderToStaticMarkup(
+			<AskUserQuestionCard content={"raw tool output"} />
+		);
+
+		expect(html).toContain("<pre");
+		expect(html).toContain("raw tool output");
+		expect(html).toContain('title="Copy"');
+	});
 });

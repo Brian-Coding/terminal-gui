@@ -31,7 +31,11 @@ import {
 	IconTarget,
 } from "../ui/Icons.tsx";
 import { GroupedEditDiff, MiniEditDiff } from "./ChatEditDiff.tsx";
-import { AskUserQuestionCard, Markdown } from "./ChatRichContent.tsx";
+import {
+	AskUserQuestionCard,
+	CopyButton,
+	Markdown,
+} from "./ChatRichContent.tsx";
 import {
 	buildRenderItems,
 	getEditToolPayload,
@@ -440,9 +444,14 @@ const Bubble = React.memo(function Bubble({
 					<span {...stylex.props(styles.toolName)}>{msg.toolName}</span>
 				</button>
 				{!collapsed && msg.content && (
-					<pre {...stylex.props(styles.toolOutput)}>
-						<ToolOutputHighlight content={msg.content} />
-					</pre>
+					<div {...stylex.props(styles.toolOutputWrap)}>
+						<pre {...stylex.props(styles.toolOutput)}>
+							<ToolOutputHighlight content={msg.content} />
+						</pre>
+						<div {...stylex.props(styles.toolCopyOverlay)}>
+							<CopyButton text={msg.content} />
+						</div>
+					</div>
 				)}
 			</div>
 		);
@@ -1020,6 +1029,9 @@ const styles = stylex.create({
 		fontFamily: font.familyMono,
 		fontSize: font.size_1,
 	},
+	toolOutputWrap: {
+		position: "relative",
+	},
 	toolOutput: {
 		maxHeight: "7rem",
 		overflow: "auto",
@@ -1035,6 +1047,18 @@ const styles = stylex.create({
 		marginTop: "0.125rem",
 		paddingBlock: controlSize._1,
 		paddingInline: controlSize._2,
+	},
+	toolCopyOverlay: {
+		opacity: {
+			default: 0,
+			":hover": 1,
+		},
+		position: "absolute",
+		right: controlSize._1,
+		top: controlSize._1,
+		transitionDuration: motion.durationBase,
+		transitionProperty: "opacity",
+		transitionTimingFunction: motion.ease,
 	},
 	assistantMessage: {
 		position: "relative",

@@ -37,7 +37,13 @@ function findParentScrollContainer(
 	return null;
 }
 
-function CopyButton({ text, className }: { text: string; className?: string }) {
+export function CopyButton({
+	text,
+	className,
+}: {
+	text: string;
+	className?: string;
+}) {
 	const [copied, setCopied] = useState(false);
 	const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	useEffect(
@@ -75,6 +81,23 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 		>
 			{copied ? <IconCheck size={10} /> : <IconCopy size={10} />}
 		</button>
+	);
+}
+
+function CopyablePre({
+	text,
+	preStyle,
+}: {
+	text: string;
+	preStyle: Record<string, unknown>;
+}) {
+	return (
+		<div {...stylex.props(styles.codeWrap)}>
+			<pre {...stylex.props(preStyle)}>{text}</pre>
+			<div {...stylex.props(styles.copyOverlay)}>
+				<CopyButton text={text} />
+			</div>
+		</div>
 	);
 }
 
@@ -225,12 +248,11 @@ export const Markdown = React.memo(function Markdown({
 				const blockKey = `${b.type}-${i}`;
 				if (b.type === "code") {
 					return (
-						<div key={blockKey} {...stylex.props(styles.codeWrap)}>
-							<pre {...stylex.props(styles.codeBlock)}>{b.content}</pre>
-							<div {...stylex.props(styles.copyOverlay)}>
-								<CopyButton text={b.content} />
-							</div>
-						</div>
+						<CopyablePre
+							key={blockKey}
+							text={b.content}
+							preStyle={styles.codeBlock}
+						/>
 					);
 				}
 				if (b.type === "heading") {
@@ -655,7 +677,7 @@ export function AskUserQuestionCard({
 	}, [onSendMessage, parsed, selections, submitted]);
 
 	if (!parsed) {
-		return <pre {...stylex.props(styles.rawToolPre)}>{content}</pre>;
+		return <CopyablePre text={content} preStyle={styles.rawToolPre} />;
 	}
 
 	return (
