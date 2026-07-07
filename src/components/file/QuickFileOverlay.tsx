@@ -13,7 +13,6 @@ import {
 	font,
 	motion,
 	radius,
-	shadow,
 } from "../../tokens.stylex.ts";
 import { IconCheck, IconCode, IconSearch, IconX } from "../ui/Icons.tsx";
 
@@ -449,41 +448,44 @@ export function QuickFileOverlay() {
 const styles = stylex.create({
 	overlay: {
 		alignItems: "center",
-		backgroundColor: color.backgroundOverlay,
+		backgroundColor: "rgba(0, 0, 0, 0.72)",
 		display: "flex",
 		inset: 0,
 		justifyContent: "center",
-		padding: controlSize._8,
+		padding: controlSize._6,
 		position: "fixed",
 		zIndex: 1000,
 	},
 	searchPanel: {
-		backgroundColor: color.backgroundRaised,
-		borderRightColor: color.border,
+		backgroundColor:
+			"color-mix(in srgb, var(--color-inferay-black) 94%, var(--color-inferay-dark-gray) 6%)",
+		borderRightColor: color.borderSubtle,
 		borderRightStyle: "solid",
 		borderRightWidth: 1,
 		display: "flex",
 		flexDirection: "column",
 		minWidth: 0,
 		overflow: "hidden",
-		width: "28rem",
+		width: "22rem",
 	},
 	workspacePanel: {
-		backgroundColor: color.backgroundRaised,
-		borderColor: color.borderStrong,
+		backgroundColor:
+			"color-mix(in srgb, var(--color-inferay-black) 96%, var(--color-inferay-dark-gray) 4%)",
+		borderColor: color.border,
 		borderRadius: radius.lg,
 		borderStyle: "solid",
 		borderWidth: 1,
-		boxShadow: shadow.modal,
+		boxShadow:
+			"0 24px 60px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.025)",
 		display: "grid",
-		gridTemplateColumns: "minmax(20rem, 28rem) minmax(0, 1fr)",
-		height: "min(82vh, 52rem)",
+		gridTemplateColumns: "minmax(18rem, 22rem) minmax(0, 1fr)",
+		height: "min(78vh, 46rem)",
 		overflow: "hidden",
-		width: "min(88rem, calc(100vw - 3rem))",
+		width: "min(72rem, calc(100vw - 4rem))",
 	},
 	searchBar: {
 		alignItems: "center",
-		borderBottomColor: color.border,
+		borderBottomColor: color.borderSubtle,
 		borderBottomStyle: "solid",
 		borderBottomWidth: 1,
 		display: "flex",
@@ -551,11 +553,13 @@ const styles = stylex.create({
 		textAlign: "left",
 	},
 	resultRowActive: {
-		backgroundColor: color.surfaceControl,
+		backgroundColor:
+			"color-mix(in srgb, var(--color-inferay-accent) 10%, transparent)",
 		color: color.textMain,
 	},
 	resultRowOpen: {
-		backgroundColor: color.accentWash,
+		backgroundColor:
+			"color-mix(in srgb, var(--color-inferay-accent) 14%, transparent)",
 	},
 	resultRowDisabled: {
 		opacity: 0.48,
@@ -586,7 +590,7 @@ const styles = stylex.create({
 	},
 	footer: {
 		alignItems: "center",
-		borderTopColor: color.border,
+		borderTopColor: color.borderSubtle,
 		borderTopStyle: "solid",
 		borderTopWidth: 1,
 		color: color.textMuted,
@@ -615,7 +619,8 @@ const styles = stylex.create({
 		paddingInline: controlSize._3,
 	},
 	editorPanel: {
-		backgroundColor: color.backgroundRaised,
+		backgroundColor:
+			"color-mix(in srgb, var(--color-inferay-black) 97%, var(--color-inferay-dark-gray) 3%)",
 		display: "flex",
 		flexDirection: "column",
 		minWidth: 0,
@@ -623,7 +628,7 @@ const styles = stylex.create({
 	},
 	editorTopBar: {
 		alignItems: "center",
-		borderBottomColor: color.border,
+		borderBottomColor: color.borderSubtle,
 		borderBottomStyle: "solid",
 		borderBottomWidth: 1,
 		display: "flex",
@@ -704,7 +709,8 @@ const styles = stylex.create({
 		transitionTimingFunction: motion.ease,
 	},
 	syntaxEditorWrap: {
-		backgroundColor: color.backgroundSubtle,
+		backgroundColor:
+			"color-mix(in srgb, var(--color-inferay-black) 98%, var(--color-inferay-dark-gray) 2%)",
 		flex: 1,
 		minHeight: 0,
 		position: "relative",
