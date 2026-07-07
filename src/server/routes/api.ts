@@ -1748,10 +1748,15 @@ async function resolveServeableImagePath(
 }
 
 async function getDefaultFileCwd(): Promise<string> {
+	const cwds = await getActiveFileCwds();
+	return cwds[0] ?? PROJECT_ROOT;
+}
+
+async function getActiveFileCwds(): Promise<string[]> {
 	const state = await readTerminalState<unknown | null>(null);
-	if (typeof state !== "object" || state === null) return PROJECT_ROOT;
+	if (typeof state !== "object" || state === null) return [PROJECT_ROOT];
 	const groups = (state as { groups?: unknown }).groups;
-	if (!Array.isArray(groups)) return PROJECT_ROOT;
+	if (!Array.isArray(groups)) return [PROJECT_ROOT];
 	const selectedGroupId = (state as { selectedGroupId?: unknown })
 		.selectedGroupId;
 	const selectedGroup =
@@ -1765,33 +1770,111 @@ async function getDefaultFileCwd(): Promise<string> {
 			})) ||
 		groups[0];
 	if (typeof selectedGroup !== "object" || selectedGroup === null) {
-		return PROJECT_ROOT;
+		return [PROJECT_ROOT];
 	}
 	const panes = (selectedGroup as { panes?: unknown }).panes;
-	if (!Array.isArray(panes)) return PROJECT_ROOT;
+	if (!Array.isArray(panes)) return [PROJECT_ROOT];
 	const selectedPaneId = (selectedGroup as { selectedPaneId?: unknown })
 		.selectedPaneId;
-	const selectedPane =
-		(typeof selectedPaneId === "string" &&
-			panes.find((pane) => {
-				return (
-					typeof pane === "object" &&
-					pane !== null &&
-					(pane as { id?: unknown }).id === selectedPaneId
-				);
-			})) ||
-		panes.find((pane) => {
-			return (
-				typeof pane === "object" &&
-				pane !== null &&
-				typeof (pane as { cwd?: unknown }).cwd === "string"
-			);
-		});
-	if (typeof selectedPane !== "object" || selectedPane === null) {
-		return PROJECT_ROOT;
+	const orderedPanes =
+		typeof selectedPaneId === "string"
+			? [
+					...panes.filter(
+						(pane) =>
+							typeof pane === "object" &&
+							pane !== null &&
+							(pane as { id?: unknown }).id === selectedPaneId
+					),
+					...panes.filter(
+						(pane) =>
+							!(
+								typeof pane === "object" &&
+								pane !== null &&
+								(pane as { id?: unknown }).id === selectedPaneId
+							)
+					),
+				]
+			: panes;
+	const cwds: string[] = [];
+	const seen = new Set<string>();
+	for (const pane of orderedPanes) {
+		if (typeof pane !== "object" || pane === null) continue;
+		const cwd = (pane as { cwd?: unknown }).cwd;
+		if (typeof cwd !== "string" || !cwd) continue;
+		const resolved = resolve(cwd);
+		if (seen.has(resolved) || !isAllowedLocalPath(resolved)) continue;
+		seen.add(resolved);
+		cwds.push(resolved);
 	}
-	const cwd = (selectedPane as { cwd?: unknown }).cwd;
-	return typeof cwd === "string" && cwd ? cwd : PROJECT_ROOT;
+	if (cwds.length > 0) return cwds;
+	return [PROJECT_ROOT];
+}
+
+type FileSearchRouteResult = {
+	name: string;
+	path: string;
+	isDir: boolean;
+	cwd: string;
+};
+
+const FILE_SEARCH_SKIP_DIRS = new Set(["node_modules", "build", "dist"]);
+
+async function searchFilesInCwd(
+	resolvedCwd: string,
+	query: string,
+	limit: number
+): Promise<FileSearchRouteResult[]> {
+	const results: FileSearchRouteResult[] = [];
+	const seen = new Set<string>();
+
+	function addFile(filePath: string, name = basename(filePath)) {
+		if (results.length >= limit || !filePath) return;
+		const lower = filePath.toLowerCase();
+		if (query && !lower.includes(query)) return;
+		if (seen.has(filePath)) return;
+		seen.add(filePath);
+		results.push({
+			name,
+			path: filePath,
+			isDir: false,
+			cwd: resolvedCwd,
+		});
+	}
+
+	try {
+		const { stdout } = await execFileAsync("git", [
+			"-C",
+			resolvedCwd,
+			"ls-files",
+			"-co",
+			"--exclude-standard",
+		]);
+		for (const filePath of stdout.split("\n")) addFile(filePath);
+		if (results.length > 0 || query) return results;
+	} catch {}
+
+	async function searchDir(dir: string, depth: number) {
+		if (depth > 4 || results.length >= limit) return;
+		try {
+			const entries = await readdir(dir, { withFileTypes: true });
+			for (const entry of entries) {
+				if (results.length >= limit) break;
+				if (
+					entry.name.startsWith(".") ||
+					FILE_SEARCH_SKIP_DIRS.has(entry.name)
+				) {
+					continue;
+				}
+				const full = join(dir, entry.name);
+				const rel = relative(resolvedCwd, full);
+				if (!entry.isDirectory()) addFile(rel, entry.name);
+				if (entry.isDirectory() && depth < 4) await searchDir(full, depth + 1);
+			}
+		} catch {}
+	}
+
+	await searchDir(resolvedCwd, 0);
+	return results;
 }
 
 function fileRoutes() {
@@ -1799,79 +1882,42 @@ function fileRoutes() {
 		"/api/files/search": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd") || (await getDefaultFileCwd());
+				const explicitCwd = url.searchParams.get("cwd");
+				const searchCwds = explicitCwd
+					? [resolve(explicitCwd)]
+					: await getActiveFileCwds();
 				const query = (url.searchParams.get("q") || "").toLowerCase();
 				const limit = Math.min(
 					Number(url.searchParams.get("limit") || "20") || 20,
 					50
 				);
 
-				const resolvedCwd = resolve(cwd);
-				if (!isAllowedLocalPath(resolvedCwd)) {
+				const resolvedCwds = searchCwds.map((cwd) => resolve(cwd));
+				if (resolvedCwds.some((cwd) => !isAllowedLocalPath(cwd))) {
 					return Response.json({ error: "Invalid directory" }, { status: 400 });
 				}
 
-				const results: { name: string; path: string; isDir: boolean }[] = [];
-				const seen = new Set<string>();
-				const SKIP = new Set(["node_modules", "build", "dist"]);
-				try {
-					const { stdout } = await execFileAsync("git", [
-						"-C",
-						resolvedCwd,
-						"ls-files",
-						"-co",
-						"--exclude-standard",
-					]);
-					for (const filePath of stdout.split("\n")) {
+				const perCwdResults = await Promise.all(
+					resolvedCwds.map((cwd) => searchFilesInCwd(cwd, query, limit))
+				);
+				const results: FileSearchRouteResult[] = [];
+				for (let index = 0; results.length < limit; index++) {
+					let added = false;
+					for (const cwdResults of perCwdResults) {
+						const result = cwdResults[index];
+						if (!result) continue;
+						results.push(result);
+						added = true;
 						if (results.length >= limit) break;
-						if (!filePath) continue;
-						const lower = filePath.toLowerCase();
-						if (query && !lower.includes(query)) continue;
-						if (seen.has(filePath)) continue;
-						seen.add(filePath);
-						results.push({
-							name: basename(filePath),
-							path: filePath,
-							isDir: false,
-						});
 					}
-					if (results.length > 0 || query) {
-						return Response.json({ cwd: resolvedCwd, results });
-					}
-				} catch {}
-
-				async function searchDir(dir: string, depth: number) {
-					if (depth > 4 || results.length >= limit) return;
-					try {
-						const entries = await readdir(dir, { withFileTypes: true });
-						for (const entry of entries) {
-							if (results.length >= limit) break;
-							if (entry.name.startsWith(".") || SKIP.has(entry.name)) continue;
-							const full = join(dir, entry.name);
-							const rel = relative(resolvedCwd, full);
-							if (seen.has(rel)) continue;
-							if (
-								!entry.isDirectory() &&
-								(!query ||
-									entry.name.toLowerCase().includes(query) ||
-									rel.toLowerCase().includes(query))
-							) {
-								seen.add(rel);
-								results.push({
-									name: entry.name,
-									path: rel,
-									isDir: false,
-								});
-							}
-							if (entry.isDirectory() && depth < 4) {
-								await searchDir(full, depth + 1);
-							}
-						}
-					} catch {}
+					if (!added) break;
 				}
 
-				await searchDir(resolvedCwd, 0);
-				return Response.json({ cwd: resolvedCwd, results });
+				return Response.json({
+					cwd: resolvedCwds[0] ?? PROJECT_ROOT,
+					cwds: resolvedCwds,
+					results,
+				});
 			}),
 		},
 

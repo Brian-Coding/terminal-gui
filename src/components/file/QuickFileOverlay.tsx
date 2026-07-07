@@ -21,10 +21,12 @@ type FileSearchResult = {
 	name: string;
 	path: string;
 	isDir: boolean;
+	cwd?: string;
 };
 
 type FileSearchResponse = {
 	cwd: string;
+	cwds?: string[];
 	results: FileSearchResult[];
 };
 
@@ -40,6 +42,18 @@ const EDITOR_LINE_HEIGHT_PX = 20;
 
 function fileName(path: string) {
 	return path.split("/").pop() || path;
+}
+
+function parentPath(path: string) {
+	const name = fileName(path);
+	return path === name ? "" : path;
+}
+
+function resultDetail(result: FileSearchResult, hasMultipleCwds: boolean) {
+	const path = parentPath(result.path);
+	if (!hasMultipleCwds || !result.cwd) return path;
+	const root = fileName(result.cwd);
+	return path ? `${path} - ${root}` : root;
 }
 
 function escapeHtml(text: string) {
@@ -115,7 +129,7 @@ function SyntaxEditor({
 export function QuickFileOverlay() {
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
-	const [cwd, setCwd] = useState("");
+	const [cwdLabel, setCwdLabel] = useState("");
 	const [results, setResults] = useState<FileSearchResult[]>([]);
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [loading, setLoading] = useState(false);
@@ -166,12 +180,15 @@ export function QuickFileOverlay() {
 				q: query,
 				limit: "50",
 			});
-			if (cwd) params.set("cwd", cwd);
 			fetchJson<FileSearchResponse>(`/api/files/search?${params.toString()}`, {
 				signal: controller.signal,
 			})
 				.then((data) => {
-					setCwd(data.cwd);
+					setCwdLabel(
+						data.cwds && data.cwds.length > 1
+							? `${data.cwds.length} active directories`
+							: data.cwd
+					);
 					setResults(data.results);
 					setSelectedIndex(0);
 					setError(null);
@@ -188,14 +205,15 @@ export function QuickFileOverlay() {
 			controller.abort();
 			clearTimeout(timer);
 		};
-	}, [cwd, open, query]);
+	}, [open, query]);
 
 	const openFile = useCallback(
 		(file: FileSearchResult | null) => {
 			if (!file || file.isDir) return;
+			const fileCwd = file.cwd ?? cwdLabel;
 			setLoading(true);
 			fetchJson<FileContentResponse>(
-				`/api/files/content?cwd=${encodeURIComponent(cwd)}&path=${encodeURIComponent(file.path)}`
+				`/api/files/content?cwd=${encodeURIComponent(fileCwd)}&path=${encodeURIComponent(file.path)}`
 			)
 				.then((data) => {
 					setActiveFile(data);
@@ -209,7 +227,7 @@ export function QuickFileOverlay() {
 				})
 				.finally(() => setLoading(false));
 		},
-		[cwd]
+		[cwdLabel]
 	);
 
 	const saveFile = useCallback(
@@ -278,37 +296,43 @@ export function QuickFileOverlay() {
 		[close, dirty, saveFile]
 	);
 
-	const fileRows = useMemo(
-		() =>
-			results.map((result, index) => {
-				const active = index === selectedIndex;
-				const opened = activeFile?.path === result.path;
-				return (
-					<button
-						key={result.path}
-						type="button"
-						onMouseEnter={() => setSelectedIndex(index)}
-						onClick={() => openFile(result)}
-						disabled={result.isDir}
-						{...stylex.props(
-							styles.resultRow,
-							active && styles.resultRowActive,
-							opened && styles.resultRowOpen,
-							result.isDir && styles.resultRowDisabled
-						)}
-					>
-						<IconCode size={13} {...stylex.props(styles.resultIcon)} />
-						<span {...stylex.props(styles.resultText)}>
-							<span {...stylex.props(styles.resultName)}>
-								{fileName(result.path)}
-							</span>
-							<span {...stylex.props(styles.resultPath)}>{result.path}</span>
+	const fileRows = useMemo(() => {
+		const cwdCount = new Set(
+			results.map((result) => result.cwd).filter(Boolean)
+		).size;
+		const hasMultipleCwds = cwdCount > 1;
+		return results.map((result, index) => {
+			const active = index === selectedIndex;
+			const opened =
+				activeFile?.path === result.path && activeFile.cwd === result.cwd;
+			const detail = resultDetail(result, hasMultipleCwds);
+			return (
+				<button
+					key={`${result.cwd ?? ""}:${result.path}`}
+					type="button"
+					onMouseEnter={() => setSelectedIndex(index)}
+					onClick={() => openFile(result)}
+					disabled={result.isDir}
+					{...stylex.props(
+						styles.resultRow,
+						active && styles.resultRowActive,
+						opened && styles.resultRowOpen,
+						result.isDir && styles.resultRowDisabled
+					)}
+				>
+					<IconCode size={13} {...stylex.props(styles.resultIcon)} />
+					<span {...stylex.props(styles.resultText)}>
+						<span {...stylex.props(styles.resultName)}>
+							{fileName(result.path)}
 						</span>
-					</button>
-				);
-			}),
-		[activeFile?.path, openFile, results, selectedIndex]
-	);
+						{detail && (
+							<span {...stylex.props(styles.resultPath)}>{detail}</span>
+						)}
+					</span>
+				</button>
+			);
+		});
+	}, [activeFile?.cwd, activeFile?.path, openFile, results, selectedIndex]);
 
 	if (!open) return null;
 
@@ -335,7 +359,7 @@ export function QuickFileOverlay() {
 								placeholder="Search files"
 								{...stylex.props(styles.searchInput)}
 							/>
-							<span {...stylex.props(styles.cwdLabel)}>{cwd}</span>
+							<span {...stylex.props(styles.cwdLabel)}>{cwdLabel}</span>
 						</div>
 						<button
 							type="button"
