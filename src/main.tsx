@@ -3,6 +3,7 @@ import { lazy, type ReactElement, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Sidebar } from "./components/layout/Sidebar.tsx";
+import { QuickFileOverlay } from "./components/file/QuickFileOverlay.tsx";
 import { TerminalShellHeader } from "./components/layout/TerminalShellHeader.tsx";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary.tsx";
 import { preloadPrompts } from "./features/prompts/usePrompts.ts";
@@ -178,6 +179,7 @@ function AppShell() {
 					</main>
 				</div>
 			</div>
+			<QuickFileOverlay />
 		</div>
 	);
 }
