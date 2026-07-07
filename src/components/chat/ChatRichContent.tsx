@@ -84,16 +84,10 @@ export function CopyButton({
 	);
 }
 
-function CopyablePre({
-	text,
-	preStyle,
-}: {
-	text: string;
-	preStyle: Record<string, unknown>;
-}) {
+function CopyablePre({ text, preStyle }: { text: string; preStyle: unknown }) {
 	return (
 		<div {...stylex.props(styles.codeWrap)}>
-			<pre {...stylex.props(preStyle)}>{text}</pre>
+			<pre {...stylex.props(preStyle as never)}>{text}</pre>
 			<div {...stylex.props(styles.copyOverlay)}>
 				<CopyButton text={text} />
 			</div>
