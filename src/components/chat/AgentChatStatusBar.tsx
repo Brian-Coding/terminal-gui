@@ -52,6 +52,12 @@ function ToolStatusIcon({ toolName }: { toolName: string }) {
 	}
 }
 
+function statusFallbackLabel(status: string) {
+	if (status === "thinking") return "Planning next step";
+	if (status === "responding") return "Writing response";
+	return "Running";
+}
+
 export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 	liveActivities = [],
 	isLoading,
@@ -93,78 +99,66 @@ export const AgentChatStatusBar = React.memo(function AgentChatStatusBar({
 	const activityItems =
 		liveActivities.length > 0 ? liveActivities : statusActivities;
 	const latestActivity = activityItems[activityItems.length - 1];
-	const hasActivity = activityItems.length > 0 || statusToolName || isLoading;
 	const displayToolName = latestActivity?.toolName ?? statusToolName;
 	const displaySummary =
-		latestActivity?.summary ??
-		statusToolName ??
-		(status === "responding" ? "Responding" : "Working…");
+		latestActivity?.summary ?? statusToolName ?? statusFallbackLabel(status);
 	const activityCount = activityItems.length;
 
 	return (
 		<div {...stylex.props(styles.root)}>
-			{hasActivity ? (
-				<div
-					{...stylex.props(styles.activityWrap)}
-					onMouseEnter={() => setIsHovered(true)}
-					onMouseLeave={() => setIsHovered(false)}
-				>
-					<div {...stylex.props(styles.activityPill)}>
-						{displayToolName && (
-							<span {...stylex.props(styles.activityIcon)}>
-								<ToolStatusIcon toolName={displayToolName} />
-							</span>
-						)}
-						<span {...stylex.props(styles.activitySummary)}>
-							{displaySummary || "Working…"}
+			<div
+				{...stylex.props(styles.activityWrap)}
+				onMouseEnter={() => setIsHovered(true)}
+				onMouseLeave={() => setIsHovered(false)}
+			>
+				<div {...stylex.props(styles.activityPill)}>
+					{displayToolName && (
+						<span {...stylex.props(styles.activityIcon)}>
+							<ToolStatusIcon toolName={displayToolName} />
 						</span>
-						{activityCount > 1 && (
-							<span {...stylex.props(styles.activityCount)}>
-								+{activityCount - 1}
-							</span>
-						)}
-					</div>
-
-					{isHovered && activityCount > 0 && (
-						<div {...stylex.props(styles.activityPopover)}>
-							<div {...stylex.props(styles.popoverHeader)}>
-								<span>Activity</span>
-								<span {...stylex.props(styles.tabularText)}>
-									{activityCount}
-								</span>
-							</div>
-							<div {...stylex.props(styles.popoverList)}>
-								{activityItems.map((activity, idx) => (
-									<div
-										key={activity.id}
-										{...stylex.props(
-											styles.popoverRow,
-											idx < activityItems.length - 1
-												? styles.popoverRowBorder
-												: null
-										)}
-									>
-										<span {...stylex.props(styles.activityIcon)}>
-											<ToolStatusIcon toolName={activity.toolName} />
-										</span>
-										<span {...stylex.props(styles.popoverSummary)}>
-											{activity.summary}
-										</span>
-										{activity.isStreaming && (
-											<span {...stylex.props(styles.liveDot)} />
-										)}
-									</div>
-								))}
-							</div>
-						</div>
+					)}
+					<span {...stylex.props(styles.activitySummary)}>
+						{displaySummary}
+					</span>
+					{activityCount > 1 && (
+						<span {...stylex.props(styles.activityCount)}>
+							+{activityCount - 1}
+						</span>
 					)}
 				</div>
-			) : (
-				<div {...stylex.props(styles.idleStatus)}>
-					<span {...stylex.props(styles.liveDot)} />
-					<span {...stylex.props(styles.idleText)}>Working…</span>
-				</div>
-			)}
+
+				{isHovered && activityCount > 0 && (
+					<div {...stylex.props(styles.activityPopover)}>
+						<div {...stylex.props(styles.popoverHeader)}>
+							<span>Activity</span>
+							<span {...stylex.props(styles.tabularText)}>{activityCount}</span>
+						</div>
+						<div {...stylex.props(styles.popoverList)}>
+							{activityItems.map((activity, idx) => (
+								<div
+									key={activity.id}
+									{...stylex.props(
+										styles.popoverRow,
+										idx < activityItems.length - 1
+											? styles.popoverRowBorder
+											: null
+									)}
+								>
+									<span {...stylex.props(styles.activityIcon)}>
+										<ToolStatusIcon toolName={activity.toolName} />
+									</span>
+									<span {...stylex.props(styles.popoverSummary)}>
+										{activity.summary}
+									</span>
+									{activity.isStreaming && (
+										<span {...stylex.props(styles.liveDot)} />
+									)}
+								</div>
+							))}
+						</div>
+					</div>
+				)}
+			</div>
 
 			<button
 				type="button"
@@ -294,15 +288,6 @@ const styles = stylex.create({
 		flexShrink: 0,
 		height: controlSize._1_5,
 		width: controlSize._1_5,
-	},
-	idleStatus: {
-		alignItems: "center",
-		display: "flex",
-		gap: controlSize._2,
-	},
-	idleText: {
-		color: color.textMuted,
-		fontSize: font.size_2,
 	},
 	stopButton: {
 		alignItems: "center",

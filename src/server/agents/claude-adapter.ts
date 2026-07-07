@@ -16,7 +16,16 @@ import {
 
 function emitClaudeAgentEvent(event: unknown, ctx: AgentRunContext) {
 	const normalized = normalizeClaudeEvent(event);
-	if (normalized) ctx.emitAgentEvent(normalized);
+	if (!normalized) return;
+	ctx.emitAgentEvent(normalized);
+	if (normalized.type === "tool-call-start") {
+		ctx.emitActivity({
+			toolName: normalized.toolName,
+			summary:
+				normalized.summary ?? summarizeToolInput(normalized.toolName, {}),
+			isStreaming: true,
+		});
+	}
 }
 
 function normalizeClaudeEvent(event: unknown): AgentEvent | null {

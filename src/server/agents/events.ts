@@ -100,15 +100,34 @@ export interface AgentAdapter<State = unknown> {
 	createHandle(prompt: string, ctx: AgentRunContext, state: State): AgentHandle;
 }
 
+function toolActionLabel(toolName: string) {
+	const name = toolName.trim().toLowerCase();
+	if (name === "exec" || name === "bash" || name === "command_execution")
+		return "Running command";
+	if (name === "patch" || name === "apply_patch" || name === "file_change")
+		return "Applying changes";
+	if (name === "web_search" || name === "websearch" || name === "webfetch")
+		return "Searching web";
+	if (name === "grep" || name === "glob") return "Searching files";
+	if (name === "read" || name === "read_file" || name === "view")
+		return "Reading";
+	if (name === "edit") return "Editing";
+	if (name === "write") return "Writing file";
+	return `Using ${toolName}`;
+}
+
 export function summarizeToolInput(toolName: string, input: unknown): string {
-	if (!input || typeof input !== "object") return toolName;
+	const action = toolActionLabel(toolName);
+	if (!input || typeof input !== "object") return action;
 	const payload = input as Record<string, unknown>;
 	const command = payload.command ?? payload.cmd;
-	if (typeof command === "string" && command) return trimSummary(command, 64);
+	if (typeof command === "string" && command)
+		return `${action}: ${trimSummary(command, 64)}`;
 	const query = payload.query;
-	if (typeof query === "string" && query) return trimSummary(query, 64);
+	if (typeof query === "string" && query)
+		return `${action}: ${trimSummary(query, 64)}`;
 	const path = payload.path ?? payload.file ?? payload.file_path;
-	if (typeof path === "string" && path) return basename(path);
+	if (typeof path === "string" && path) return `${action}: ${basename(path)}`;
 	const files = payload.files ?? payload.changes;
 	if (Array.isArray(files) && files.length > 0) {
 		const first = files[0];
@@ -121,13 +140,15 @@ export function summarizeToolInput(toolName: string, input: unknown): string {
 						(first as Record<string, unknown>).file_path)
 					: null;
 		if (typeof firstPath === "string" && firstPath) {
-			return files.length === 1
-				? basename(firstPath)
-				: `${basename(firstPath)} +${files.length - 1}`;
+			const fileSummary =
+				files.length === 1
+					? basename(firstPath)
+					: `${basename(firstPath)} +${files.length - 1}`;
+			return `${action}: ${fileSummary}`;
 		}
-		return `${files.length} changes`;
+		return `${action}: ${files.length} changes`;
 	}
-	return toolName;
+	return action;
 }
 
 export async function drainStreamToString(

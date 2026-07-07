@@ -1078,13 +1078,13 @@ const STATUS_CONFIG: Record<BaseStatus, Omit<StatusInfo, "toolName">> = {
 		isActive: false,
 	},
 	thinking: {
-		label: "Thinking...",
+		label: "Planning next step",
 		tone: "thinking",
 		iconType: "sparkles",
 		isActive: true,
 	},
 	responding: {
-		label: "Responding...",
+		label: "Writing response",
 		tone: "responding",
 		iconType: "message",
 		isActive: true,

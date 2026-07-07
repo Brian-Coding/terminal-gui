@@ -206,7 +206,7 @@ export function ThinkingIndicator({ startTime }: { startTime: number }) {
 		<output
 			{...stylex.props(styles.thinkingRow)}
 			aria-live="polite"
-			aria-label={`Working, ${elapsed} elapsed`}
+			aria-label={`Agent active, ${elapsed} elapsed`}
 		>
 			<DotMatrixRipple />
 			<span {...stylex.props(styles.thinkingTime)}>{elapsed}</span>

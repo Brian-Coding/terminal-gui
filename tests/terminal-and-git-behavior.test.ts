@@ -676,7 +676,7 @@ describe("terminal state and git change behavior", () => {
 			})
 		);
 		expect(getStatusInfo("thinking")).toEqual(
-			expect.objectContaining({ label: "Thinking...", isActive: true })
+			expect.objectContaining({ label: "Planning next step", isActive: true })
 		);
 		expect(getStatusInfo("queued")).toEqual(
 			expect.objectContaining({ label: "queued", isActive: false })

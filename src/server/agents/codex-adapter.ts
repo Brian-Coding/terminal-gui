@@ -8,7 +8,7 @@ import {
 	resolveAgentBinary,
 } from "../../features/terminal/terminal-command.ts";
 import { noop } from "../../lib/data.ts";
-import { basename, trimText as trimSummary } from "../../lib/format.ts";
+import { basename } from "../../lib/format.ts";
 import { isWithinDirectory } from "../security.ts";
 import { PidTracker } from "../services/pid-tracker.ts";
 import {
@@ -107,42 +107,6 @@ function extractText(value: unknown): string {
 			.join("");
 	}
 	return "";
-}
-
-function summarizeToolEvent(toolName: string, payload: unknown): string {
-	const record = asRecord(payload);
-	if (!record) return toolName;
-	for (const key of ["command", "cmd", "query"]) {
-		const value = stringField(record, key);
-		if (value) return trimSummary(value, 48);
-	}
-	for (const key of ["path", "file"]) {
-		const value = stringField(record, key);
-		if (value) return basename(value);
-	}
-	const files = arrayField(record, "files");
-	if (files.length > 0) {
-		const first = String(files[0] ?? "");
-		return files.length === 1
-			? basename(first)
-			: `${basename(first)} +${files.length - 1}`;
-	}
-	const changes = arrayField(record, "changes");
-	if (changes.length > 0) {
-		const first = changes[0];
-		const firstRecord = asRecord(first);
-		const firstFile =
-			typeof first === "string"
-				? first
-				: firstString(firstRecord, ["file_path", "path", "file"]);
-		if (firstFile) {
-			return changes.length === 1
-				? basename(firstFile)
-				: `${basename(firstFile)} +${changes.length - 1}`;
-		}
-		return `${changes.length} changes`;
-	}
-	return toolName;
 }
 
 function getReferenceWorkspaceDir(path: string): string | null {
@@ -437,7 +401,7 @@ export function handleCodexEvent(
 		ctx.emitStatus("tool:exec", true);
 		ctx.emitActivity({
 			toolName: "exec",
-			summary: summarizeToolEvent("exec", payload),
+			summary: summarizeToolInput("exec", payload),
 			isStreaming: true,
 		});
 		const itemId = stringField(itemRecord, "id");
@@ -473,7 +437,7 @@ export function handleCodexEvent(
 		ctx.emitStatus("tool:patch", true);
 		ctx.emitActivity({
 			toolName: "patch",
-			summary: summarizeToolEvent("patch", payload),
+			summary: summarizeToolInput("patch", payload),
 			isStreaming: true,
 		});
 		startTool("patch", payload);
@@ -503,7 +467,7 @@ export function handleCodexEvent(
 		ctx.emitStatus("tool:exec", true);
 		ctx.emitActivity({
 			toolName: "exec",
-			summary: summarizeToolEvent("exec", payload),
+			summary: summarizeToolInput("exec", payload),
 			isStreaming: true,
 		});
 		startTool("exec", payload);
@@ -530,7 +494,7 @@ export function handleCodexEvent(
 		ctx.emitStatus("tool:patch", true);
 		ctx.emitActivity({
 			toolName: "patch",
-			summary: summarizeToolEvent("patch", payload),
+			summary: summarizeToolInput("patch", payload),
 			isStreaming: true,
 		});
 		startTool("patch", payload);
@@ -544,7 +508,7 @@ export function handleCodexEvent(
 		ctx.emitStatus("tool:web_search", true);
 		ctx.emitActivity({
 			toolName: "web_search",
-			summary: summarizeToolEvent("web_search", payload),
+			summary: summarizeToolInput("web_search", payload),
 			isStreaming: true,
 		});
 		startTool("web_search", payload);
@@ -562,7 +526,7 @@ export function handleCodexEvent(
 		ctx.emitStatus(`tool:${toolName}`, true);
 		ctx.emitActivity({
 			toolName,
-			summary: summarizeToolEvent(toolName, payload),
+			summary: summarizeToolInput(toolName, payload),
 			isStreaming: true,
 		});
 		startTool(toolName, payload);
