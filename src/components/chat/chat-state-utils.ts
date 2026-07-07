@@ -1,5 +1,6 @@
 import {
 	type ChatMessage,
+	compactAdjacentDuplicateTranscriptMessages,
 	nextId,
 	trimMessages,
 } from "../../features/chat/agent-chat-shared.ts";
@@ -102,10 +103,33 @@ export function mergeSyncedMessages(
 	});
 	const serverIds = new Set(uniqueServerMessages.map((message) => message.id));
 	for (const localUserMessage of localUserMsgs.slice(serverUserMsgs.length)) {
-		if (!serverIds.has(localUserMessage.id))
-			mergedMessages.push(localUserMessage);
+		if (serverIds.has(localUserMessage.id)) continue;
+		const localIndex = localMessages.findIndex(
+			(message) => message.id === localUserMessage.id
+		);
+		const mergedIndexById = new Map(
+			mergedMessages.map((message, index) => [message.id, index])
+		);
+		let insertIndex = mergedMessages.length;
+		for (let i = localIndex - 1; i >= 0; i--) {
+			const anchorIndex = mergedIndexById.get(localMessages[i]!.id);
+			if (anchorIndex === undefined) continue;
+			insertIndex = anchorIndex + 1;
+			break;
+		}
+		mergedMessages.splice(insertIndex, 0, localUserMessage);
 	}
-	return mergedMessages;
+	return compactAdjacentDuplicateTranscriptMessages(mergedMessages);
+}
+
+function isMessagePrefix<T extends { id: string }>(
+	candidateMessages: T[],
+	messages: T[]
+): boolean {
+	if (candidateMessages.length >= messages.length) return false;
+	return candidateMessages.every(
+		(message, index) => message.id === messages[index]?.id
+	);
 }
 
 export function reconcileChatSync({
@@ -129,6 +153,19 @@ export function reconcileChatSync({
 	}
 
 	const serverMessages = dedupeChatMessagesById(rawServerMessages);
+	if (!isStreaming && isMessagePrefix(serverMessages, currentMessages)) {
+		return {
+			mergedMessages: currentMessages,
+			nextRevision: revision ?? previousRevision,
+			serverMessages,
+			shouldPersist: false,
+			shouldSkip: true,
+			shouldUpdateMessages: false,
+			streamingAssistantId: null,
+			streamingToolId: null,
+		};
+	}
+
 	const localStreamingAssistantId =
 		currentMessages.findLast?.(
 			(message) => message.isStreaming && message.role === "assistant"
@@ -310,5 +347,10 @@ export function appendSystemMessage(
 	messages: ChatStateMessage[],
 	content: string
 ): ChatStateMessage[] {
-	return trimMessages([...messages, { id: nextId(), role: "system", content }]);
+	const next = [
+		...messages,
+		{ id: nextId(), role: "system" as const, content },
+	];
+	const compacted = compactAdjacentDuplicateTranscriptMessages(next);
+	return compacted === next ? trimMessages(next) : messages;
 }

@@ -171,6 +171,33 @@ export function appendTrimmedMessage(
 	return trimMessages([...msgs, msg]);
 }
 
+function transcriptDuplicateKey(
+	message: Pick<ChatMessage, "content" | "isStreaming" | "role"> | undefined
+) {
+	if (!message?.content || message.isStreaming) return null;
+	if (message.role === "assistant") return `assistant:${message.content}`;
+	if (message.role === "system") return `system:${message.content}`;
+	return null;
+}
+
+export function compactAdjacentDuplicateTranscriptMessages<
+	T extends Pick<ChatMessage, "content" | "isStreaming" | "role">,
+>(messages: T[]): T[] {
+	let compacted: T[] | null = null;
+	let previousKey: string | null = null;
+	for (let index = 0; index < messages.length; index++) {
+		const message = messages[index]!;
+		const key = transcriptDuplicateKey(message);
+		if (key && key === previousKey) {
+			compacted ??= messages.slice(0, index);
+			continue;
+		}
+		previousKey = key;
+		if (compacted) compacted.push(message);
+	}
+	return compacted ?? messages;
+}
+
 export function prepareTranscriptForStorage<
 	T extends { isStreaming?: boolean },
 >(messages: T[]): Array<Omit<T, "isStreaming"> & { isStreaming?: boolean }> {

@@ -12,6 +12,7 @@ import {
 import {
 	appendBtwQuestionMessage,
 	appendMessageContent,
+	appendSystemMessage,
 	applyAssistantResultMessage,
 	applyPendingMessageContent,
 	createBtwQuestionMessage,
@@ -265,7 +266,7 @@ describe("chat data behavior", () => {
 		});
 	});
 
-	test("parses structured and legacy goal system messages", () => {
+	test("parses structured goal system messages", () => {
 		const structured = serializeGoalSystemMessage({
 			type: "inferay.goal",
 			status: "active",
@@ -281,19 +282,58 @@ describe("chat data behavior", () => {
 			turns: 2,
 			detail: "Goal resumed",
 		});
-		expect(parseGoalSystemMessage("Goal started: Fix checkout")).toEqual({
+		expect(parseGoalSystemMessage("Goal started: Fix checkout")).toBeNull();
+		expect(parseGoalSystemMessage("ordinary system message")).toBeNull();
+	});
+
+	test("deduplicates adjacent identical goal system messages", () => {
+		const goalStarted = serializeGoalSystemMessage({
 			type: "inferay.goal",
 			status: "active",
-			objective: "Fix checkout",
+			objective: "fix all please",
+			turns: 0,
 			detail: "Goal started",
 		});
-		expect(parseGoalSystemMessage("Goal achieved after 3 turns")).toEqual({
-			type: "inferay.goal",
-			status: "complete",
-			turns: 3,
-			detail: "Goal achieved",
-		});
-		expect(parseGoalSystemMessage("ordinary system message")).toBeNull();
+		const serverMessages: ChatMessage[] = [
+			{ id: "server-goal", role: "system", content: goalStarted },
+			{ id: "server-goal-duplicate", role: "system", content: goalStarted },
+		];
+		const localMessages: ChatMessage[] = [
+			{ id: "local-goal", role: "system", content: goalStarted },
+		];
+
+		expect(appendSystemMessage(localMessages, goalStarted)).toBe(localMessages);
+		expect(mergeSyncedMessages(localMessages, serverMessages)).toEqual([
+			{ id: "server-goal", role: "system", content: goalStarted },
+		]);
+	});
+
+	test("deduplicates adjacent identical settled assistant messages", () => {
+		const localMessages: ChatMessage[] = [
+			{ id: "u1", role: "user", content: "please keep making it better" },
+		];
+		const serverMessages: ChatMessage[] = [
+			{ id: "u1", role: "user", content: "please keep making it better" },
+			{
+				id: "a1",
+				role: "assistant",
+				content: "I'll remove the narrow regression test coverage.",
+			},
+			{
+				id: "a2",
+				role: "assistant",
+				content: "I'll remove the narrow regression test coverage.",
+			},
+		];
+
+		expect(mergeSyncedMessages(localMessages, serverMessages)).toEqual([
+			{ id: "u1", role: "user", content: "please keep making it better" },
+			{
+				id: "a1",
+				role: "assistant",
+				content: "I'll remove the narrow regression test coverage.",
+			},
+		]);
 	});
 
 	test("projects live activity ui state without duplicating adjacent updates", () => {
@@ -377,6 +417,26 @@ describe("chat data behavior", () => {
 			message("server-1", "first"),
 			message("server-a", "assistant reply", "assistant"),
 			message("local-queued", "queued follow-up"),
+		]);
+	});
+
+	test("keeps optimistic user message before server assistant response", () => {
+		const localMessages = [
+			message("server-1", "first"),
+			message("server-a", "assistant reply", "assistant"),
+			message("local-follow-up", "follow-up prompt"),
+		];
+		const serverMessages = [
+			message("server-1", "first"),
+			message("server-a", "assistant reply", "assistant"),
+			message("server-new-a", "follow-up answer", "assistant"),
+		];
+
+		expect(mergeSyncedMessages(localMessages, serverMessages)).toEqual([
+			message("server-1", "first"),
+			message("server-a", "assistant reply", "assistant"),
+			message("local-follow-up", "follow-up prompt"),
+			message("server-new-a", "follow-up answer", "assistant"),
 		]);
 	});
 

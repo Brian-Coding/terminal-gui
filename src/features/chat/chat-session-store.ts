@@ -13,6 +13,7 @@ import {
 	type ChatLoadingState,
 	type ChatMessage,
 	type CheckpointInfo,
+	compactAdjacentDuplicateTranscriptMessages,
 	prepareTranscriptForStorage,
 	type QueuedMessageInfo,
 	trimMessages,
@@ -369,16 +370,22 @@ function dedupeStoredChatMessages<T extends { id: string }>(
 
 function prepareChatMessagesForStorage(messages: ChatMessage[]): ChatMessage[] {
 	return prepareTranscriptForStorage(
-		trimMessages(dedupeStoredChatMessages(messages))
+		trimMessages(
+			compactAdjacentDuplicateTranscriptMessages(
+				dedupeStoredChatMessages(messages)
+			)
+		)
 	) as ChatMessage[];
 }
 
 function loadInitialChatMessages(paneId: string): ChatMessage[] {
-	return dedupeStoredChatMessages(
-		loadStoredMessages<ChatMessage>(paneId).map((message) => ({
-			...message,
-			isStreaming: false,
-		}))
+	return compactAdjacentDuplicateTranscriptMessages(
+		dedupeStoredChatMessages(
+			loadStoredMessages<ChatMessage>(paneId).map((message) => ({
+				...message,
+				isStreaming: false,
+			}))
+		)
 	);
 }
 
@@ -440,7 +447,9 @@ function createChatMessageReadModel(paneId: string): ChatMessageReadModel {
 			typeof update === "function"
 				? (update as (prev: ChatMessage[]) => ChatMessage[])(messages)
 				: update;
-		const deduped = dedupeStoredChatMessages(next);
+		const deduped = compactAdjacentDuplicateTranscriptMessages(
+			dedupeStoredChatMessages(next)
+		);
 		if (deduped === messages) return;
 		messages = deduped;
 		scheduleSave(deduped);
@@ -451,8 +460,10 @@ function createChatMessageReadModel(paneId: string): ChatMessageReadModel {
 		loadStarted = true;
 		const cachedMessages = await loadStoredMessagesAsync<ChatMessage>(paneId);
 		if (cachedMessages.length === 0 || messages.length > 0) return;
-		const nextMessages = dedupeStoredChatMessages(
-			cachedMessages.map((message) => ({ ...message, isStreaming: false }))
+		const nextMessages = compactAdjacentDuplicateTranscriptMessages(
+			dedupeStoredChatMessages(
+				cachedMessages.map((message) => ({ ...message, isStreaming: false }))
+			)
 		);
 		if (nextMessages.length === 0) return;
 		messages = nextMessages;

@@ -143,3 +143,62 @@ test("chat sync reconciler hydrates streaming rows when no local stream exists",
 	});
 	expect(result.mergedMessages.at(-1)?.content).toBe("server partial");
 });
+
+test("chat sync reconciler skips stale completed sync that is only a local prefix", () => {
+	const currentMessages: ChatMessage[] = [
+		{ id: "u1", role: "user", content: "first prompt" },
+		{ id: "a1", role: "assistant", content: "first answer" },
+		{ id: "u2", role: "user", content: "follow-up prompt" },
+		{ id: "a2", role: "assistant", content: "follow-up answer" },
+	];
+
+	const result = reconcileChatSync({
+		currentMessages,
+		isStreaming: false,
+		previousRevision: 4,
+		revision: 5,
+		serverMessages: [
+			{ id: "u1", role: "user", content: "first prompt" },
+			{ id: "a1", role: "assistant", content: "first answer" },
+		],
+	});
+
+	expect(result).toMatchObject({
+		mergedMessages: currentMessages,
+		nextRevision: 5,
+		shouldPersist: false,
+		shouldSkip: true,
+		shouldUpdateMessages: false,
+	});
+});
+
+test("chat sync reconciler still accepts shorter completed sync with new server output", () => {
+	const result = reconcileChatSync({
+		currentMessages: [
+			{ id: "u1", role: "user", content: "first prompt" },
+			{ id: "a1", role: "assistant", content: "first answer" },
+			{ id: "local-u2", role: "user", content: "follow-up prompt" },
+		],
+		isStreaming: false,
+		previousRevision: 4,
+		revision: 5,
+		serverMessages: [
+			{ id: "u1", role: "user", content: "first prompt" },
+			{ id: "a1", role: "assistant", content: "first answer" },
+			{ id: "server-a2", role: "assistant", content: "follow-up answer" },
+		],
+	});
+
+	expect(result).toMatchObject({
+		nextRevision: 5,
+		shouldPersist: true,
+		shouldSkip: false,
+		shouldUpdateMessages: true,
+	});
+	expect(result.mergedMessages).toEqual([
+		{ id: "u1", role: "user", content: "first prompt" },
+		{ id: "a1", role: "assistant", content: "first answer" },
+		{ id: "local-u2", role: "user", content: "follow-up prompt" },
+		{ id: "server-a2", role: "assistant", content: "follow-up answer" },
+	]);
+});
