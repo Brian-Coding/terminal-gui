@@ -41,7 +41,6 @@ function isFilePreviewMessage(msg: unknown): msg is FilePreviewMessage {
 }
 
 export function useAgentChatComposerState(paneId: string, enabled = true) {
-	const [isDragOver, setIsDragOver] = useState(false);
 	const [attachedImages, setAttachedImages] = useState<AttachedImageInfo[]>([]);
 	const attachedImagesRef = useRef(attachedImages);
 	attachedImagesRef.current = attachedImages;
@@ -190,7 +189,6 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 	const handleDrop = useCallback(
 		async (e: React.DragEvent) => {
 			e.preventDefault();
-			setIsDragOver(false);
 			for (const file of Array.from(e.dataTransfer.files)) {
 				if (file.type.startsWith("image/")) await attachImage(file);
 			}
@@ -222,8 +220,6 @@ export function useAgentChatComposerState(paneId: string, enabled = true) {
 	);
 
 	return {
-		isDragOver,
-		setIsDragOver,
 		attachedImages,
 		queuedMessages,
 		replaceQueuedMessages,

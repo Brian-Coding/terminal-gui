@@ -557,7 +557,6 @@ export const AgentChatView = memo(function AgentChatView({
 		textareaRef,
 	} = useChatViewport(input, isSelected, renderVisibleChat);
 	const {
-		setIsDragOver,
 		attachedImages,
 		queuedMessages,
 		replaceQueuedMessages,
@@ -658,7 +657,8 @@ export const AgentChatView = memo(function AgentChatView({
 		wsClient.send({ type: "chat:stop", paneId });
 		setRunStatus({ isLoading: false, status: "idle", startTime: null });
 		setMessages((prev) => appendSystemMessage(prev, "Generation stopped"));
-	}, [paneId, setMessages, setRunStatus]);
+		scheduleScrollToBottom("auto");
+	}, [paneId, scheduleScrollToBottom, setMessages, setRunStatus]);
 	useImperativeHandle(
 		ref,
 		() => ({
@@ -743,11 +743,7 @@ export const AgentChatView = memo(function AgentChatView({
 						}
 					: undefined
 			}
-			onDragOver={(e) => {
-				e.preventDefault();
-				setIsDragOver(true);
-			}}
-			onDragLeave={() => setIsDragOver(false)}
+			onDragOver={(e) => e.preventDefault()}
 			onDrop={handleDrop}
 		>
 			{renderVisibleChat && !hideHeader && !composerOnly && (

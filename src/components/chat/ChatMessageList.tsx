@@ -343,13 +343,20 @@ const Bubble = React.memo(function Bubble({
 				<div {...stylex.props(styles.userBubble)}>
 					{userMessageDisplay.imagePaths.length > 0 && (
 						<div {...stylex.props(styles.userImages)}>
-							{userMessageDisplay.imagePaths.map((imgPath) => (
-								<img
+							{userMessageDisplay.imagePaths.map((imgPath, index) => (
+								<span
 									key={imgPath}
-									src={`/api/file?path=${encodeURIComponent(imgPath)}`}
-									alt=""
-									{...stylex.props(styles.userImage)}
-								/>
+									{...stylex.props(
+										styles.userImageFrame,
+										index % 2 === 1 && styles.userImageFrameAlt
+									)}
+								>
+									<img
+										src={`/api/file?path=${encodeURIComponent(imgPath)}`}
+										alt=""
+										{...stylex.props(styles.userImage)}
+									/>
+								</span>
 							))}
 						</div>
 					)}
@@ -541,6 +548,7 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 		paddingStart: CHAT_LIST_TOP_PADDING_PX,
 		useAnimationFrameWithResizeObserver: true,
 	});
+	const totalSize = rowVirtualizer.getTotalSize();
 	const virtualRows = rowVirtualizer.getVirtualItems();
 	const renderedVirtualRows =
 		virtualRows.length > 0 || renderRows.length === 0
@@ -629,15 +637,24 @@ export const ChatMessageList = React.memo(function ChatMessageList({
 	}, [lastRowChangeKey, renderRows.length, rowVirtualizer, stickToBottom]);
 
 	useLayoutEffect(() => {
+		const scrollElement = scrollElementRef.current;
+		if (!scrollElement) return;
+		const maxScrollTop = Math.max(
+			0,
+			scrollElement.scrollHeight - scrollElement.clientHeight
+		);
+		if (scrollElement.scrollTop > maxScrollTop) {
+			scrollElement.scrollTop = maxScrollTop;
+		}
+	}, [renderRows.length, scrollElementRef, totalSize]);
+
+	useLayoutEffect(() => {
 		if (renderRows.length > 0) return;
 		didInitialScrollRef.current = false;
 	}, [renderRows.length]);
 
 	return (
-		<div
-			{...stylex.props(styles.messageList)}
-			style={{ height: rowVirtualizer.getTotalSize() }}
-		>
+		<div {...stylex.props(styles.messageList)} style={{ height: totalSize }}>
 			{renderedVirtualRows.map((virtualRow) => {
 				const index = virtualRow.index;
 				const item = renderRows[index];
@@ -914,17 +931,74 @@ const styles = stylex.create({
 	userImages: {
 		display: "flex",
 		flexWrap: "wrap",
-		gap: controlSize._1_5,
-		marginBottom: controlSize._1_5,
+		gap: controlSize._2,
+		marginBlock: controlSize._1,
+		paddingBlock: controlSize._0_5,
+		paddingInline: controlSize._0_5,
+	},
+	userImageFrame: {
+		position: "relative",
+		display: "inline-flex",
+		paddingBlock: controlSize._1,
+		paddingInline: controlSize._1,
+		borderRadius: radius.sm,
+		backgroundColor: "color-mix(in srgb, var(--color-inferay-bg) 78%, #f6efe4)",
+		backgroundImage:
+			"linear-gradient(135deg, rgba(255,255,255,0.26), rgba(255,255,255,0) 42%), repeating-linear-gradient(0deg, rgba(255,255,255,0.08) 0 1px, transparent 1px 6px)",
+		boxShadow:
+			"0 0 0 1px rgba(255,255,255,0.12), 0 10px 24px rgba(30, 18, 46, 0.22), 0 0 28px rgba(176, 143, 255, 0.12)",
+		transform: "rotate(-1.5deg)",
+		transitionDuration: motion.durationBase,
+		transitionProperty: "box-shadow, transform",
+		transitionTimingFunction: motion.ease,
+		":hover": {
+			boxShadow:
+				"0 0 0 1px rgba(255,255,255,0.16), 0 12px 28px rgba(30, 18, 46, 0.28), 0 0 34px rgba(176, 143, 255, 0.18)",
+			transform: "rotate(-0.5deg) translateY(-1px)",
+		},
+		"::before": {
+			content: '""',
+			position: "absolute",
+			top: "-0.38rem",
+			left: "24%",
+			width: "2.6rem",
+			height: "0.82rem",
+			borderRadius: radius.xs,
+			backgroundColor: "rgba(244, 221, 181, 0.58)",
+			backgroundImage:
+				"linear-gradient(90deg, rgba(255,255,255,0.22), rgba(255,255,255,0))",
+			boxShadow: "0 1px 4px rgba(0, 0, 0, 0.14)",
+			transform: "rotate(4deg)",
+			zIndex: 1,
+		},
+		"::after": {
+			content: '""',
+			position: "absolute",
+			inset: controlSize._1,
+			borderRadius: radius.xs,
+			backgroundImage:
+				"radial-gradient(circle at 22% 18%, rgba(255,255,255,0.22), transparent 25%), linear-gradient(180deg, rgba(185, 170, 255, 0.14), rgba(255, 205, 238, 0.08))",
+			pointerEvents: "none",
+		},
+	},
+	userImageFrameAlt: {
+		transform: "rotate(1.25deg)",
+		":hover": {
+			transform: "rotate(0.4deg) translateY(-1px)",
+		},
+		"::before": {
+			left: "auto",
+			right: "18%",
+			transform: "rotate(-5deg)",
+		},
 	},
 	userImage: {
-		maxWidth: "8rem",
-		maxHeight: "6rem",
-		borderWidth: 1,
-		borderStyle: "solid",
-		borderColor: color.borderControl,
-		borderRadius: radius.sm,
+		display: "block",
+		width: "clamp(5.5rem, 20vw, 8.5rem)",
+		height: "clamp(4.25rem, 15vw, 6.5rem)",
+		borderRadius: radius.xs,
 		objectFit: "cover",
+		filter: "saturate(0.88) contrast(0.96) brightness(1.05)",
 	},
 	userText: {
 		whiteSpace: "pre-wrap",
