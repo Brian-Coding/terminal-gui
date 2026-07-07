@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { findExistingApp } from "../packages/inferay/src/platform.js";
 import { findAsset, releaseApiUrl } from "../packages/inferay/src/releases.js";
 
 describe("release metadata mapping", () => {
@@ -53,6 +57,23 @@ describe("release metadata mapping", () => {
 			} else {
 				process.env.INFERAY_RELEASE_URL = previousUrl;
 			}
+		}
+	});
+
+	test("discovers local release app bundle built from the dev source bundle", async () => {
+		const root = join(tmpdir(), `inferay-release-app-${Date.now()}`);
+		const releaseApp = join(
+			root,
+			"build",
+			"release-macos-arm64",
+			"inferay.app"
+		);
+
+		try {
+			await mkdir(releaseApp, { recursive: true });
+			expect(findExistingApp(root, { includeDev: true })).toBe(releaseApp);
+		} finally {
+			await rm(root, { recursive: true, force: true });
 		}
 	});
 });
