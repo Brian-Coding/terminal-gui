@@ -1,6 +1,13 @@
 import { exec, execFile } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { mkdir, readdir, readFile, realpath, stat } from "node:fs/promises";
+import {
+	mkdir,
+	readdir,
+	readFile,
+	realpath,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { homedir, hostname, platform, tmpdir } from "node:os";
 import {
 	basename,
@@ -1740,12 +1747,59 @@ async function resolveServeableImagePath(
 	}
 }
 
+async function getDefaultFileCwd(): Promise<string> {
+	const state = await readTerminalState<unknown | null>(null);
+	if (typeof state !== "object" || state === null) return PROJECT_ROOT;
+	const groups = (state as { groups?: unknown }).groups;
+	if (!Array.isArray(groups)) return PROJECT_ROOT;
+	const selectedGroupId = (state as { selectedGroupId?: unknown })
+		.selectedGroupId;
+	const selectedGroup =
+		(typeof selectedGroupId === "string" &&
+			groups.find((group) => {
+				return (
+					typeof group === "object" &&
+					group !== null &&
+					(group as { id?: unknown }).id === selectedGroupId
+				);
+			})) ||
+		groups[0];
+	if (typeof selectedGroup !== "object" || selectedGroup === null) {
+		return PROJECT_ROOT;
+	}
+	const panes = (selectedGroup as { panes?: unknown }).panes;
+	if (!Array.isArray(panes)) return PROJECT_ROOT;
+	const selectedPaneId = (selectedGroup as { selectedPaneId?: unknown })
+		.selectedPaneId;
+	const selectedPane =
+		(typeof selectedPaneId === "string" &&
+			panes.find((pane) => {
+				return (
+					typeof pane === "object" &&
+					pane !== null &&
+					(pane as { id?: unknown }).id === selectedPaneId
+				);
+			})) ||
+		panes.find((pane) => {
+			return (
+				typeof pane === "object" &&
+				pane !== null &&
+				typeof (pane as { cwd?: unknown }).cwd === "string"
+			);
+		});
+	if (typeof selectedPane !== "object" || selectedPane === null) {
+		return PROJECT_ROOT;
+	}
+	const cwd = (selectedPane as { cwd?: unknown }).cwd;
+	return typeof cwd === "string" && cwd ? cwd : PROJECT_ROOT;
+}
+
 function fileRoutes() {
 	return {
 		"/api/files/search": {
 			GET: tryRoute(async (req) => {
 				const url = new URL(req.url);
-				const cwd = url.searchParams.get("cwd") || PROJECT_ROOT;
+				const cwd = url.searchParams.get("cwd") || (await getDefaultFileCwd());
 				const query = (url.searchParams.get("q") || "").toLowerCase();
 				const limit = Math.min(
 					Number(url.searchParams.get("limit") || "20") || 20,
@@ -1760,6 +1814,31 @@ function fileRoutes() {
 				const results: { name: string; path: string; isDir: boolean }[] = [];
 				const seen = new Set<string>();
 				const SKIP = new Set(["node_modules", "build", "dist"]);
+				try {
+					const { stdout } = await execFileAsync("git", [
+						"-C",
+						resolvedCwd,
+						"ls-files",
+						"-co",
+						"--exclude-standard",
+					]);
+					for (const filePath of stdout.split("\n")) {
+						if (results.length >= limit) break;
+						if (!filePath) continue;
+						const lower = filePath.toLowerCase();
+						if (query && !lower.includes(query)) continue;
+						if (seen.has(filePath)) continue;
+						seen.add(filePath);
+						results.push({
+							name: basename(filePath),
+							path: filePath,
+							isDir: false,
+						});
+					}
+					if (results.length > 0 || query) {
+						return Response.json({ cwd: resolvedCwd, results });
+					}
+				} catch {}
 
 				async function searchDir(dir: string, depth: number) {
 					if (depth > 4 || results.length >= limit) return;
@@ -1772,15 +1851,16 @@ function fileRoutes() {
 							const rel = relative(resolvedCwd, full);
 							if (seen.has(rel)) continue;
 							if (
-								!query ||
-								entry.name.toLowerCase().includes(query) ||
-								rel.toLowerCase().includes(query)
+								!entry.isDirectory() &&
+								(!query ||
+									entry.name.toLowerCase().includes(query) ||
+									rel.toLowerCase().includes(query))
 							) {
 								seen.add(rel);
 								results.push({
 									name: entry.name,
 									path: rel,
-									isDir: entry.isDirectory(),
+									isDir: false,
 								});
 							}
 							if (entry.isDirectory() && depth < 4) {
@@ -1792,6 +1872,95 @@ function fileRoutes() {
 
 				await searchDir(resolvedCwd, 0);
 				return Response.json({ cwd: resolvedCwd, results });
+			}),
+		},
+
+		"/api/files/content": {
+			GET: tryRoute(async (req) => {
+				const url = new URL(req.url);
+				const cwd = url.searchParams.get("cwd") || (await getDefaultFileCwd());
+				const filePath = url.searchParams.get("path");
+				if (!filePath) {
+					return Response.json({ error: "No path provided" }, { status: 400 });
+				}
+
+				const resolvedCwd = resolve(cwd);
+				if (!isAllowedLocalPath(resolvedCwd)) {
+					return Response.json({ error: "Invalid directory" }, { status: 400 });
+				}
+				const resolvedFile = resolve(resolvedCwd, filePath);
+				if (
+					!isAllowedLocalPath(resolvedFile) ||
+					!isWithinDirectory(resolvedFile, resolvedCwd)
+				) {
+					return Response.json({ error: "Access denied" }, { status: 403 });
+				}
+
+				const info = await stat(resolvedFile);
+				if (!info.isFile()) {
+					return Response.json({ error: "Not a file" }, { status: 400 });
+				}
+				if (info.size > 1024 * 1024) {
+					return Response.json({ error: "File too large" }, { status: 413 });
+				}
+
+				const content = await readFile(resolvedFile, "utf8");
+				return Response.json({
+					content,
+					cwd: resolvedCwd,
+					path: relative(resolvedCwd, resolvedFile),
+					size: info.size,
+					updatedAt: info.mtimeMs,
+				});
+			}),
+			POST: tryRoute(async (req) => {
+				const body = (await req.json()) as {
+					content?: unknown;
+					cwd?: unknown;
+					path?: unknown;
+				};
+				const cwd =
+					typeof body.cwd === "string" ? body.cwd : await getDefaultFileCwd();
+				const filePath = typeof body.path === "string" ? body.path : "";
+				const content = typeof body.content === "string" ? body.content : null;
+				if (!filePath) {
+					return Response.json({ error: "No path provided" }, { status: 400 });
+				}
+				if (content === null) {
+					return Response.json(
+						{ error: "No content provided" },
+						{ status: 400 }
+					);
+				}
+				if (content.length > 1024 * 1024) {
+					return Response.json({ error: "File too large" }, { status: 413 });
+				}
+
+				const resolvedCwd = resolve(cwd);
+				if (!isAllowedLocalPath(resolvedCwd)) {
+					return Response.json({ error: "Invalid directory" }, { status: 400 });
+				}
+				const resolvedFile = resolve(resolvedCwd, filePath);
+				if (
+					!isAllowedLocalPath(resolvedFile) ||
+					!isWithinDirectory(resolvedFile, resolvedCwd)
+				) {
+					return Response.json({ error: "Access denied" }, { status: 403 });
+				}
+
+				const info = await stat(resolvedFile);
+				if (!info.isFile()) {
+					return Response.json({ error: "Not a file" }, { status: 400 });
+				}
+				await writeFile(resolvedFile, content, "utf8");
+				const updated = await stat(resolvedFile);
+				return Response.json({
+					ok: true,
+					cwd: resolvedCwd,
+					path: relative(resolvedCwd, resolvedFile),
+					size: updated.size,
+					updatedAt: updated.mtimeMs,
+				});
 			}),
 		},
 
