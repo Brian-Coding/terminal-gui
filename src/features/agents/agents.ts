@@ -73,6 +73,21 @@ const CLAUDE_MODELS: readonly ModelOption[] = [
 ] as const;
 
 const CODEX_MODELS: readonly ModelOption[] = [
+	{
+		id: "gpt-5.6-sol",
+		label: "GPT-5.6 Sol",
+		detail: "★ Frontier agentic coding",
+	},
+	{
+		id: "gpt-5.6-terra",
+		label: "GPT-5.6 Terra",
+		detail: "Balanced everyday work",
+	},
+	{
+		id: "gpt-5.6-luna",
+		label: "GPT-5.6 Luna",
+		detail: "Fast & affordable",
+	},
 	{ id: "gpt-5.5", label: "GPT-5.5", detail: "Frontier model" },
 	{ id: "gpt-5.4", label: "GPT-5.4", detail: "Everyday coding" },
 	{ id: "gpt-5.2-codex", label: "GPT-5.2 Codex", detail: "★ Frontier agentic" },
@@ -133,7 +148,7 @@ const AGENT_DEFINITIONS: Record<AgentKind, AgentDefinition> = {
 		supportsResume: true,
 		nativeSlashCommands: CODEX_NATIVE_COMMANDS,
 		models: CODEX_MODELS,
-		defaultModel: "gpt-5.5",
+		defaultModel: "gpt-5.6-sol",
 	},
 } as const;
 
@@ -160,7 +175,7 @@ const DEFAULT_CHAT_SETTINGS_KEY = "inferay-default-chat-settings";
 
 const FALLBACK_DEFAULT_CHAT_SETTINGS: DefaultChatSettings = {
 	agentKind: "codex",
-	model: "gpt-5.5",
+	model: "gpt-5.6-sol",
 	reasoningLevel: "low",
 };
 
