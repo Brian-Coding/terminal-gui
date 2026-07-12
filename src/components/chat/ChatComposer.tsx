@@ -132,9 +132,6 @@ const CommandMenuRow = memo(function CommandMenuRow({
 					<span {...stylex.props(styles.commandBadge)}>Native</span>
 				)}
 			</span>
-			<span {...stylex.props(styles.commandDescription)}>
-				{command.description}
-			</span>
 		</button>
 	);
 });
@@ -482,7 +479,6 @@ export const ChatComposer = memo(function ChatComposer({
 						)}
 						{showCommands && filteredCommands.length > 0 && (
 							<div {...stylex.props(styles.floatingMenu, styles.commandMenu)}>
-								<div {...stylex.props(styles.commandHeader)}>Commands</div>
 								<div {...stylex.props(styles.commandList)}>
 									{filteredCommands.map((command, idx) => (
 										<CommandMenuRow
@@ -992,15 +988,6 @@ const styles = stylex.create({
 		borderRadius: radius.lg,
 		boxShadow: shadow.modal,
 	},
-	commandHeader: {
-		color: color.textMuted,
-		fontSize: font.size_2,
-		fontWeight: font.weight_5,
-		letterSpacing: "0.04em",
-		paddingBlock: controlSize._2,
-		paddingInline: controlSize._3,
-		textTransform: "uppercase",
-	},
 	commandList: {
 		maxHeight: "280px",
 		overflowY: "auto",
@@ -1051,10 +1038,6 @@ const styles = stylex.create({
 	},
 	commandNameActive: {
 		color: color.accent,
-	},
-	commandDescription: {
-		color: color.textMuted,
-		fontSize: "0.6875rem",
 	},
 	accentText: {
 		color: "currentColor",
