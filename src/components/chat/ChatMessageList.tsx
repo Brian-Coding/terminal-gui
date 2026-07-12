@@ -11,6 +11,10 @@ import React, {
 } from "react";
 import type { CheckpointInfo } from "../../features/chat/agent-chat-shared.ts";
 import {
+	type CommandSystemMessage,
+	parseCommandSystemMessage,
+} from "../../features/chat/command-system-message.ts";
+import {
 	type GoalSystemMessage,
 	parseGoalSystemMessage,
 } from "../../features/chat/goal-system-message.ts";
@@ -170,6 +174,31 @@ function GoalSystemCard({ goal }: { goal: GoalSystemMessage }) {
 				)}
 				{goal.detail && (
 					<div {...stylex.props(styles.goalDetail)}>{goal.detail}</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
+function CommandSystemCard({ command }: { command: CommandSystemMessage }) {
+	const commandLabel = `/${command.name}${command.args ? ` ${command.args}` : ""}`;
+	return (
+		<div {...stylex.props(styles.goalCard, styles.goalCardActive)}>
+			<span {...stylex.props(styles.goalIconSlot, styles.goalIconActive)}>
+				<DotMatrixRipple
+					dotSize={1.35}
+					gap={1}
+					speed={1.1}
+					ariaLabel="Command running"
+				/>
+			</span>
+			<div {...stylex.props(styles.goalCardBody)}>
+				<div {...stylex.props(styles.goalCardHeader)}>
+					<span {...stylex.props(styles.goalCardTitle)}>Running Command</span>
+				</div>
+				<div {...stylex.props(styles.commandObjective)}>{commandLabel}</div>
+				{command.description && (
+					<div {...stylex.props(styles.goalDetail)}>{command.description}</div>
 				)}
 			</div>
 		</div>
@@ -373,15 +402,14 @@ const Bubble = React.memo(function Bubble({
 	if (msg.role === "system") {
 		const goalMessage = parseGoalSystemMessage(msg.content);
 		if (goalMessage) return <GoalSystemCard goal={goalMessage} />;
+		const commandMessage = parseCommandSystemMessage(msg.content);
+		if (commandMessage) return <CommandSystemCard command={commandMessage} />;
 		const runningMatch = msg.content.match(/^Running \/(.+)\.\.\.$/);
 		if (runningMatch?.[1]) {
-			const commandName = runningMatch[1];
 			return (
-				<div {...stylex.props(styles.systemRunRow)}>
-					<div {...stylex.props(styles.systemRunPill)}>
-						<span {...stylex.props(styles.runningCommand)}>/{commandName}</span>
-					</div>
-				</div>
+				<CommandSystemCard
+					command={{ type: "inferay.command", name: runningMatch[1] }}
+				/>
 			);
 		}
 		return <p {...stylex.props(styles.systemText)}>{msg.content}</p>;
@@ -803,6 +831,15 @@ const styles = stylex.create({
 		fontWeight: font.weight_6,
 		lineHeight: 1.35,
 	},
+	commandObjective: {
+		color: color.accent,
+		fontFamily: font.familyMono,
+		fontSize: font.size_3,
+		fontWeight: font.weight_6,
+		lineHeight: 1.35,
+		marginTop: controlSize._0_5,
+		overflowWrap: "break-word",
+	},
 	goalTurns: {
 		color: color.textMuted,
 		fontFamily: font.familyMono,
@@ -1004,29 +1041,6 @@ const styles = stylex.create({
 		whiteSpace: "pre-wrap",
 		overflowWrap: "break-word",
 		fontSize: font.size_3,
-	},
-	systemRunRow: {
-		display: "flex",
-		justifyContent: "center",
-		paddingBlock: controlSize._1,
-	},
-	systemRunPill: {
-		display: "inline-flex",
-		alignItems: "center",
-		gap: controlSize._2_5,
-		borderWidth: 1,
-		borderStyle: "solid",
-		borderColor: color.accentBorder,
-		borderRadius: radius.lg,
-		backgroundColor: color.accentWash,
-		paddingBlock: controlSize._1_5,
-		paddingInline: controlSize._3,
-	},
-	runningCommand: {
-		color: color.accent,
-		fontFamily: font.familyMono,
-		fontSize: font.size_4,
-		fontWeight: font.weight_5,
 	},
 	dot2: {
 		animationDelay: "0.1s",

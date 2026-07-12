@@ -15,6 +15,7 @@ import {
 	loadStoredSessionId,
 } from "../../features/chat/chat-session-store.ts";
 import type { AgentKind } from "../../features/terminal/terminal-utils.ts";
+import { serializeCommandSystemMessage } from "../../features/chat/command-system-message.ts";
 import { noop } from "../../lib/data.ts";
 import { wsClient } from "../../lib/websocket.ts";
 import { hideMenuState } from "./chat-agent-utils.ts";
@@ -269,7 +270,12 @@ export function useChatInputActions({
 			if (cmd.id) incrementUsage(cmd.id).catch(noop);
 			sendUserMessage({
 				displayText,
-				systemMessage: `Running /${cmd.name}...`,
+				systemMessage: serializeCommandSystemMessage({
+					type: "inferay.command",
+					name: cmd.name,
+					description: cmd.description,
+					args: args?.trim() || undefined,
+				}),
 				text: prompt,
 			});
 		},

@@ -33,6 +33,10 @@ import {
 	parseGoalSystemMessage,
 	serializeGoalSystemMessage,
 } from "../src/features/chat/goal-system-message.ts";
+import {
+	parseCommandSystemMessage,
+	serializeCommandSystemMessage,
+} from "../src/features/chat/command-system-message.ts";
 
 function message(
 	id: string,
@@ -284,6 +288,24 @@ describe("chat data behavior", () => {
 		});
 		expect(parseGoalSystemMessage("Goal started: Fix checkout")).toBeNull();
 		expect(parseGoalSystemMessage("ordinary system message")).toBeNull();
+	});
+
+	test("parses structured command system messages", () => {
+		const structured = serializeCommandSystemMessage({
+			type: "inferay.command",
+			name: "commit",
+			description: "Commit the current changes",
+			args: "fix picker",
+		});
+
+		expect(parseCommandSystemMessage(structured)).toEqual({
+			type: "inferay.command",
+			name: "commit",
+			description: "Commit the current changes",
+			args: "fix picker",
+		});
+		expect(parseCommandSystemMessage('{"type":"inferay.command"}')).toBeNull();
+		expect(parseCommandSystemMessage("Running /commit...")).toBeNull();
 	});
 
 	test("deduplicates adjacent identical goal system messages", () => {
