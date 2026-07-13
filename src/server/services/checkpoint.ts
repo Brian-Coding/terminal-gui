@@ -1,5 +1,5 @@
 import { mkdir, readdir, unlink } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { atomicWriteJson, readJson } from "../../lib/route-helpers.ts";
 import { isWithinDirectory, resolveAllowedLocalPath } from "../security.ts";
 
@@ -14,7 +14,6 @@ interface Checkpoint {
 	paneId: string;
 	cwd: string;
 	gitRoot: string | null;
-	cwdRelative: string;
 	headSha: string | null;
 	timestamp: number;
 	userMessage: string;
@@ -46,6 +45,8 @@ const CHECKPOINTS_PATH = resolve(
 const MAX_CHECKPOINTS_PER_PANE = 10;
 const MAX_TOTAL_CHECKPOINTS = 50;
 const MAX_FILE_SIZE = 1_000_000;
+const MAX_INLINE_DIFFS = 25;
+const MAX_INLINE_DIFF_CHARS = 2_000_000;
 const BINARY_EXTENSIONS = new Set([
 	".png",
 	".jpg",
@@ -92,6 +93,10 @@ function isBinary(filePath: string): boolean {
 	return BINARY_EXTENSIONS.has(
 		filePath.substring(filePath.lastIndexOf(".")).toLowerCase()
 	);
+}
+
+function isSkippedPath(filePath: string): boolean {
+	return filePath.split(/[\\/]/).some((part) => SKIP_DIRS.has(part));
 }
 
 async function runGit(
@@ -233,15 +238,15 @@ async function captureGitSnapshot(
 	const args = ["status", "--porcelain"];
 	if (cwdRelative) args.push("--", cwdRelative);
 
-	const { stdout: output } = await runGit(args, gitRoot, false);
+	args.unshift("-c", "core.fsmonitor=false");
+	const { code, stdout: output } = await runGit(args, gitRoot, false);
+	if (code !== 0) throw new Error("Unable to capture Git working tree state");
 	const snapshot: Record<string, string | null> = {};
 
 	for (const { status, path } of parsePorcelain(output)) {
-		if (isBinary(path)) continue;
+		if (isBinary(path) || isSkippedPath(path)) continue;
 		if (status[0] === "D" || status[1] === "D") {
-			const content = await gitShowFile(gitRoot, "HEAD", path);
-			snapshot[path] =
-				content !== null ? await storeBlob(gitRoot, content) : null;
+			snapshot[path] = null;
 		} else {
 			const content = await safeReadFile(resolve(gitRoot, path));
 			snapshot[path] =
@@ -264,7 +269,6 @@ async function captureFileSnapshot(
 
 const checkpoints = new Map<string, Checkpoint[]>();
 const checkpointsById = new Map<string, Checkpoint>();
-const pending = new Map<string, string>();
 
 function findCheckpoint(checkpointId: string): Checkpoint | null {
 	return checkpointsById.get(checkpointId) ?? null;
@@ -309,7 +313,6 @@ export const CheckpointService = {
 			paneId,
 			cwd: safeCwd,
 			gitRoot,
-			cwdRelative,
 			headSha,
 			timestamp: Date.now(),
 			userMessage,
@@ -328,37 +331,45 @@ export const CheckpointService = {
 			if (removed) checkpointsById.delete(removed.id);
 		}
 
-		pending.set(paneId, id);
 		return id;
 	},
 
 	async finalizeCheckpoint(
-		checkpointId: string
+		checkpointId: string,
+		touchedPaths: readonly string[] = []
 	): Promise<CheckpointMeta | null> {
 		const cp = findCheckpoint(checkpointId);
 		if (!cp) return null;
 
-		if (pending.get(cp.paneId) === checkpointId) pending.delete(cp.paneId);
-
-		const afterSnapshot = await (cp.gitRoot
-			? captureGitSnapshot(cp.gitRoot, cp.cwdRelative)
-			: captureFileSnapshot(cp.cwd));
-
-		const allPaths = new Set([
-			...Object.keys(cp.beforeSnapshot),
-			...Object.keys(afterSnapshot),
-		]);
+		const root = cp.gitRoot ?? cp.cwd;
+		const paths = new Set(
+			touchedPaths.flatMap((path) => {
+				const absolutePath = isAbsolute(path)
+					? resolve(path)
+					: resolve(cp.cwd, path);
+				const relativePath = relative(root, absolutePath);
+				return isWithinDirectory(absolutePath, root) &&
+					relativePath &&
+					!isSkippedPath(relativePath) &&
+					!isBinary(relativePath)
+					? [relativePath]
+					: [];
+			})
+		);
 		const changedFiles: FileSnapshot[] = [];
-		for (const path of allPaths) {
+		for (const path of paths) {
 			const hasBefore = path in cp.beforeSnapshot;
 			const before = hasBefore
 				? (cp.beforeSnapshot[path] ?? null)
 				: cp.gitRoot
 					? await gitSnapshotBlob(cp.gitRoot, cp.headSha, path)
 					: null;
-			const after = afterSnapshot[path] ?? null;
-			const hasAfter = path in afterSnapshot;
-			if (before !== after || hasBefore !== hasAfter) {
+			const afterContent = await safeReadFile(resolve(root, path));
+			const after =
+				afterContent !== null && cp.gitRoot
+					? await storeBlob(cp.gitRoot, afterContent)
+					: afterContent;
+			if (before !== after) {
 				changedFiles.push({
 					relativePath: path,
 					blobBefore: before,
@@ -433,17 +444,22 @@ export const CheckpointService = {
 		const cp = findCheckpoint(checkpointId);
 		if (!cp) return [];
 		const diffs: CheckpointInlineDiff[] = [];
+		let totalChars = 0;
 		for (const file of cp.changedFiles) {
+			if (diffs.length >= MAX_INLINE_DIFFS) break;
 			if (file.blobBefore === null || file.blobAfter === null) continue;
 			const before = await resolveContent(cp, file.blobBefore);
 			const after = await resolveContent(cp, file.blobAfter);
 			if (before === null || after === null || before === after) continue;
-			if (before.length + after.length > MAX_FILE_SIZE) continue;
+			const chars = before.length + after.length;
+			if (chars > MAX_FILE_SIZE || totalChars + chars > MAX_INLINE_DIFF_CHARS)
+				continue;
 			diffs.push({
 				path: file.relativePath,
 				oldString: before,
 				newString: after,
 			});
+			totalChars += chars;
 		}
 		return diffs;
 	},

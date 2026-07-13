@@ -924,7 +924,38 @@ async function finalizeChatCheckpoint(
 		return 0;
 	}
 	try {
-		const cpMeta = await CheckpointService.finalizeCheckpoint(checkpointId);
+		const messages = session.messageBuffer.getMessages();
+		const lastUserIndex = messages.findLastIndex(
+			(message) => message.role === "user"
+		);
+		const editedPaths: string[] = [];
+		for (const message of messages.slice(lastUserIndex + 1)) {
+			if (
+				message.role !== "tool" ||
+				!["edit", "write", "multiedit", "patch", "apply_patch"].includes(
+					message.toolName?.toLowerCase() ?? ""
+				)
+			)
+				continue;
+			try {
+				JSON.parse(message.content, (key, value: unknown) => {
+					if (
+						["path", "file", "file_path"].includes(key) &&
+						typeof value === "string"
+					)
+						editedPaths.push(value);
+					else if (["files", "changes"].includes(key) && Array.isArray(value))
+						editedPaths.push(
+							...value.filter((item) => typeof item === "string")
+						);
+					return value;
+				});
+			} catch {}
+		}
+		const cpMeta = await CheckpointService.finalizeCheckpoint(
+			checkpointId,
+			editedPaths
+		);
 		if (!cpMeta) {
 			appendChatEvent(paneId, "checkpoint_skipped", {
 				checkpointId,
